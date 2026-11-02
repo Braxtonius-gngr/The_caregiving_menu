@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1b1f24">
+  <meta name="description" content="Household recipe, pantry and food diary tracker with diet profiles.">
+  <title>The Caregiving Menu</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+  <link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1 id="screenTitle">Home</h1>
+    <div class="topbar-actions">
+      <span id="syncDot" class="sync-dot" title="Local only"></span>
+      <button class="icon-btn" onclick="showScreen('settings')" aria-label="Settings">&#9881;</button>
+    </div>
+  </header>
+
+  <main id="screen" class="screen"></main>
+
+  <nav class="tabbar" aria-label="Main">
+    <button data-tab="home" class="tab active" onclick="showScreen('home')"><span class="tab-ico">&#8962;</span>Home</button>
+    <button data-tab="recipes" class="tab" onclick="showScreen('recipes')"><span class="tab-ico">&#9636;</span>Recipes</button>
+    <button data-tab="scan" class="tab tab-scan" onclick="showScreen('scan')"><span class="tab-ico">&#10010;</span>Add</button>
+    <button data-tab="pantry" class="tab" onclick="showScreen('pantry')"><span class="tab-ico">&#9744;</span>Pantry</button>
+    <button data-tab="diary" class="tab" onclick="showScreen('diary')"><span class="tab-ico">&#9998;</span>Diary</button>
+  </nav>
+
+  <div id="sheet" class="sheet hidden" onclick="if (event.target === this) closeSheet()">
+    <div class="sheet-body" id="sheetBody"></div>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js" defer></script>
+  <script src="assets/js/config.js"></script>
+  <script src="assets/js/units.js"></script>
+  <script src="assets/js/db.js"></script>
+  <script src="assets/js/logic.js"></script>
+  <script src="assets/js/sync.js"></script>
+  <script src="assets/js/ui.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>

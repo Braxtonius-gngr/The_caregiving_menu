@@ -1,0 +1,245 @@
+// /brain — every AI call the app makes goes through here so the API key never
+// reaches the browser. Each mode has a prompt and a JSON schema; the model's
+// reply is constrained to that schema via structured outputs.
+//
+// Secrets (supabase secrets set ...):
+//   ANTHROPIC_API_KEY   required
+//   CLAUDE_MODEL        optional, defaults to claude-opus-5-5
+import Anthropic from "npm:@anthropic-ai/sdk";
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { corsHeaders, json } from "../_shared/cors.ts";
+
+const MODEL = Deno.env.get("CLAUDE_MODEL") ?? "claude-opus-5-5";
+const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
+
+const num = { type: ["number", "null"] };
+const str = { type: "string" };
+const nutrition = {
+  kcal: num, protein_g: num, carbs_g: num, fat_g: num, fiber_g: num,
+  sodium_mg: num, sugar_g: num, potassium_mg: num,
+};
+const nutritionKeys = Object.keys(nutrition);
+
+const ingredientLine = {
+  type: "object",
+  additionalProperties: false,
+  required: ["qty", "unit", "name", "prep", "optional"],
+  properties: {
+    qty: num,
+    unit: { type: "string", description: "g, kg, oz, lb, ml, l, tsp, tbsp, cup, each, clove, can, slice, or empty" },
+    name: { type: "string", description: "Generic ingredient name, singular, lowercase, no brand" },
+    prep: { type: "string", description: "Preparation note like 'diced', or empty" },
+    optional: { type: "boolean" },
+  },
+};
+
+const recipeSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title", "servings", "cuisine", "meal_type", "prep_min", "cook_min", "ingredients", "steps", "notes", "confidence"],
+  properties: {
+    title: str,
+    servings: num,
+    cuisine: str,
+    meal_type: { type: "array", items: { type: "string", enum: ["breakfast", "lunch", "dinner", "snack", "dessert"] } },
+    prep_min: num,
+    cook_min: num,
+    ingredients: { type: "array", items: ingredientLine },
+    steps: { type: "array", items: str },
+    notes: { type: "string", description: "Handwritten notes, tips, or attributions found on the card" },
+    confidence: { type: "number", description: "0-1, how legible and complete the source was" },
+  },
+};
+
+const receiptSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["store", "items"],
+  properties: {
+    store: str,
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["raw", "name", "qty", "unit", "price", "is_food", "confidence"],
+        properties: {
+          raw: { type: "string", description: "Line exactly as printed" },
+          name: { type: "string", description: "Generic grocery ingredient name, lowercase. Reuse a name from the known list when it matches." },
+          qty: num,
+          unit: str,
+          price: num,
+          is_food: { type: "boolean" },
+          confidence: { type: "number" },
+        },
+      },
+    },
+  },
+};
+
+const plateSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items", ...nutritionKeys, "confidence"],
+  properties: {
+    items: {
+      type: "array",
+      items: { type: "object", additionalProperties: false, required: ["name", "portion"], properties: { name: str, portion: str } },
+    },
+    ...nutrition,
+    confidence: { type: "number" },
+  },
+};
+
+const optionsSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["options"],
+  properties: {
+    options: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["title", "summary", "changes", "est_nutrition_per_serving"],
+        properties: {
+          title: str,
+          summary: str,
+          changes: { type: "array", items: str, description: "Concrete edits to the parent recipe: swaps, amount changes, step changes" },
+          est_nutrition_per_serving: { type: "object", additionalProperties: false, required: nutritionKeys, properties: nutrition },
+        },
+      },
+    },
+  },
+};
+
+const canonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["matches"],
+  properties: {
+    matches: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["input", "existing", "new_name", "category"],
+        properties: {
+          input: str,
+          existing: { type: ["string", "null"], description: "Exact name from the known list, or null" },
+          new_name: { type: ["string", "null"] },
+          category: { type: "string", enum: ["produce", "dairy", "meat", "pantry", "spice", "frozen", "bakery", "drink", "other"] },
+        },
+      },
+    },
+  },
+};
+
+const SYSTEM = `You help a family caregiver run their kitchen: recipes, pantry, and a food diary, including for an older relative whose diet may need adjusting.
+Return only what the schema asks for. Use generic, lowercase, singular ingredient names ("yellow onion", not "Vidalia Onions 3lb").
+Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
+Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
+
+type Mode = "parse_recipe" | "parse_receipt" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize";
+
+function imageBlock(dataUrl: string): Anthropic.ImageBlockParam {
+  const m = dataUrl.match(/^data:(image\/[a-z+]+);base64,(.*)$/);
+  if (!m) throw new Error("image must be a base64 data URL");
+  return { type: "image", source: { type: "base64", media_type: m[1] as "image/jpeg", data: m[2] } };
+}
+
+async function ask(schema: object, content: Anthropic.ContentBlockParam[], effort: "low" | "medium" | "high") {
+  // fallbacks:"default" re-runs a request on Anthropic's recommended model if a safety
+  // classifier declines it, instead of returning a bare refusal.
+  const params = {
+    model: MODEL,
+    max_tokens: 16000,
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    system: SYSTEM,
+    output_config: { effort, format: { type: "json_schema", schema } },
+    messages: [{ role: "user", content }],
+  };
+  // deno-lint-ignore no-explicit-any
+  const res = await anthropic.beta.messages.create(params as any);
+  if (res.stop_reason === "refusal") throw new Error("The model declined this request.");
+  if (res.stop_reason === "max_tokens") throw new Error("Response was cut off; try a smaller input.");
+  const text = res.content.find((b) => b.type === "text");
+  if (!text || text.type !== "text") throw new Error("No structured output returned.");
+  return JSON.parse(text.text);
+}
+
+// Most recipe sites embed schema.org/Recipe as JSON-LD; read it directly when present.
+function jsonLdRecipe(html: string): Record<string, unknown> | null {
+  const blocks = [...html.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const b of blocks) {
+    try {
+      const data = JSON.parse(b[1].trim());
+      const queue = Array.isArray(data) ? [...data] : [data];
+      while (queue.length) {
+        const n = queue.shift();
+        if (!n || typeof n !== "object") continue;
+        if (n["@graph"]) queue.push(...n["@graph"]);
+        const t = n["@type"];
+        if (t === "Recipe" || (Array.isArray(t) && t.includes("Recipe"))) return n;
+      }
+    } catch { /* malformed block, try the next */ }
+  }
+  return null;
+}
+
+function stripHtml(html: string): string {
+  return html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").slice(0, 60000);
+}
+
+async function handle(mode: Mode, body: Record<string, any>) {
+  const known = (body.ingredients ?? []).slice(0, 400).join(", ");
+  switch (mode) {
+    case "parse_recipe": {
+      if (body.url) {
+        const page = await fetch(body.url, { headers: { "User-Agent": "Mozilla/5.0 CaregivingMenu" } }).then((r) => r.text());
+        const ld = jsonLdRecipe(page);
+        const source = ld ? "JSON-LD recipe data:\n" + JSON.stringify(ld).slice(0, 40000) : "Page text:\n" + stripHtml(page);
+        return { ...(await ask(recipeSchema, [{ type: "text", text: `Extract the recipe from this web page (${body.url}).\n${source}` }], "low")), source_ref: body.url };
+      }
+      const content: Anthropic.ContentBlockParam[] = [];
+      if (body.image) content.push(imageBlock(body.image));
+      content.push({ type: "text", text: (body.image ? "This is a photo of a recipe (card, cookbook page, or handwriting). Transcribe it into the schema. Keep handwritten notes in notes." : "Parse this recipe text:\n" + body.text) + (known ? `\nKnown pantry ingredient names to reuse when they match: ${known}` : "") });
+      return await ask(recipeSchema, content, body.image ? "medium" : "low");
+    }
+    case "parse_receipt":
+      return await ask(receiptSchema, [imageBlock(body.image), { type: "text", text: `Read this grocery receipt. Decode abbreviations (GV = Great Value, YEL = yellow). Skip tax, totals, bags and coupons, or mark non-food lines is_food=false. qty is the amount bought in the item's natural unit (3 lb onions => qty 3, unit lb).${known ? "\nKnown names: " + known : ""}` }], "medium");
+    case "estimate_plate": {
+      const content: Anthropic.ContentBlockParam[] = [];
+      if (body.image) content.push(imageBlock(body.image));
+      content.push({ type: "text", text: "Estimate what was eaten and total nutrition for the whole plate." + (body.text ? `\nDescription: ${body.text}` : "") });
+      return await ask(plateSchema, content, "low");
+    }
+    case "variations":
+      return await ask(optionsSchema, [{ type: "text", text: `Give 3 "${body.angle}" takes on this recipe, as edits to it rather than whole new recipes.\nRecipe: ${JSON.stringify(body.recipe)}\nOn hand: ${(body.pantry ?? []).join(", ")}` }], "medium");
+    case "diet_swaps":
+      return await ask(optionsSchema, [{ type: "text", text: `Suggest 2-3 versions of this recipe adjusted for ${body.profile?.name}. Keep it recognisably the same dish; say what each change saves (e.g. "~600 mg sodium per serving").\nTheir rules: ${JSON.stringify(body.profile?.rules ?? [])}\nDaily targets: ${JSON.stringify(body.profile?.targets ?? {})}\nRecipe: ${JSON.stringify(body.recipe)}` }], "medium");
+    case "canonicalize":
+      return await ask(canonSchema, [{ type: "text", text: `Map each input to an existing ingredient name if it is the same thing, otherwise propose a new generic name.\nInputs: ${JSON.stringify(body.inputs)}\nKnown: ${known}` }], "low");
+    default:
+      throw new Error("unknown mode");
+  }
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  try {
+    // Only signed-in household members may spend API credit.
+    const auth = req.headers.get("Authorization") ?? "";
+    const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } });
+    const { data: { user } } = await sb.auth.getUser();
+    if (!user) return json({ error: "sign in first" }, 401);
+    const body = await req.json();
+    return json(await handle(body.mode, body));
+  } catch (e) {
+    if (e instanceof Anthropic.RateLimitError) return json({ error: "Busy, try again in a minute." }, 429);
+    if (e instanceof Anthropic.APIError) return json({ error: `AI service error ${e.status}` }, 502);
+    return json({ error: (e as Error).message }, 400);
+  }
+});
