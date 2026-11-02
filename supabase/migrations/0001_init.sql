@@ -110,7 +110,7 @@ create table profile_rules (
 create table diary_entries (
   id uuid primary key, household_id uuid not null references households(id) on delete cascade,
   user_id uuid default auth.uid(), for_profile_id uuid, eaten_at timestamptz not null, recipe_id uuid,
-  free_text text, portion_mult numeric not null default 1, photo_path text,
+  free_text text, portion_mult numeric not null default 1, photo_path text, photo_data text,
   kcal numeric, protein_g numeric, carbs_g numeric, fat_g numeric, fiber_g numeric,
   sodium_mg numeric, sugar_g numeric, potassium_mg numeric, estimate_source text, confidence numeric,
   updated_at timestamptz not null default now(), deleted boolean not null default false
