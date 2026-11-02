@@ -1,0 +1,9 @@
+{
+  "name": "the-caregiving-menu",
+  "private": true,
+  "description": "Quality checks for this build-free static PWA. No runtime dependencies.",
+  "scripts": {
+    "check": "node scripts/check.js",
+    "test": "node scripts/check.js && node scripts/logic-test.js"
+  }
+}

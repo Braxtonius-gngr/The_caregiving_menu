@@ -1,0 +1,87 @@
+/* IndexedDB store. One object store per noun, plus a change log for sync.
+ * All records carry: id (uuid), updated_at (ISO), deleted (bool). */
+var DB = (function () {
+  var NAME = 'tcm';
+  var VERSION = 1;
+  var STORES = ['ingredients', 'recipes', 'recipe_ingredients', 'recipe_variations', 'pantry_items', 'diet_profiles', 'profile_rules', 'diary_entries', 'shopping_list', 'usage_log', 'intake_jobs', 'outbox', 'meta'];
+  var dbp = null;
+
+  function open() {
+    if (dbp) return dbp;
+    dbp = new Promise(function (resolve, reject) {
+      var req = indexedDB.open(NAME, VERSION);
+      req.onupgradeneeded = function () {
+        var d = req.result;
+        STORES.forEach(function (s) {
+          if (!d.objectStoreNames.contains(s)) {
+            var os = d.createObjectStore(s, { keyPath: 'id' });
+            if (s !== 'meta' && s !== 'outbox') os.createIndex('updated_at', 'updated_at');
+            if (s === 'recipe_ingredients') { os.createIndex('recipe_id', 'recipe_id'); os.createIndex('ingredient_id', 'ingredient_id'); }
+            if (s === 'pantry_items' || s === 'usage_log' || s === 'shopping_list') os.createIndex('ingredient_id', 'ingredient_id');
+            if (s === 'profile_rules') os.createIndex('profile_id', 'profile_id');
+            if (s === 'diary_entries') os.createIndex('eaten_at', 'eaten_at');
+          }
+        });
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+    return dbp;
+  }
+
+  function tx(store, mode, fn) {
+    return open().then(function (d) {
+      return new Promise(function (resolve, reject) {
+        var t = d.transaction(store, mode);
+        var os = t.objectStore(store);
+        var out = fn(os);
+        t.oncomplete = function () { resolve(out && out.result !== undefined ? out.result : out); };
+        t.onerror = function () { reject(t.error); };
+      });
+    });
+  }
+
+  function uuid() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) { var r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
+  }
+
+  function all(store) {
+    return tx(store, 'readonly', function (os) { return os.getAll(); }).then(function (rows) { return (rows || []).filter(function (r) { return !r.deleted; }); });
+  }
+  function get(store, id) { return tx(store, 'readonly', function (os) { return os.get(id); }); }
+  function byIndex(store, index, value) {
+    return open().then(function (d) {
+      return new Promise(function (resolve, reject) {
+        var req = d.transaction(store).objectStore(store).index(index).getAll(value);
+        req.onsuccess = function () { resolve((req.result || []).filter(function (r) { return !r.deleted; })); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
+  // put() stamps updated_at and queues the change for cloud sync.
+  function put(store, rec, opts) {
+    opts = opts || {};
+    if (!rec.id) rec.id = uuid();
+    rec.updated_at = new Date().toISOString();
+    if (rec.deleted == null) rec.deleted = false;
+    return tx(store, 'readwrite', function (os) { os.put(rec); return rec; }).then(function (r) {
+      if (!opts.silent) return tx('outbox', 'readwrite', function (os) { os.put({ id: store + ':' + rec.id, store: store, record: rec }); }).then(function () { return r; });
+      return r;
+    });
+  }
+  function remove(store, id) {
+    return get(store, id).then(function (rec) { if (!rec) return null; rec.deleted = true; return put(store, rec); });
+  }
+  function bulkPut(store, recs) { return Promise.all(recs.map(function (r) { return put(store, r, { silent: true }); })); }
+  function meta(key, value) {
+    if (value === undefined) return get('meta', key).then(function (r) { return r ? r.value : null; });
+    return tx('meta', 'readwrite', function (os) { os.put({ id: key, value: value }); });
+  }
+  function outbox() { return tx('outbox', 'readonly', function (os) { return os.getAll(); }); }
+  function clearOutbox(ids) { return tx('outbox', 'readwrite', function (os) { ids.forEach(function (id) { os.delete(id); }); }); }
+  function wipe() { return open().then(function (d) { d.close(); dbp = null; return new Promise(function (res) { var r = indexedDB.deleteDatabase(NAME); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; }); }); }
+
+  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe };
+})();
