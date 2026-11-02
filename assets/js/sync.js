@@ -47,6 +47,7 @@ var Sync = (function () {
         if (SYNCED.indexOf(it.store) < 0) return;
         var rec = Object.assign({}, it.record, { household_id: hid });
         delete rec.fts; // server-generated column
+        delete rec.photo_data; // local copy only; the photo itself lives in Storage at photo_path
         (byStore[it.store] = byStore[it.store] || []).push(rec);
       });
       return Promise.all(Object.keys(byStore).map(function (store) {
@@ -66,16 +67,48 @@ var Sync = (function () {
           if (r.error) throw r.error;
           r.data.forEach(function (row) { if (row.updated_at > newest) newest = row.updated_at; });
           n += r.data.length;
-          return DB.bulkPut(store, r.data);
+          if (store !== 'diary_entries') return DB.bulkPut(store, r.data);
+          // Keep the local photo copy when the server row still points at the same photo.
+          return Promise.all(r.data.map(function (row) {
+            return DB.get(store, row.id).then(function (local) {
+              if (local && local.photo_data && local.photo_path === row.photo_path) row.photo_data = local.photo_data;
+              return row;
+            });
+          })).then(function (rows) { return DB.bulkPut(store, rows); });
         });
       })).then(function () { return DB.meta('last_pull', newest); }).then(function () { return n; });
     });
   }
 
+  // Diary photos taken offline (or before sign-in) carry photo_data but no photo_path.
+  // Upload them first so the rows pushed next already point at Storage.
+  function uploadPendingPhotos() {
+    var c = getClient();
+    return Promise.all([DB.all('diary_entries'), householdId()]).then(function (res) {
+      var pending = res[0].filter(function (e) { return e.photo_data && !e.photo_path; }), hid = res[1];
+      var chain = Promise.resolve(0);
+      pending.forEach(function (e) {
+        chain = chain.then(function (n) {
+          var path = hid + '/diary/' + e.id + '.jpg';
+          return dataUrlToBlob(e.photo_data).then(function (blob) {
+            return c.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+          }).then(function (r) {
+            if (r.error) throw r.error;
+            e.photo_path = path;
+            return DB.put('diary_entries', e).then(function () { return n + 1; });
+          }).catch(function () { return n; }); // leave it pending; never block the rest of the sync
+        });
+      });
+      return chain;
+    });
+  }
+
   function run() {
     return session().then(function (s) {
-      if (!s) return { pushed: 0, pulled: 0, signedIn: false };
-      return push().then(function (p) { return pull().then(function (q) { return { pushed: p, pulled: q, signedIn: true }; }); });
+      if (!s) return { pushed: 0, pulled: 0, photos: 0, signedIn: false };
+      return uploadPendingPhotos().then(function (ph) {
+        return push().then(function (p) { return pull().then(function (q) { return { pushed: p, pulled: q, photos: ph, signedIn: true }; }); });
+      });
     });
   }
 
@@ -103,14 +136,37 @@ var Sync = (function () {
     });
   }
 
-  function uploadPhoto(bucket, file) {
-    var c = getClient();
-    if (!c) return Promise.resolve(null);
-    return householdId().then(function (hid) {
-      var path = hid + '/' + DB.uuid() + '.jpg';
-      return c.storage.from(bucket).upload(path, file, { contentType: 'image/jpeg' }).then(function (r) { if (r.error) throw r.error; return path; });
-    });
+  var BUCKET = 'photos';
+  function dataUrlToBlob(dataUrl) { return fetch(dataUrl).then(function (r) { return r.blob(); }); }
+  function blobToDataUrl(blob) {
+    return new Promise(function (resolve, reject) { var fr = new FileReader(); fr.onload = function () { resolve(fr.result); }; fr.onerror = reject; fr.readAsDataURL(blob); });
   }
 
-  return { inviteCode: inviteCode, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup, uploadPhoto: uploadPhoto };
+  // Returns a displayable src for a diary entry's photo: the local copy if we have one,
+  // otherwise downloads it from Storage once and keeps it locally for offline viewing.
+  var inflight = {};
+  function photoSrc(entry) {
+    if (entry.photo_data) return Promise.resolve(entry.photo_data);
+    if (!entry.photo_path) return Promise.resolve(null);
+    var c = getClient();
+    if (!c) return Promise.resolve(null);
+    if (inflight[entry.id]) return inflight[entry.id];
+    inflight[entry.id] = c.storage.from(BUCKET).download(entry.photo_path).then(function (r) {
+      if (r.error) throw r.error;
+      return blobToDataUrl(r.data);
+    }).then(function (dataUrl) {
+      return DB.get('diary_entries', entry.id).then(function (rec) {
+        if (rec) { rec.photo_data = dataUrl; return DB.put('diary_entries', rec, { silent: true }); }
+      }).then(function () { entry.photo_data = dataUrl; return dataUrl; });
+    }).catch(function () { return null; }).then(function (src) { delete inflight[entry.id]; return src; });
+    return inflight[entry.id];
+  }
+
+  function removePhoto(path) {
+    var c = getClient();
+    if (!c || !path) return Promise.resolve();
+    return c.storage.from(BUCKET).remove([path]).then(function () {}, function () {});
+  }
+
+  return { photoSrc: photoSrc, removePhoto: removePhoto, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
 })();

@@ -99,7 +99,8 @@ ol.steps li { margin: 6px 0; }
 .list-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .qty-ctl { display: flex; align-items: center; gap: 6px; }
 .qty-ctl button { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
-.photo-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; background: var(--line); }
+.photo-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; background: var(--line); cursor: pointer; flex: none; }
+.photo-big { width: 100%; border-radius: var(--radius); display: block; background: var(--line); min-height: 120px; }
 
 .sheet { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 20; display: flex; align-items: flex-end; }
 .sheet.hidden, .hidden { display: none !important; }
@@ -108,3 +109,6 @@ ol.steps li { margin: 6px 0; }
 .empty { text-align: center; color: var(--muted); padding: 30px 10px; }
 .person-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .note { background: color-mix(in srgb, var(--warn) 12%, transparent); border-left: 3px solid var(--warn); padding: 8px 10px; border-radius: 6px; font-size: 13px; }
+.scan-view { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #000; border-radius: var(--radius); overflow: hidden; }
+.scan-view video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scan-guide { position: absolute; left: 10%; right: 10%; top: 30%; bottom: 30%; border: 3px solid var(--accent); border-radius: 12px; box-shadow: 0 0 0 999px rgba(0,0,0,.35); }

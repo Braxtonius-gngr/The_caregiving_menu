@@ -26,7 +26,7 @@ function rebuildIndexes() {
 
 function toast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(t._h); t._h = setTimeout(function () { t.classList.add('hidden'); }, 2200); }
 function openSheet(html) { document.getElementById('sheetBody').innerHTML = html; document.getElementById('sheet').classList.remove('hidden'); }
-function closeSheet() { document.getElementById('sheet').classList.add('hidden'); }
+function closeSheet() { if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
 
 var TITLES = { home: 'Home', recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe' };
 var currentScreen = 'home';
@@ -200,7 +200,7 @@ function deleteRecipe(id) {
 /* ---------- Add / Scan ---------- */
 function renderScan() {
   var cloud = Sync.enabled();
-  return '<p class="muted">' + (cloud ? 'Photos and links are parsed in the cloud; the result always lands on a review screen first.' : 'Cloud not configured, so photo/receipt/link parsing is off. Manual and paste entry work fully offline.') + '</p>' +
+  return '<p class="muted">' + (cloud ? 'Photos and links are parsed in the cloud; the result always lands on a review screen first.' : 'Cloud not configured, so photo/receipt/link parsing is off. Barcodes, manual and paste entry still work.') + '</p>' +
     '<div class="grid-big">' +
     '<div class="big-btn" onclick="scanPhoto(\'recipe\')"><span class="ico">&#128247;</span>Recipe photo<div class="muted">card, cookbook, handwriting</div></div>' +
     '<div class="big-btn" onclick="scanPhoto(\'receipt\')"><span class="ico">&#129534;</span>Receipt<div class="muted">adds to pantry</div></div>' +
@@ -229,10 +229,40 @@ function downscale(file, max) {
   });
 }
 function scanBarcode() {
-  var code = prompt('Barcode scanning via camera lands in phase 1. For now, type the UPC:');
+  openSheet('<h2 style="margin-top:0">Scan a barcode</h2>' +
+    '<div class="scan-view"><video id="scanVideo" playsinline muted></video><div class="scan-guide"></div></div>' +
+    '<canvas id="scanCanvas" class="hidden"></canvas>' +
+    '<p class="muted" id="scanMsg">Point the camera at the barcode and hold steady.</p>' +
+    '<label>Or type the number</label><div class="row"><input id="scanManual" inputmode="numeric" class="grow" placeholder="012345678905"><button class="btn sm" onclick="onBarcode(document.getElementById(\'scanManual\').value.trim())">Look up</button></div>' +
+    '<div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Done</button></div>');
+  Scanner.start(document.getElementById('scanVideo'), document.getElementById('scanCanvas'), onBarcode, function (e) {
+    var m = document.getElementById('scanMsg'); if (m) m.textContent = e.message;
+    var v = document.querySelector('.scan-view'); if (v) v.classList.add('hidden');
+  });
+}
+// Local match first (works offline), then the cloud lookup, then Open Food Facts directly.
+function lookupBarcode(code) {
+  var known = State.ingredients.find(function (i) { return i.upc === code; });
+  if (known) return Promise.resolve({ name: known.name, known: true });
+  var viaCloud = Sync.enabled() ? Sync.lookup('barcode', code) : Promise.reject(new Error('no cloud'));
+  return viaCloud.catch(function () {
+    return fetch('https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(code) + '.json?fields=product_name,nutriments').then(function (r) { return r.json(); }).then(function (d) {
+      if (d.status !== 1) return { name: null };
+      var n = d.product.nutriments || {};
+      var mg = function (g) { return g != null ? Math.round(g * 1000) : null; };
+      return { name: (d.product.product_name || '').toLowerCase(), nutrition: { kcal_100g: n['energy-kcal_100g'], protein_g: n.proteins_100g, carbs_g: n.carbohydrates_100g, fat_g: n.fat_100g, fiber_g: n.fiber_100g, sodium_mg: mg(n.sodium_100g), sugar_g: n.sugars_100g, potassium_mg: mg(n.potassium_100g) } };
+    });
+  });
+}
+function onBarcode(code) {
   if (!code) return;
-  if (!Sync.enabled()) return toast('Configure Supabase first');
-  Sync.lookup('barcode', code.trim()).then(function (res) { if (!res || !res.name) return toast('Not found'); reviewPantry([{ name: res.name, qty: 1, unit: 'each', nutrition: res.nutrition, upc: code.trim() }], 'barcode'); }).catch(function (e) { toast(e.message); });
+  if (!Scanner.validGtin(code)) return toast('That number does not look like a barcode');
+  Scanner.stop();
+  var m = document.getElementById('scanMsg'); if (m) m.textContent = 'Found ' + code + ', looking it up...';
+  lookupBarcode(code).catch(function () { return { name: null }; }).then(function (res) {
+    if (!res.name) toast('Not in the product database. Name it once and it will be remembered.');
+    reviewPantry([{ name: res.name || '', qty: 1, unit: 'each', nutrition: res.nutrition, upc: code, raw: 'barcode ' + code + (res.known ? ' (seen before)' : '') }], 'barcode');
+  });
 }
 function pasteRecipe() {
   openSheet('<h2 style="margin-top:0">Link or paste</h2><label>Recipe URL or full text</label><textarea id="fPaste" rows="8" placeholder="https://... or paste the recipe text"></textarea><div class="btn-row"><button class="btn" onclick="submitPaste()">Parse</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div><p class="muted">Offline fallback: first line becomes the title, lines that start with a number become ingredients, the rest become steps.</p>');
@@ -270,17 +300,29 @@ function reviewPantry(items, source) {
   openSheet('<h2 style="margin-top:0">Review ' + source + '</h2>' + items.map(function (it, i) {
     var m = Logic.ingredientMatch(it.name, State.ingredients);
     return '<div class="card"><div class="row"><input class="grow" id="rp-name-' + i + '" value="' + esc(m ? m.name : it.name) + '"><input id="rp-qty-' + i + '" type="number" step="any" style="width:70px" value="' + (it.qty || 1) + '"><input id="rp-unit-' + i + '" style="width:70px" value="' + esc(it.unit || '') + '"></div><div class="muted">' + (m ? 'matched ' + esc(m.name) : 'new ingredient') + (it.raw ? ' · from "' + esc(it.raw) + '"' : '') + '</div></div>';
-  }).join('') + '<div class="btn-row"><button class="btn" onclick="commitPantryReview()">Add all to pantry</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
+  }).join('') + '<div class="btn-row"><button class="btn" onclick="commitPantryReview()">Add ' + (items.length > 1 ? 'all ' : '') + 'to pantry</button>' + (source === 'barcode' ? '<button class="btn ghost" onclick="commitPantryReview(true)">Add &amp; scan next</button>' : '') + '<button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
 }
-function commitPantryReview() {
+function commitPantryReview(scanNext) {
   var items = S.pendingPantry || [];
   var chain = Promise.resolve();
+  var named = items.filter(function (it, i) { return document.getElementById('rp-name-' + i).value.trim(); });
+  if (!named.length) return toast('Give it a name first');
   items.forEach(function (it, i) {
     var name = document.getElementById('rp-name-' + i).value.trim(), qty = +document.getElementById('rp-qty-' + i).value || 0, unit = document.getElementById('rp-unit-' + i).value.trim();
-    if (!name) return;
-    chain = chain.then(function () { return ensureIngredient(name, it.nutrition, it.upc); }).then(function (ing) { return addToPantry(ing.id, qty, unit, 'pantry', 'bought'); });
+    if (!name) return; // blank line = skip it
+    chain = chain.then(function () { return ensureIngredient(name, it.nutrition, it.upc); }).then(function (ing) {
+      // Remember the barcode on whichever ingredient the user picked, so the next scan is instant.
+      var save = it.upc && !ing.upc ? DB.put('ingredients', Object.assign(ing, { upc: it.upc })) : Promise.resolve();
+      return save.then(function () { return addToPantry(ing.id, qty, unit, guessLocation(ing), 'bought'); });
+    });
   });
-  chain.then(function () { closeSheet(); toast('Pantry updated'); return loadAll(); }).then(function () { showScreen('pantry'); });
+  chain.then(function () { toast('Pantry updated'); return loadAll(); }).then(function () {
+    if (scanNext) { refresh(); scanBarcode(); } else { closeSheet(); showScreen('pantry'); }
+  });
+}
+function guessLocation(ing) {
+  if (/frozen/.test(ing.name || '') || ing.category === 'frozen') return 'freezer';
+  return ing.category === 'dairy' || ing.category === 'meat' ? 'fridge' : 'pantry';
 }
 
 /* ---------- Pantry ---------- */
@@ -338,7 +380,7 @@ function renderDiary() {
     (entries.length ? entries.map(function (e) {
       var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
       var who = State.profiles.find(function (p) { return p.id === e.for_profile_id; });
-      return '<div class="card row">' + (e.photo_data ? '<img class="photo-thumb" src="' + e.photo_data + '">' : '') + '<div class="grow"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + e.eaten_at.slice(11, 16) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + e.portion_mult + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + '</div></div><button class="icon-btn" onclick="DB.remove(\'diary_entries\',\'' + e.id + '\').then(loadAll).then(refresh)">&times;</button></div>';
+      return '<div class="card row">' + photoThumb(e) + '<div class="grow"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + e.eaten_at.slice(11, 16) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + e.portion_mult + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
     }).join('') : '<div class="empty">Nothing logged.</div>') +
     (prof ? '<h2>Notes for ' + esc(prof.person_name) + '\'s next appointment</h2><div class="card"><textarea id="profNotes" rows="4" placeholder="Questions to ask, patterns you noticed...">' + esc(prof.notes || '') + '</textarea><div class="btn-row"><button class="btn sm" onclick="saveProfileNotes(\'' + prof.id + '\')">Save notes</button><button class="btn sm ghost" onclick="weeklyDigest(\'' + prof.id + '\')">Weekly digest</button></div></div>' : '');
 }
@@ -360,7 +402,7 @@ function saveLog() {
   if (v('lKcal')) { e.kcal = +v('lKcal'); e.estimate_source = 'manual'; }
   if (v('lNa')) e.sodium_mg = +v('lNa');
   var file = document.getElementById('lPhoto').files[0];
-  var p = file ? downscale(file, 900).then(function (d) { e.photo_data = d; }) : Promise.resolve();
+  var p = file ? downscale(file, 1280).then(function (d) { e.photo_data = d; }) : Promise.resolve();
   p.then(function () {
     if (!rid && text && Sync.enabled() && !v('lKcal')) {
       return Sync.brain('estimate_plate', { text: text, image: e.photo_data || null }).then(function (res) { Logic.NUTRIENTS.forEach(function (k) { if (res[k] != null) e[k] = res[k]; }); e.estimate_source = 'estimate'; e.confidence = res.confidence; }).catch(function () {});
@@ -369,7 +411,42 @@ function saveLog() {
     var writes = [DB.put('diary_entries', e)];
     if (rid) (S.linesByRecipe[rid] || []).forEach(function (l) { writes.push(DB.put('usage_log', { ingredient_id: l.ingredient_id, qty: 1, unit: l.unit, event: 'logged', at: e.eaten_at })); });
     return Promise.all(writes);
-  }).then(function () { closeSheet(); toast('Logged'); return loadAll(); }).then(function () { showScreen('diary'); });
+  }).then(function () { closeSheet(); toast('Logged'); return loadAll(); }).then(function () {
+    showScreen('diary');
+    if (e.photo_data && Sync.enabled()) syncNow().then(function () { return loadAll(); }).then(function () { if (currentScreen === 'diary') refresh(); });
+  });
+}
+
+/* ---------- diary photos ---------- */
+function photoThumb(e) {
+  if (!e.photo_data && !e.photo_path) return '';
+  return '<img class="photo-thumb" alt="Meal photo" data-photo="' + e.id + '"' + (e.photo_data ? ' src="' + e.photo_data + '"' : '') + ' onclick="viewPhoto(\'' + e.id + '\')">';
+}
+function photoStatus(e) {
+  if (!Sync.enabled() || (!e.photo_data && !e.photo_path)) return '';
+  return e.photo_path ? ' · &#9729; photo saved' : ' · photo uploads on next sync';
+}
+// Fill in thumbnails that only exist in the cloud. Called after the diary renders.
+function hydratePhotos() {
+  document.querySelectorAll('img[data-photo]:not([src])').forEach(function (img) {
+    var e = State.diary.find(function (x) { return x.id === img.dataset.photo; });
+    if (!e) return;
+    Sync.photoSrc(e).then(function (src) { if (src && img.isConnected) img.src = src; });
+  });
+}
+function viewPhoto(id) {
+  var e = State.diary.find(function (x) { return x.id === id; });
+  if (!e) return;
+  var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
+  openSheet('<h2 style="margin-top:0">' + esc(r ? r.title : e.free_text || 'Meal') + '</h2><p class="muted">' + e.eaten_at.slice(0, 10) + ' ' + e.eaten_at.slice(11, 16) + '</p><img id="bigPhoto" class="photo-big" alt="Meal photo"><div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
+  Sync.photoSrc(e).then(function (src) { var el = document.getElementById('bigPhoto'); if (el && src) el.src = src; else if (el) el.replaceWith(Object.assign(document.createElement('p'), { className: 'muted', textContent: 'Photo is in the cloud. Sign in or reconnect to see it.' })); });
+}
+function deleteDiaryEntry(id) {
+  var e = State.diary.find(function (x) { return x.id === id; });
+  if (!e || !confirm('Delete this diary entry' + (e.photo_data || e.photo_path ? ' and its photo' : '') + '?')) return;
+  var path = e.photo_path;
+  e.photo_data = null;
+  DB.put('diary_entries', e, { silent: true }).then(function () { return DB.remove('diary_entries', id); }).then(function () { return Sync.removePhoto(path); }).then(loadAll).then(refresh);
 }
 function saveProfileNotes(id) { var p = State.profiles.find(function (x) { return x.id === id; }); p.notes = document.getElementById('profNotes').value; DB.put('diet_profiles', p).then(function () { toast('Saved'); }); }
 function weeklyDigest(pid) {

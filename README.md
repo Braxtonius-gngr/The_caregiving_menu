@@ -16,10 +16,11 @@ The full design lives in [docs/design.md](docs/design.md).
 | Shopping list grouped by aisle; checking an item adds it to the pantry | yes | |
 | Restock suggestions from par levels and recent usage | yes | |
 | Diet profiles, rules, starter packs, ✓ ⚠ ✕ badges | yes | |
-| Food diary with photos and daily-value bars, weekly digest | yes | |
+| Food diary with daily-value bars, weekly digest | yes | synced |
+| Diary photos | kept on the device | uploaded to a private bucket, visible on every household device, and cached for offline viewing |
 | Paste a recipe as text | basic parser | Claude parses it |
 | Recipe photo, receipt photo, recipe URL | | Claude parses it |
-| Barcode lookup (type the UPC for now) | | Open Food Facts |
+| Camera barcode scanning, with "Add & scan next" for unpacking groceries | scans offline; looks up new products on Open Food Facts when online | lookup runs through the cloud function |
 | Ingredient nutrition lookup | | USDA FoodData Central |
 | Variations and diet swaps | | Claude |
 

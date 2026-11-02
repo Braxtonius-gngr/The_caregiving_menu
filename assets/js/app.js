@@ -106,7 +106,7 @@ function addMissingToList(id) {
 function toggleShop(id) {
   var s = State.shopping.find(function (x) { return x.id === id; });
   s.done = true;
-  DB.put('shopping_list', s).then(function () { return addToPantry(s.ingredient_id, s.qty || 1, s.unit || '', (S.ingById[s.ingredient_id] || {}).category === 'dairy' || (S.ingById[s.ingredient_id] || {}).category === 'meat' || (S.ingById[s.ingredient_id] || {}).category === 'produce' ? 'fridge' : 'pantry', 'bought'); }).then(loadAll).then(function () { toast('Bought, added to pantry'); refresh(); });
+  DB.put('shopping_list', s).then(function () { return addToPantry(s.ingredient_id, s.qty || 1, s.unit || '', guessLocation(S.ingById[s.ingredient_id] || {}), 'bought'); }).then(loadAll).then(function () { toast('Bought, added to pantry'); refresh(); });
 }
 
 /* ---------- auth box in Settings ---------- */
@@ -123,7 +123,7 @@ function syncNow() {
   var dot = document.getElementById('syncDot');
   return Sync.run().then(function (r) {
     dot.classList.toggle('on', r.signedIn); dot.title = r.signedIn ? 'Synced' : 'Local only';
-    if (r.pulled) return loadAll().then(refresh);
+    if (r.pulled || r.photos) return loadAll().then(refresh);
   }).catch(function (e) { dot.classList.remove('on'); dot.title = 'Sync error: ' + e.message; });
 }
 
@@ -206,7 +206,7 @@ function handleShareTarget() {
 }
 
 var _origShowScreen = showScreen;
-showScreen = function (name, arg) { S.lastArg = arg; _origShowScreen(name, arg); if (name === 'settings') renderAuthBox(); };
+showScreen = function (name, arg) { S.lastArg = arg; _origShowScreen(name, arg); if (name === 'settings') renderAuthBox(); if (name === 'diary') hydratePhotos(); };
 
 document.addEventListener('DOMContentLoaded', function () {
   DB.meta('active_profile').then(function (p) { State.activeProfile = p; return loadAll(); }).then(function () {
