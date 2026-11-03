@@ -1,0 +1,13 @@
+{
+  "name": "caregiving-menu-live-tests",
+  "private": true,
+  "description": "Tests against a real Supabase stack. Not needed for the app or for npm test.",
+  "scripts": {
+    "live": "node live/app.test.js",
+    "functions": "node live/functions.test.js"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "2.49.4",
+    "playwright": "1.56.1"
+  }
+}

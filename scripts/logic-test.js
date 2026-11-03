@@ -7,8 +7,9 @@ var vm = require('vm');
 var assert = require('assert');
 var ctx = {};
 vm.createContext(ctx);
-['units.js', 'logic.js'].forEach(function (f) { vm.runInContext(fs.readFileSync(path.join(__dirname, '../assets/js', f), 'utf8') + '\nthis.Units = typeof Units !== "undefined" ? Units : this.Units; this.Logic = typeof Logic !== "undefined" ? Logic : this.Logic;', ctx); });
-var Units = ctx.Units, Logic = ctx.Logic;
+ctx.window = {}; ctx.navigator = {};
+['units.js', 'logic.js', 'scanner.js'].forEach(function (f) { vm.runInContext(fs.readFileSync(path.join(__dirname, '../assets/js', f), 'utf8'), ctx); });
+var Units = vm.runInContext('Units', ctx), Logic = vm.runInContext('Logic', ctx), Scanner = vm.runInContext('Scanner', ctx);
 var n = 0;
 function t(name, fn) { fn(); n++; console.log('  ok ' + name); }
 
@@ -74,5 +75,33 @@ t('a pinch of salt is tiny', function () {
   assert.strictEqual(p.unit, 'pinch'); assert.strictEqual(p.name, 'salt');
   var r = Logic.recipeNutrition({ servings: 1 }, [{ ingredient_id: 's', qty: 1, unit: 'pinch' }], { s: { name: 'salt', kcal_100g: 0, sodium_mg: 38758 } });
   assert.ok(r.perServing.sodium_mg < 200, 'got ' + r.perServing.sodium_mg);
+});
+t('barcode check digits', function () {
+  assert.ok(Scanner.validGtin('036000291452')); // UPC-A
+  assert.ok(Scanner.validGtin('4006381333931')); // EAN-13
+  assert.ok(Scanner.validGtin('96385074')); // EAN-8
+  assert.ok(!Scanner.validGtin('036000291453')); // one digit off
+  assert.ok(!Scanner.validGtin('12'));
+  assert.ok(!Scanner.validGtin('ABC-123'));
+});
+t('UPC-E expands to UPC-A before validation', function () {
+  assert.strictEqual(Scanner.expandUpcE('04252614'), '042100005264');
+  assert.strictEqual(Scanner.expandUpcE('04252615'), null); // wrong check digit
+  assert.strictEqual(JSON.stringify(Scanner.candidates('04252614', 'upc_e')), JSON.stringify(['042100005264']));
+  assert.strictEqual(JSON.stringify(Scanner.candidates('04252614', 'ean_8')), JSON.stringify([])); // not a valid EAN-8
+});
+t('typed 8-digit codes try every valid reading', function () {
+  assert.strictEqual(JSON.stringify(Scanner.candidates('04252614')), JSON.stringify(['042100005264']));
+  assert.strictEqual(JSON.stringify(Scanner.candidates('96385074')), JSON.stringify(['96385074']));
+  assert.strictEqual(JSON.stringify(Scanner.candidates('036000291452', 'upc_a')), JSON.stringify(['036000291452']));
+  assert.strictEqual(JSON.stringify(Scanner.candidates('12345')), JSON.stringify([]));
+  assert.strictEqual(JSON.stringify(Scanner.candidates('ABC-1234', 'code_128')), JSON.stringify(['ABC-1234']));
+});
+t('equivalent GTINs match, other codes match exactly', function () {
+  assert.ok(Scanner.sameProduct('036000291452', '0036000291452'));
+  assert.ok(Scanner.sameProduct('0036000291452', '00036000291452'));
+  assert.ok(!Scanner.sameProduct('036000291452', '4006381333931'));
+  assert.ok(Scanner.sameProduct('ABC-1234', 'ABC-1234'));
+  assert.ok(!Scanner.sameProduct('036000291452', null));
 });
 console.log(n + ' tests passed');

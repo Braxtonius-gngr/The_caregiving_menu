@@ -3,7 +3,8 @@ var State = { ingredients: [], recipes: [], lines: [], variations: [], pantry: [
 var S = {}; // derived indexes, rebuilt by rebuildIndexes()
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-function fmtQty(q, u) { if (q == null) return ''; var n = Math.round(q * 100) / 100; return n + (u ? ' ' + u : ''); }
+function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
+function fmtQty(q, u) { if (q == null) return ''; var n = Math.round(q * 100) / 100; return (isFinite(n) ? n : '') + (u ? ' ' + esc(u) : ''); }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
 function rebuildIndexes() {
@@ -24,17 +25,29 @@ function rebuildIndexes() {
   });
 }
 
-function toast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(t._h); t._h = setTimeout(function () { t.classList.add('hidden'); }, 2200); }
+// toast(msg) or toast(msg, actionLabel, actionFn) for a short "Undo"-style action.
+function toast(msg, actionLabel, actionFn) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  if (actionLabel) {
+    var b = document.createElement('button'); b.className = 'toast-action'; b.textContent = actionLabel;
+    b.onclick = function () { t.classList.add('hidden'); actionFn(); };
+    t.appendChild(b);
+  }
+  t.classList.remove('hidden'); clearTimeout(t._h);
+  t._h = setTimeout(function () { t.classList.add('hidden'); }, actionLabel ? 6000 : 2200);
+}
 function openSheet(html) { document.getElementById('sheetBody').innerHTML = html; document.getElementById('sheet').classList.remove('hidden'); }
-function closeSheet() { document.getElementById('sheet').classList.add('hidden'); }
+var scanSession = 0; // bumped when the scanner opens or a sheet closes; late lookups compare against it
+function closeSheet() { scanSession++; S.sharedPhoto = null; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
 
-var TITLES = { home: 'Home', recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe' };
+var TITLES = { simple: '', home: 'Home', recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe' };
 var currentScreen = 'home';
 function showScreen(name, arg) {
   currentScreen = name;
   document.getElementById('screenTitle').textContent = TITLES[name] || name;
   document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
-  var fn = { home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe }[name];
+  var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe }[name];
   document.getElementById('screen').innerHTML = fn ? fn(arg) : '';
   window.scrollTo(0, 0);
 }
@@ -52,11 +65,11 @@ function recipeCard(r) {
   var info = S.recipeInfo[r.id];
   var miss = info.cov.missing.slice(0, 3).map(function (l) { return esc((S.ingById[l.ingredient_id] || {}).name || '?'); }).join(', ');
   return '<div class="card tappable row" onclick="showScreen(\'recipe\',\'' + r.id + '\')">' +
-    '<div class="ring" style="--pct:' + info.cov.pct + '"><span>' + info.cov.pct + '%</span></div>' +
+    (r.photo_data || r.photo_path ? '<img class="photo-thumb" alt="" data-photo="' + r.id + '" data-store="recipes"' + (r.photo_data ? ' src=\"' + esc(r.photo_data) + '\"' : '') + '>' : '') +
     '<div class="grow"><h3>' + esc(r.title) + '</h3>' +
     '<div class="muted">' + (r.cuisine ? esc(r.cuisine) + ' · ' : '') + (info.nut.perServing.kcal ? '~' + info.nut.perServing.kcal + ' kcal/serving · ' : '') + info.cov.have + '/' + info.cov.total + ' on hand' + (miss ? ' · need ' + miss : '') + '</div>' +
     '<div class="chips" style="margin:4px 0 0">' + profileBadge(r.id) + (r.meal_type || []).map(function (m) { return '<span class="badge">' + esc(m) + '</span>'; }).join('') + '</div>' +
-    '</div></div>';
+    '</div><div class="ring" style="--pct:' + info.cov.pct + '" title="' + info.cov.pct + '% of ingredients on hand"><span>' + info.cov.pct + '%</span></div></div>';
 }
 function dvTiles(totals, targets) {
   var keys = ['kcal', 'sodium_mg', 'fiber_g', 'protein_g', 'sugar_g', 'potassium_mg'];
@@ -89,20 +102,52 @@ function renderHome() {
   if (!State.recipes.length) html += '<div class="card"><h3>Welcome</h3><p class="muted">Add a recipe and a few pantry items and this screen fills in with what you can cook tonight. Try <b>Settings &rarr; Load sample data</b> to see it working.</p></div>';
   html += '<h2>Cook tonight</h2>' + (cookNow.length ? cookNow.slice(0, 6).map(recipeCard).join('') : '<div class="empty">Nothing fully covered yet.</div>');
   html += '<h2>One trip away</h2>' + (oneTrip.length ? oneTrip.slice(0, 6).map(recipeCard).join('') : '<div class="empty">No near-misses.</div>');
-  if (useUp.length) html += '<h2>Use it up</h2><p class="muted">' + expiring.map(function (p) { return esc(S.ingById[p.ingredient_id].name) + ' (' + p.expires_on + ')'; }).join(', ') + '</p>' + useUp.slice(0, 4).map(recipeCard).join('');
+  if (useUp.length) html += '<h2>Use it up</h2><p class="muted">' + expiring.map(function (p) { return esc(S.ingById[p.ingredient_id].name) + ' (' + esc(p.expires_on) + ')'; }).join(', ') + '</p>' + useUp.slice(0, 4).map(recipeCard).join('');
   if (restock.length) html += '<h2>Restock</h2>' + restock.map(function (s) { return '<div class="list-item"><div class="grow"><b>' + esc(S.ingById[s.ingredient_id].name) + '</b><div class="muted">' + esc(s.why) + '</div></div><button class="btn sm" onclick="addToList(\'' + s.ingredient_id + '\',\'low_stock\')">+ list</button></div>'; }).join('');
   var open = State.shopping.filter(function (s) { return !s.done; });
   if (open.length) html += '<h2>Shopping list (' + open.length + ')</h2>' + renderShoppingList(open);
   return html;
 }
-function renderShoppingList(items) {
+// Walk-the-store order. Each device keeps its own (stores differ); the default suits most US groceries.
+var DEFAULT_AISLES = ['produce', 'bakery', 'meat', 'dairy', 'pantry', 'spice', 'frozen', 'drink', 'other'];
+function aisleOrder() {
+  var saved = State.aisleOrder || [];
+  return saved.concat(DEFAULT_AISLES.filter(function (a) { return saved.indexOf(a) < 0; }));
+}
+function shoppingByAisle(items) {
   var byCat = {};
   items.forEach(function (s) { var cat = (S.ingById[s.ingredient_id] || {}).category || 'other'; (byCat[cat] = byCat[cat] || []).push(s); });
-  return Object.keys(byCat).sort().map(function (cat) {
-    return '<div class="card"><h3>' + esc(cat) + '</h3>' + byCat[cat].map(function (s) {
-      return '<div class="list-item"><input type="checkbox" style="width:auto" onchange="toggleShop(\'' + s.id + '\')"><div class="grow">' + esc((S.ingById[s.ingredient_id] || {}).name) + ' <span class="muted">' + fmtQty(s.qty, s.unit) + ' · ' + esc(s.reason || '') + '</span></div></div>';
+  return aisleOrder().filter(function (a) { return byCat[a]; }).map(function (a) { return { aisle: a, items: byCat[a] }; })
+    .concat(Object.keys(byCat).filter(function (c) { return aisleOrder().indexOf(c) < 0; }).map(function (c) { return { aisle: c, items: byCat[c] }; }));
+}
+function renderShoppingList(items) {
+  return shoppingByAisle(items).map(function (g) {
+    return '<div class="card"><h3>' + esc(g.aisle) + '</h3>' + g.items.map(function (s) {
+      return '<label class="list-item"><input type="checkbox" style="width:auto" onchange="toggleShop(\'' + s.id + '\')"><div class="grow">' + esc((S.ingById[s.ingredient_id] || {}).name) + ' <span class="muted">' + fmtQty(s.qty, s.unit) + ' · ' + esc((s.reason || '').replace(/_/g, ' ')) + '</span></div></label>';
     }).join('') + '</div>';
-  }).join('');
+  }).join('') + '<div class="btn-row"><button class="btn ghost sm" onclick="shareShoppingList()">Share list</button></div>';
+}
+function shoppingListText() {
+  return 'Shopping list\n' + shoppingByAisle(State.shopping.filter(function (s) { return !s.done; })).map(function (g) {
+    return '\n' + g.aisle.toUpperCase() + '\n' + g.items.map(function (s) { return '- ' + (S.ingById[s.ingredient_id] || {}).name + (s.qty ? ' (' + fmtQty(s.qty, s.unit) + ')' : ''); }).join('\n');
+  }).join('\n');
+}
+// Hand the list to texts, notes or email; fall back to the clipboard.
+function shareShoppingList() {
+  var text = shoppingListText();
+  if (navigator.share) return navigator.share({ title: 'Shopping list', text: text }).catch(function () {});
+  copyText(text, 'List copied');
+}
+function copyText(text, msg) {
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(function () { toast(msg || 'Copied'); }, function () { toast('Could not copy'); });
+  toast('Copy is not available here');
+}
+function moveAisle(aisle, dir) {
+  var order = aisleOrder(), i = order.indexOf(aisle), j = i + dir;
+  if (i < 0 || j < 0 || j >= order.length) return;
+  order.splice(i, 1); order.splice(j, 0, aisle);
+  State.aisleOrder = order;
+  DB.meta('aisle_order', order).then(refresh);
 }
 
 /* ---------- Recipes ---------- */
@@ -143,7 +188,7 @@ function renderRecipes() {
     '<div class="btn-row"><button class="btn" onclick="editRecipe()">+ New recipe</button></div>' +
     '<div id="recipeList">' + (list.length ? list.map(recipeCard).join('') : '<div class="empty">No matches.</div>' + buyHint) + '</div>';
 }
-function refreshList() { var el = document.getElementById('recipeList'); if (el) { var list = filteredRecipes(); el.innerHTML = list.length ? list.map(recipeCard).join('') : '<div class="empty">No matches.</div>'; } }
+function refreshList() { var el = document.getElementById('recipeList'); if (el) { var list = filteredRecipes(); el.innerHTML = list.length ? list.map(recipeCard).join('') : '<div class="empty">No matches.</div>'; hydratePhotos(); } }
 
 function renderRecipe(id) {
   S.lastArg = id;
@@ -153,7 +198,8 @@ function renderRecipe(id) {
   var vars = State.variations.filter(function (v) { return v.recipe_id === id; });
   var fitHtml = '';
   State.profiles.forEach(function (p) { var f = info.fits[p.id]; if (f.reasons.length) fitHtml += '<div class="note"><b>' + esc(p.person_name) + ':</b> ' + esc(f.reasons.join('; ')) + ' <button class="btn sm ghost" onclick="askSwaps(\'' + id + '\',\'' + p.id + '\')">Suggest swaps</button></div>'; });
-  return '<div class="card"><div class="row between"><h2 style="margin:0">' + esc(r.title) + '</h2><div class="ring" style="--pct:' + info.cov.pct + '"><span>' + info.cov.pct + '%</span></div></div>' +
+  return (r.photo_data || r.photo_path ? '<img class="photo-hero" alt="Photo of ' + esc(r.title) + '" data-photo="' + r.id + '" data-store="recipes"' + (r.photo_data ? ' src=\"' + esc(r.photo_data) + '\"' : '') + '>' : '') +
+    '<div class="card"><div class="row between"><h2 style="margin:0">' + esc(r.title) + '</h2><div class="ring" style="--pct:' + info.cov.pct + '"><span>' + info.cov.pct + '%</span></div></div>' +
     '<div class="muted">' + [r.cuisine, r.servings ? r.servings + ' servings' : '', (r.prep_min || r.cook_min) ? ((r.prep_min || 0) + (r.cook_min || 0)) + ' min' : '', r.times_cooked ? 'cooked ' + r.times_cooked + 'x' : ''].filter(Boolean).map(esc).join(' · ') + '</div>' +
     '<div class="chips">' + profileBadge(id) + '</div>' + fitHtml +
     '<div class="btn-row"><button class="btn" onclick="cookedThis(\'' + id + '\')">I cooked this</button><button class="btn ghost" onclick="logFromRecipe(\'' + id + '\')">I ate this</button><button class="btn ghost" onclick="addMissingToList(\'' + id + '\')">Add missing to list</button><button class="btn ghost" onclick="editRecipe(\'' + id + '\')">Edit</button></div></div>' +
@@ -169,7 +215,9 @@ function renderRecipe(id) {
 }
 
 function editRecipe(id) {
+  S.pendingDraft = null; S.pendingPhoto = null;
   var r = id ? State.recipes.find(function (x) { return x.id === id; }) : { title: '', servings: 4, steps: [], meal_type: [] };
+  var hasPhoto = !!(r.photo_data || r.photo_path);
   var lines = id ? (S.linesByRecipe[id] || []).map(function (l) { return fmtQty(l.qty, l.unit) + ' ' + ((S.ingById[l.ingredient_id] || {}).name || '') + (l.prep_note ? ', ' + l.prep_note : ''); }).join('\n') : '';
   openSheet('<h2 style="margin-top:0">' + (id ? 'Edit' : 'New') + ' recipe</h2>' +
     '<label>Title</label><input id="fTitle" value="' + esc(r.title) + '">' +
@@ -179,6 +227,10 @@ function editRecipe(id) {
     '<label>Ingredients, one per line ("2 cups flour, sifted")</label><textarea id="fIng" rows="7">' + esc(lines) + '</textarea>' +
     '<label>Steps, one per line</label><textarea id="fSteps" rows="6">' + esc((r.steps || []).join('\n')) + '</textarea>' +
     '<label>Notes</label><textarea id="fNotes" rows="3">' + esc(r.notes || '') + '</textarea>' +
+    '<label>Photo</label><div class="row">' + '<img id="fPhotoPrev" class="photo-thumb' + (hasPhoto ? '' : ' hidden') + '" alt=""' + (r.photo_data ? ' src=\"' + esc(r.photo_data) + '\"' : '') + '>' +
+    '<input id="fPhoto" type="file" accept="image/*" class="grow" onchange="previewRecipePhoto(this)"></div>' +
+    (hasPhoto ? '<label class="row" style="color:inherit"><input id="fPhotoRemove" type="checkbox" style="width:auto"> Remove photo</label>' : '') +
+    '<p class="muted hidden" id="fPhotoNote">The scanned photo will be kept with this recipe.</p>' +
     '<div class="btn-row"><button class="btn" onclick="saveRecipeForm(' + (id ? '\'' + id + '\'' : 'null') + ')">Save</button><button class="btn ghost" onclick="closeSheet()">Cancel</button>' + (id ? '<button class="btn danger" onclick="deleteRecipe(\'' + id + '\')">Delete</button>' : '') + '</div>');
 }
 function saveRecipeForm(id) {
@@ -189,18 +241,39 @@ function saveRecipeForm(id) {
   rec.meal_type = [].map.call(document.querySelectorAll('.meal-chip.on'), function (c) { return c.dataset.v; });
   rec.steps = v('fSteps').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
   rec.notes = v('fNotes').trim();
+  if (!id && S.pendingDraft) { rec.source_type = S.pendingDraft.source_type || 'manual'; if (S.pendingDraft.source_ref) rec.source_ref = S.pendingDraft.source_ref; }
   var lineTexts = v('fIng').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
-  saveRecipeWithLines(rec, lineTexts.map(Units.parseLine)).then(function (saved) { closeSheet(); toast('Saved'); return loadAll().then(function () { showScreen('recipe', saved.id); }); });
+  var file = document.getElementById('fPhoto').files[0];
+  var remove = document.getElementById('fPhotoRemove') && document.getElementById('fPhotoRemove').checked;
+  var photo = file ? downscale(file, 1280) : Promise.resolve(remove ? null : S.pendingPhoto);
+  photo.then(function (dataUrl) {
+    if (dataUrl || remove) {
+      // Replacing or removing: the old cloud copy is queued for deletion; a new one uploads on sync.
+      if (rec.photo_path) Sync.removePhoto(rec.photo_path);
+      rec.photo_path = null; rec.photo_data = dataUrl || null;
+    }
+    return saveRecipeWithLines(rec, lineTexts.map(Units.parseLine));
+  }).then(function (saved) {
+    closeSheet(); toast('Saved');
+    if (Sync.enabled() && saved.photo_data && !saved.photo_path) syncNow();
+    return loadAll().then(function () { showScreen('recipe', saved.id); });
+  });
+}
+function previewRecipePhoto(input) {
+  var f = input.files[0], img = document.getElementById('fPhotoPrev');
+  if (!f || !img) return;
+  img.src = URL.createObjectURL(f); img.classList.remove('hidden');
 }
 function deleteRecipe(id) {
   if (!confirm('Delete this recipe?')) return;
+  Sync.removeRecordPhotos('recipes', id);
   Promise.all((S.linesByRecipe[id] || []).map(function (l) { return DB.remove('recipe_ingredients', l.id); })).then(function () { return DB.remove('recipes', id); }).then(function () { closeSheet(); return loadAll(); }).then(function () { showScreen('recipes'); });
 }
 
 /* ---------- Add / Scan ---------- */
 function renderScan() {
   var cloud = Sync.enabled();
-  return '<p class="muted">' + (cloud ? 'Photos and links are parsed in the cloud; the result always lands on a review screen first.' : 'Cloud not configured, so photo/receipt/link parsing is off. Manual and paste entry work fully offline.') + '</p>' +
+  return '<p class="muted">' + (cloud ? 'Photos and links are parsed in the cloud; the result always lands on a review screen first.' : 'Cloud not configured, so photo/receipt/link parsing is off. Barcodes, manual and paste entry still work.') + '</p>' +
     '<div class="grid-big">' +
     '<div class="big-btn" onclick="scanPhoto(\'recipe\')"><span class="ico">&#128247;</span>Recipe photo<div class="muted">card, cookbook, handwriting</div></div>' +
     '<div class="big-btn" onclick="scanPhoto(\'receipt\')"><span class="ico">&#129534;</span>Receipt<div class="muted">adds to pantry</div></div>' +
@@ -214,12 +287,18 @@ var scanKind = 'recipe';
 function scanPhoto(kind) { scanKind = kind; if (!Sync.enabled()) return toast('Configure Supabase first (Settings)'); document.getElementById('scanFile').click(); }
 function onScanFile(input) {
   var file = input.files[0]; if (!file) return;
-  toast('Reading photo...');
-  downscale(file, 1600).then(function (dataUrl) {
-    return Sync.brain(scanKind === 'receipt' ? 'parse_receipt' : 'parse_recipe', { image: dataUrl, ingredients: State.ingredients.map(function (i) { return i.name; }) });
-  }).then(function (res) { scanKind === 'receipt' ? reviewPantry((res.items || []).filter(function (i) { return i.is_food !== false; }), 'receipt') : reviewRecipe(res, 'photo'); })
-    .catch(function (e) { toast('Scan failed: ' + e.message); });
+  scanImage(scanKind, file);
   input.value = '';
+}
+// Recipe or receipt photo (from the camera, a file, or a share) -> cloud parse -> review screen.
+function scanImage(kind, fileOrBlob) {
+  closeSheet(); toast('Reading photo...');
+  var shot;
+  downscale(fileOrBlob, 1600).then(function (dataUrl) {
+    shot = dataUrl;
+    return Sync.brain(kind === 'receipt' ? 'parse_receipt' : 'parse_recipe', { image: dataUrl, ingredients: State.ingredients.map(function (i) { return i.name; }) });
+  }).then(function (res) { kind === 'receipt' ? reviewPantry((res.items || []).filter(function (i) { return i.is_food !== false; }), 'receipt') : reviewRecipe(res, 'photo', shot); })
+    .catch(function (e) { toast('Scan failed: ' + e.message); });
 }
 function downscale(file, max) {
   return new Promise(function (resolve) {
@@ -229,10 +308,58 @@ function downscale(file, max) {
   });
 }
 function scanBarcode() {
-  var code = prompt('Barcode scanning via camera lands in phase 1. For now, type the UPC:');
-  if (!code) return;
-  if (!Sync.enabled()) return toast('Configure Supabase first');
-  Sync.lookup('barcode', code.trim()).then(function (res) { if (!res || !res.name) return toast('Not found'); reviewPantry([{ name: res.name, qty: 1, unit: 'each', nutrition: res.nutrition, upc: code.trim() }], 'barcode'); }).catch(function (e) { toast(e.message); });
+  scanSession++;
+  openSheet('<h2 style="margin-top:0">Scan a barcode</h2>' +
+    '<div class="scan-view"><video id="scanVideo" playsinline muted></video><div class="scan-guide"></div></div>' +
+    '<canvas id="scanCanvas" class="hidden"></canvas>' +
+    '<p class="muted" id="scanMsg">Point the camera at the barcode and hold steady.</p>' +
+    '<label>Or type the number</label><div class="row"><input id="scanManual" inputmode="numeric" class="grow" placeholder="012345678905"><button class="btn sm" onclick="onBarcode(document.getElementById(\'scanManual\').value.trim())">Look up</button></div>' +
+    '<div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Done</button></div>');
+  Scanner.start(document.getElementById('scanVideo'), document.getElementById('scanCanvas'), onBarcode, function (e) {
+    var m = document.getElementById('scanMsg'); if (m) m.textContent = e.message;
+    var v = document.querySelector('.scan-view'); if (v) v.classList.add('hidden');
+  });
+}
+// Local match first (works offline), then the cloud lookup, then Open Food Facts directly.
+// codes: normalised candidates from Scanner.candidates, best first.
+function lookupBarcode(codes) {
+  var hit = null;
+  var known = State.ingredients.find(function (i) {
+    return [i.upc].concat(i.barcodes || []).some(function (b) { return codes.some(function (c) { if (Scanner.sameProduct(c, b)) { hit = c; return true; } }); });
+  });
+  if (known) return Promise.resolve({ name: known.name, known: true, code: hit });
+  var tryCode = function (i) {
+    if (i >= codes.length) return Promise.resolve({ name: null, code: codes[0] });
+    return remoteLookup(codes[i]).catch(function () { return { name: null }; }).then(function (res) {
+      return res && res.name ? Object.assign(res, { code: codes[i] }) : tryCode(i + 1);
+    });
+  };
+  return tryCode(0);
+}
+function remoteLookup(code) {
+  var viaCloud = Sync.enabled() ? Sync.lookup('barcode', code) : Promise.reject(new Error('no cloud'));
+  return viaCloud.catch(function () {
+    return fetch('https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(code) + '.json?fields=product_name,nutriments').then(function (r) { return r.json(); }).then(function (d) {
+      if (d.status !== 1) return { name: null };
+      var n = d.product.nutriments || {};
+      var mg = function (g) { return g != null ? Math.round(g * 1000) : null; };
+      return { name: (d.product.product_name || '').toLowerCase(), nutrition: { kcal_100g: n['energy-kcal_100g'], protein_g: n.proteins_100g, carbs_g: n.carbohydrates_100g, fat_g: n.fat_100g, fiber_g: n.fiber_100g, sodium_mg: mg(n.sodium_100g), sugar_g: n.sugars_100g, potassium_mg: mg(n.potassium_100g) } };
+    });
+  });
+}
+function onBarcode(text, format) {
+  if (!text) return;
+  var codes = Scanner.candidates(text, format);
+  if (!codes.length) return toast('That number does not look like a barcode');
+  Scanner.stop();
+  var mine = ++scanSession; // a newer lookup (or closing the sheet) supersedes this one
+  var m = document.getElementById('scanMsg'); if (m) m.textContent = 'Found ' + codes[0] + ', looking it up...';
+  lookupBarcode(codes).catch(function () { return { name: null, code: codes[0] }; }).then(function (res) {
+    // The user closed the scanner (or opened another form) while this was in flight.
+    if (mine !== scanSession || !document.getElementById('scanMsg')) return;
+    if (!res.name) toast('Not in the product database. Name it once and it will be remembered.');
+    reviewPantry([{ name: res.name || '', qty: 1, unit: 'each', nutrition: res.nutrition, upc: res.code, raw: 'barcode ' + res.code + (res.known ? ' (seen before)' : '') }], 'barcode');
+  });
 }
 function pasteRecipe() {
   openSheet('<h2 style="margin-top:0">Link or paste</h2><label>Recipe URL or full text</label><textarea id="fPaste" rows="8" placeholder="https://... or paste the recipe text"></textarea><div class="btn-row"><button class="btn" onclick="submitPaste()">Parse</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div><p class="muted">Offline fallback: first line becomes the title, lines that start with a number become ingredients, the rest become steps.</p>');
@@ -253,10 +380,15 @@ function localParse(text) {
   ls.forEach(function (l) { (/^[\d½¼¾]/.test(l) ? ing : steps).push(l); });
   return { title: title, servings: 4, ingredients: ing.map(Units.parseLine), steps: steps.map(function (s) { return s.replace(/^\d+[.)]\s*/, ''); }), confidence: 0.4 };
 }
-function reviewRecipe(draft, source) {
+function reviewRecipe(draft, source, photoDataUrl) {
   var lines = (draft.ingredients || []).map(function (l) { return fmtQty(l.qty, l.unit) + ' ' + (l.name || '') + (l.prep ? ', ' + l.prep : ''); }).join('\n');
+  editRecipe(); // resets pending state, so set it afterwards
   S.pendingDraft = Object.assign({ source_type: source }, draft);
-  editRecipe();
+  if (photoDataUrl) {
+    S.pendingPhoto = photoDataUrl;
+    var prev = document.getElementById('fPhotoPrev'); prev.src = photoDataUrl; prev.classList.remove('hidden');
+    document.getElementById('fPhotoNote').classList.remove('hidden');
+  }
   document.getElementById('fTitle').value = draft.title || '';
   document.getElementById('fServ').value = draft.servings || 4;
   document.getElementById('fCuis').value = draft.cuisine || '';
@@ -270,17 +402,36 @@ function reviewPantry(items, source) {
   openSheet('<h2 style="margin-top:0">Review ' + source + '</h2>' + items.map(function (it, i) {
     var m = Logic.ingredientMatch(it.name, State.ingredients);
     return '<div class="card"><div class="row"><input class="grow" id="rp-name-' + i + '" value="' + esc(m ? m.name : it.name) + '"><input id="rp-qty-' + i + '" type="number" step="any" style="width:70px" value="' + (it.qty || 1) + '"><input id="rp-unit-' + i + '" style="width:70px" value="' + esc(it.unit || '') + '"></div><div class="muted">' + (m ? 'matched ' + esc(m.name) : 'new ingredient') + (it.raw ? ' · from "' + esc(it.raw) + '"' : '') + '</div></div>';
-  }).join('') + '<div class="btn-row"><button class="btn" onclick="commitPantryReview()">Add all to pantry</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
+  }).join('') + '<div class="btn-row"><button class="btn" onclick="commitPantryReview()">Add ' + (items.length > 1 ? 'all ' : '') + 'to pantry</button>' + (source === 'barcode' ? '<button class="btn ghost" onclick="commitPantryReview(true)">Add &amp; scan next</button>' : '') + '<button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
 }
-function commitPantryReview() {
+function commitPantryReview(scanNext) {
   var items = S.pendingPantry || [];
   var chain = Promise.resolve();
+  var named = items.filter(function (it, i) { return document.getElementById('rp-name-' + i).value.trim(); });
+  if (!named.length) return toast('Give it a name first');
   items.forEach(function (it, i) {
     var name = document.getElementById('rp-name-' + i).value.trim(), qty = +document.getElementById('rp-qty-' + i).value || 0, unit = document.getElementById('rp-unit-' + i).value.trim();
-    if (!name) return;
-    chain = chain.then(function () { return ensureIngredient(name, it.nutrition, it.upc); }).then(function (ing) { return addToPantry(ing.id, qty, unit, 'pantry', 'bought'); });
+    if (!name) return; // blank line = skip it
+    chain = chain.then(function () { return ensureIngredient(name, it.nutrition, it.upc); }).then(function (ing) {
+      // Remember the barcode on whichever ingredient the user picked, so the next scan is instant.
+      // Remember this barcode on the ingredient, even if it already has another (e.g. a second pack size).
+      var known = it.upc && (Scanner.sameProduct(ing.upc, it.upc) || (ing.barcodes || []).some(function (b) { return Scanner.sameProduct(b, it.upc); }));
+      var save = !it.upc || known ? Promise.resolve()
+        : DB.put('ingredients', ing.upc ? Object.assign(ing, { barcodes: (ing.barcodes || []).concat(it.upc) }) : Object.assign(ing, { upc: it.upc }));
+      return save.then(function () { return addToPantry(ing.id, qty, unit, guessLocation(ing), 'bought'); });
+    });
   });
-  chain.then(function () { closeSheet(); toast('Pantry updated'); return loadAll(); }).then(function () { showScreen('pantry'); });
+  chain.then(function () { toast('Pantry updated'); return loadAll(); }).then(function () {
+    if (scanNext) { refresh(); scanBarcode(); } else { closeSheet(); showScreen('pantry'); }
+  });
+}
+// Where a newly bought item goes: wherever this ingredient is already kept (so the
+// existing record is topped up), else a default by category.
+function guessLocation(ing) {
+  var existing = (S.pantryByIng && S.pantryByIng[ing.id]) || [];
+  if (existing.length) return existing[0].location || 'pantry';
+  if (/frozen/.test(ing.name || '') || ing.category === 'frozen') return 'freezer';
+  return ing.category === 'dairy' || ing.category === 'meat' || ing.category === 'produce' ? 'fridge' : 'pantry';
 }
 
 /* ---------- Pantry ---------- */
@@ -295,7 +446,7 @@ function renderPantry() {
     (items.length ? ['fridge', 'freezer', 'pantry', 'counter'].filter(function (l) { return byLoc[l]; }).map(function (loc) {
       return '<h2>' + loc + ' (' + byLoc[loc].length + ')</h2><div class="card">' + byLoc[loc].sort(function (a, b) { return S.ingById[a.ingredient_id].name.localeCompare(S.ingById[b.ingredient_id].name); }).map(function (p) {
         var ing = S.ingById[p.ingredient_id] || {};
-        return '<div class="list-item"><div class="grow" onclick="editPantryItem(\'' + p.id + '\')"><b>' + esc(ing.name) + '</b> <span class="muted">' + esc(ing.category || '') + (p.expires_on ? ' · exp ' + p.expires_on : '') + (p.par_qty != null ? ' · par ' + p.par_qty : '') + '</span></div><div class="qty-ctl"><button onclick="bumpQty(\'' + p.id + '\',-1)">&minus;</button><span>' + fmtQty(p.qty, p.unit) + '</span><button onclick="bumpQty(\'' + p.id + '\',1)">+</button></div></div>';
+        return '<div class="list-item"><div class="grow" onclick="editPantryItem(\'' + p.id + '\')"><b>' + esc(ing.name) + '</b> <span class="muted">' + esc(ing.category || '') + (p.expires_on ? ' · exp ' + esc(p.expires_on) : '') + (p.par_qty != null ? ' · par ' + esc(p.par_qty) : '') + '</span></div><div class="qty-ctl"><button onclick="bumpQty(\'' + p.id + '\',-1)">&minus;</button><span>' + fmtQty(p.qty, p.unit) + '</span><button onclick="bumpQty(\'' + p.id + '\',1)">+</button></div></div>';
       }).join('') + '</div>';
     }).join('') : '<div class="empty">Pantry is empty. Add items or scan a receipt.</div>');
 }
@@ -338,7 +489,7 @@ function renderDiary() {
     (entries.length ? entries.map(function (e) {
       var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
       var who = State.profiles.find(function (p) { return p.id === e.for_profile_id; });
-      return '<div class="card row">' + (e.photo_data ? '<img class="photo-thumb" src="' + e.photo_data + '">' : '') + '<div class="grow"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + e.eaten_at.slice(11, 16) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + e.portion_mult + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + '</div></div><button class="icon-btn" onclick="DB.remove(\'diary_entries\',\'' + e.id + '\').then(loadAll).then(refresh)">&times;</button></div>';
+      return '<div class="card row">' + photoThumb(e) + '<div class="grow"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(e.eaten_at.slice(11, 16)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
     }).join('') : '<div class="empty">Nothing logged.</div>') +
     (prof ? '<h2>Notes for ' + esc(prof.person_name) + '\'s next appointment</h2><div class="card"><textarea id="profNotes" rows="4" placeholder="Questions to ask, patterns you noticed...">' + esc(prof.notes || '') + '</textarea><div class="btn-row"><button class="btn sm" onclick="saveProfileNotes(\'' + prof.id + '\')">Save notes</button><button class="btn sm ghost" onclick="weeklyDigest(\'' + prof.id + '\')">Weekly digest</button></div></div>' : '');
 }
@@ -359,8 +510,9 @@ function saveLog() {
   if (rid) { var per = S.recipeInfo[rid].nut.perServing; Logic.NUTRIENTS.forEach(function (k) { e[k] = per[k]; }); e.estimate_source = 'recipe'; }
   if (v('lKcal')) { e.kcal = +v('lKcal'); e.estimate_source = 'manual'; }
   if (v('lNa')) e.sodium_mg = +v('lNa');
-  var file = document.getElementById('lPhoto').files[0];
-  var p = file ? downscale(file, 900).then(function (d) { e.photo_data = d; }) : Promise.resolve();
+  var file = document.getElementById('lPhoto').files[0] || S.sharedPhoto;
+  S.sharedPhoto = null;
+  var p = file ? downscale(file, 1280).then(function (d) { e.photo_data = d; }) : Promise.resolve();
   p.then(function () {
     if (!rid && text && Sync.enabled() && !v('lKcal')) {
       return Sync.brain('estimate_plate', { text: text, image: e.photo_data || null }).then(function (res) { Logic.NUTRIENTS.forEach(function (k) { if (res[k] != null) e[k] = res[k]; }); e.estimate_source = 'estimate'; e.confidence = res.confidence; }).catch(function () {});
@@ -369,36 +521,173 @@ function saveLog() {
     var writes = [DB.put('diary_entries', e)];
     if (rid) (S.linesByRecipe[rid] || []).forEach(function (l) { writes.push(DB.put('usage_log', { ingredient_id: l.ingredient_id, qty: 1, unit: l.unit, event: 'logged', at: e.eaten_at })); });
     return Promise.all(writes);
-  }).then(function () { closeSheet(); toast('Logged'); return loadAll(); }).then(function () { showScreen('diary'); });
+  }).then(function () { closeSheet(); toast('Logged'); return loadAll(); }).then(function () {
+    showScreen('diary');
+    if (e.photo_data && Sync.enabled()) syncNow().then(function () { return loadAll(); }).then(function () { if (currentScreen === 'diary') refresh(); });
+  });
+}
+
+/* ---------- diary photos ---------- */
+function photoThumb(e) {
+  if (!e.photo_data && !e.photo_path) return '';
+  // A real button so the full view is reachable by keyboard and announced as a control.
+  return '<button type="button" class="photo-btn" aria-label="View meal photo" onclick="viewPhoto(\'' + e.id + '\')"><img class="photo-thumb" alt="" data-photo="' + e.id + '"' + (e.photo_data ? ' src=\"' + esc(e.photo_data) + '\"' : '') + '></button>';
+}
+function photoStatus(e) {
+  if (!Sync.enabled() || (!e.photo_data && !e.photo_path)) return '';
+  return e.photo_path ? ' · &#9729; photo saved' : ' · photo uploads on next sync';
+}
+// Fill in thumbnails that only exist in the cloud. Called after the diary renders.
+// Fill in photos that only exist in the cloud. Runs after every screen render.
+function hydratePhotos() {
+  document.querySelectorAll('img[data-photo]:not([src])').forEach(function (img) {
+    var store = img.dataset.store || 'diary_entries';
+    var list = store === 'recipes' ? State.recipes : State.diary;
+    var rec = list.find(function (x) { return x.id === img.dataset.photo; });
+    if (!rec) return;
+    Sync.photoSrc(rec, store).then(function (src) { if (src && img.isConnected) img.src = src; });
+  });
+}
+function viewPhoto(id) {
+  var e = State.diary.find(function (x) { return x.id === id; });
+  if (!e) return;
+  var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
+  openSheet('<h2 style="margin-top:0">' + esc(r ? r.title : e.free_text || 'Meal') + '</h2><p class="muted">' + e.eaten_at.slice(0, 10) + ' ' + e.eaten_at.slice(11, 16) + '</p><img id="bigPhoto" class="photo-big" alt="Meal photo"><div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
+  var el = document.getElementById('bigPhoto'); // this sheet's image; a later sheet makes a new one
+  Sync.photoSrc(e).then(function (src) {
+    if (!el.isConnected) return;
+    if (src) el.src = src;
+    else el.replaceWith(Object.assign(document.createElement('p'), { className: 'muted', textContent: 'Photo is in the cloud. Sign in or reconnect to see it.' }));
+  });
+}
+function deleteDiaryEntry(id) {
+  var e = State.diary.find(function (x) { return x.id === id; });
+  if (!e || !confirm('Delete this diary entry' + (e.photo_data || e.photo_path ? ' and its photo' : '') + '?')) return;
+  DB.update('diary_entries', id, function (cur) { if (!cur) return null; cur.deleted = true; cur.photo_data = null; return cur; })
+    .then(function () { return Sync.removeRecordPhotos('diary_entries', id); }).then(loadAll).then(refresh);
 }
 function saveProfileNotes(id) { var p = State.profiles.find(function (x) { return x.id === id; }); p.notes = document.getElementById('profNotes').value; DB.put('diet_profiles', p).then(function () { toast('Saved'); }); }
-function weeklyDigest(pid) {
-  var since = Date.now() - 7 * 864e5;
-  var entries = State.diary.filter(function (e) { return e.for_profile_id === pid && new Date(e.eaten_at).getTime() >= since; });
-  var t = Logic.dayTotals(entries); var days = Math.max(1, new Set(entries.map(function (e) { return e.eaten_at.slice(0, 10); })).size);
+// Everything the digest, the copyable summary and the Claude draft are built from.
+function digestData(pid, span) {
+  var since = Date.now() - span * 864e5;
   var prof = State.profiles.find(function (x) { return x.id === pid; });
-  var rules = S.rulesByProfile[pid] || [];
+  var entries = State.diary.filter(function (e) { return e.for_profile_id === pid && new Date(e.eaten_at).getTime() >= since; });
+  var t = Logic.dayTotals(entries);
+  var days = Math.max(1, new Set(entries.map(function (e) { return e.eaten_at.slice(0, 10); })).size);
+  var avg = {}; Logic.NUTRIENTS.forEach(function (k) { avg[k] = Math.round(t[k] / days); });
+  var counts = {};
+  entries.forEach(function (e) { var r = e.recipe_id && State.recipes.find(function (x) { return x.id === e.recipe_id; }); var name = r ? r.title : (e.free_text || 'unnamed'); counts[name] = (counts[name] || 0) + 1; });
+  var top = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 6).map(function (n) { return { name: n, times: counts[n] }; });
   var hits = [];
-  State.recipes.forEach(function (r) { var f = S.recipeInfo[r.id].fits[pid]; if (f.level !== 'ok' && entries.some(function (e) { return e.recipe_id === r.id; })) hits.push(r.title + ': ' + f.reasons.join('; ')); });
-  var good = State.recipes.filter(function (r) { return S.recipeInfo[r.id].fits[pid].level === 'ok' && r.times_cooked; }).sort(function (a, b) { return b.times_cooked - a.times_cooked; }).slice(0, 3);
-  openSheet('<h2 style="margin-top:0">Last 7 days · ' + esc(prof.person_name) + '</h2><p class="muted">' + entries.length + ' entries over ' + days + ' day' + (days > 1 ? 's' : '') + '. Daily averages:</p>' + dvTiles({ kcal: t.kcal / days, sodium_mg: t.sodium_mg / days, fiber_g: t.fiber_g / days, protein_g: t.protein_g / days, sugar_g: t.sugar_g / days, potassium_mg: t.potassium_mg / days }, prof.daily_targets) +
-    '<h3 style="margin-top:14px">Rules hit</h3>' + (hits.length ? hits.map(function (h) { return '<div class="note">' + esc(h) + '</div>'; }).join('') : '<p class="muted">' + (rules.length ? 'None.' : 'No rules set up yet.') + '</p>') +
-    '<h3 style="margin-top:14px">Dishes that already fit</h3>' + (good.length ? good.map(function (r) { return '<div>&bull; ' + esc(r.title) + '</div>'; }).join('') : '<p class="muted">Cook a few things first.</p>') +
-    '<p class="note" style="margin-top:14px">This is a summary of what was logged, not medical advice. Bring it to her doctor or dietitian.</p><div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
+  State.recipes.forEach(function (r) { var f = S.recipeInfo[r.id].fits[pid]; if (f.level !== 'ok' && entries.some(function (e) { return e.recipe_id === r.id; })) hits.push({ dish: r.title, reasons: f.reasons }); });
+  var fits = State.recipes.filter(function (r) { return S.recipeInfo[r.id].fits[pid].level === 'ok'; }).sort(function (a, b) { return (b.times_cooked || 0) - (a.times_cooked || 0); }).slice(0, 5).map(function (r) { return r.title; });
+  var targets = {}; Logic.NUTRIENTS.forEach(function (k) { targets[k] = (prof.daily_targets || {})[k] || Logic.DV[k]; });
+  return { prof: prof, span: span, entries: entries.length, days: days, avg: avg, targets: targets, top: top, hits: hits, fits: fits, rules: (S.rulesByProfile[pid] || []).map(describeRule) };
+}
+var NUTRIENT_LABEL = { kcal: 'Calories', sodium_mg: 'Sodium (mg)', sugar_g: 'Sugar (g)', fiber_g: 'Fiber (g)', protein_g: 'Protein (g)', potassium_mg: 'Potassium (mg)', carbs_g: 'Carbs (g)', fat_g: 'Fat (g)' };
+function digestText(d) {
+  var L = [d.prof.person_name + ': food diary summary, last ' + d.span + ' days', plural(d.entries, 'meal') + ' logged on ' + plural(d.days, 'day') + '.', '', 'Daily averages (target):'];
+  ['kcal', 'sodium_mg', 'sugar_g', 'fiber_g', 'protein_g', 'potassium_mg'].forEach(function (k) { L.push('- ' + NUTRIENT_LABEL[k] + ': ' + d.avg[k] + ' (' + d.targets[k] + ')'); });
+  if (d.top.length) { L.push('', 'Eaten most:'); d.top.forEach(function (x) { L.push('- ' + x.name + ' x' + x.times); }); }
+  if (d.hits.length) { L.push('', 'Dishes outside the current rules:'); d.hits.forEach(function (h) { L.push('- ' + h.dish + ': ' + h.reasons.join('; ')); }); }
+  if (d.rules.length) { L.push('', 'Rules in the app:'); d.rules.forEach(function (r) { L.push('- ' + r); }); }
+  if (d.prof.notes) L.push('', 'Caregiver notes:', d.prof.notes);
+  L.push('', 'Estimates from a home food diary, not a medical record.');
+  return L.join('\n');
+}
+function weeklyDigest(pid, span) {
+  span = span || 7;
+  var d = digestData(pid, span);
+  d.token = (S.digestSeq = (S.digestSeq || 0) + 1);
+  S.digest = d;
+  openSheet('<h2 style="margin-top:0" id="digestSheet" data-token="' + d.token + '">' + esc(d.prof.person_name) + ' · last ' + span + ' days</h2>' +
+    '<div class="chips">' + [7, 14, 30].map(function (n) { return '<span class="chip ' + (n === span ? 'on' : '') + '" onclick="weeklyDigest(\'' + pid + '\',' + n + ')">' + n + ' days</span>'; }).join('') + '</div>' +
+    '<p class="muted">' + plural(d.entries, 'entry', 'entries') + ' over ' + plural(d.days, 'day') + '. Daily averages:</p>' + dvTiles(d.avg, d.prof.daily_targets) +
+    '<h3 style="margin-top:14px">Rules hit</h3>' + (d.hits.length ? d.hits.map(function (h) { return '<div class="note">' + esc(h.dish + ': ' + h.reasons.join('; ')) + '</div>'; }).join('') : '<p class="muted">' + (d.rules.length ? 'None.' : 'No rules set up yet.') + '</p>') +
+    '<h3 style="margin-top:14px">Dishes that already fit</h3>' + (d.fits.length ? d.fits.map(function (t) { return '<div>&bull; ' + esc(t) + '</div>'; }).join('') : '<p class="muted">Add a few recipes first.</p>') +
+    '<p class="note" style="margin-top:14px">A summary of what was logged, not medical advice. Bring it to ' + esc(d.prof.person_name) + '\'s doctor or dietitian.</p>' +
+    '<div class="btn-row"><button class="btn" onclick="shareDigest()">Share summary</button><button class="btn ghost" onclick="copyText(digestText(S.digest), \'Summary copied\')">Copy</button>' +
+    (Sync.enabled() ? '<button class="btn ghost" onclick="draftAppointmentSummary()">Draft with Claude</button>' : '') +
+    '<button class="btn ghost" onclick="closeSheet()">Close</button></div>');
+}
+function shareDigest() {
+  var text = digestText(S.digest);
+  if (navigator.share) return navigator.share({ title: S.digest.prof.person_name + ' food summary', text: text }).catch(function () {});
+  copyText(text, 'Summary copied');
+}
+// Claude turns the numbers into a short brief with questions to bring to the appointment.
+function draftAppointmentSummary() {
+  var d = S.digest; toast('Drafting...');
+  var token = S.summaryToken = (S.summaryToken || 0) + 1;
+  var payload = { person: d.prof.person_name, span_days: d.span, meals_logged: d.entries, days_logged: d.days, daily_averages: d.avg, daily_targets: d.targets, eaten_most: d.top, rule_hits: d.hits, rules: d.rules, dishes_that_fit: d.fits, caregiver_notes: d.prof.notes || '' };
+  Sync.brain('appointment_summary', { digest: payload }).then(function (res) {
+    // A newer draft started, or the caregiver moved on to another digest: drop this one.
+    var marker = document.getElementById('digestSheet');
+    var open = marker && marker.dataset.token === String(d.token) && !document.getElementById('sheet').classList.contains('hidden');
+    if (token !== S.summaryToken || S.digest !== d || !open) return;
+    document.getElementById('toast').classList.add('hidden');
+    S.summary = { res: res, d: d }; // actions below use this pair, never the current S.digest
+    var list = function (title, items) { return items && items.length ? '<h3 style="margin-top:14px">' + title + '</h3>' + items.map(function (x) { return '<div>&bull; ' + esc(x) + '</div>'; }).join('') : ''; };
+    openSheet('<h2 style="margin-top:0">For ' + esc(d.prof.person_name) + '\'s next appointment</h2><p>' + esc(res.headline) + '</p>' +
+      list('Patterns', res.patterns) + list('Worth watching', res.watch_items) + list('Questions to ask', res.questions_for_clinician) + list('Foods that already fit', res.foods_that_fit) +
+      '<p class="note" style="margin-top:14px">' + esc(res.caveats || 'Drafted from a home food diary. Not medical advice.') + '</p>' +
+      '<div class="btn-row"><button class="btn" onclick="shareSummary()">Share</button><button class="btn ghost" onclick="addQuestionsToNotes()">Add questions to notes</button><button class="btn ghost" onclick="weeklyDigest(\'' + d.prof.id + '\',' + d.span + ')">Back</button></div>');
+  }).catch(function (e) { toast(e.message); });
+}
+function summaryText(res, d) {
+  var sec = function (t, xs) { return xs && xs.length ? '\n' + t + ':\n' + xs.map(function (x) { return '- ' + x; }).join('\n') : ''; };
+  return d.prof.person_name + ', last ' + d.span + ' days\n' + res.headline + sec('Patterns', res.patterns) + sec('Worth watching', res.watch_items) + sec('Questions to ask', res.questions_for_clinician) + sec('Foods that already fit', res.foods_that_fit) + '\n\n' + (res.caveats || '');
+}
+function shareSummary() {
+  var text = summaryText(S.summary.res, S.summary.d);
+  if (navigator.share) return navigator.share({ title: 'Appointment notes', text: text }).catch(function () {});
+  copyText(text, 'Copied');
+}
+function addQuestionsToNotes() {
+  var pid = S.summary.d.prof.id, qs = S.summary.res.questions_for_clinician || [];
+  if (!qs.length) return toast('No questions to add');
+  var block = 'Questions (' + todayISO() + '):\n' + qs.map(function (q) { return '- ' + q; }).join('\n');
+  // Append to the profile as it is now, not the copy from when the digest opened.
+  DB.update('diet_profiles', pid, function (cur) {
+    if (!cur || cur.deleted) return null;
+    cur.notes = (cur.notes ? cur.notes + '\n\n' : '') + block; return cur;
+  }).then(function (saved) { toast(saved ? 'Added to notes' : 'That profile no longer exists'); closeSheet(); return loadAll(); }).then(refresh);
 }
 
 /* ---------- Settings ---------- */
 function renderSettings() {
   var cloud = Sync.enabled();
-  return '<h2>Cloud sync</h2><div class="card">' + (cloud ? '<div id="authBox">Checking...</div>' : '<p class="muted">Not configured. Put your Supabase URL and anon key in <code>assets/js/config.js</code>, apply <code>supabase/migrations</code>, deploy the two Edge Functions. Until then everything stays on this device.</p>') + '</div>' +
+  return '<h2>Cloud sync</h2><div class="card">' + (cloud ? '<div id="authBox">Checking...</div>' + (Sync.config().source === 'device' ? '<p><button class="linkish" onclick="disconnectCloud()">Disconnect this device from the cloud</button></p>' : '')
+    : Sync.configured() ? '<p class="muted">Cloud details are set, but the sync library did not load. Check the connection and reload.</p>'
+    : '<p class="muted">Everything stays on this device until you connect your Supabase project. If someone sent you a setup link, just open it on this device instead.</p>' +
+      '<label>Project URL</label><input id="cfgUrl" placeholder="https://abcd1234.supabase.co" autocomplete="off">' +
+      '<label>Anon (public) key</label><input id="cfgKey" placeholder="eyJ..." autocomplete="off">' +
+      '<div class="btn-row"><button class="btn sm" onclick="connectCloud()">Connect</button></div>') + '</div>' +
     '<h2>Diet profiles</h2>' + State.profiles.map(function (p) {
       var rules = S.rulesByProfile[p.id] || [];
-      return '<div class="card"><div class="row between"><h3>' + esc(p.person_name) + '</h3><button class="btn sm ghost" onclick="editProfile(\'' + p.id + '\')">Edit</button></div><div class="muted">' + (Object.keys(p.daily_targets || {}).length ? Object.keys(p.daily_targets).map(function (k) { return k.replace('_', ' ') + ' ≤ ' + p.daily_targets[k]; }).join(', ') : 'no daily targets') + '</div>' +
-        (rules.length ? rules.map(function (r) { return '<div class="list-item"><span class="badge ' + (r.severity === 'hard' ? 'bad' : 'warn') + '">' + r.severity + '</span><div class="grow">' + esc(describeRule(r)) + (r.source ? ' <span class="muted">— ' + esc(r.source) + '</span>' : '') + '</div><button class="icon-btn" onclick="DB.remove(\'profile_rules\',\'' + r.id + '\').then(loadAll).then(refresh)">&times;</button></div>'; }).join('') : '<p class="muted">No rules yet.</p>') +
-        '<div class="btn-row"><button class="btn sm" onclick="addRule(\'' + p.id + '\')">+ Rule</button><button class="btn sm ghost" onclick="starterPacks(\'' + p.id + '\')">Starter packs</button></div></div>';
+      return '<div class="card"><div class="row between"><h3>' + esc(p.person_name) + '</h3><button class="btn sm ghost" onclick="editProfile(\'' + p.id + '\')">Edit</button></div><div class="muted">' + (Object.keys(p.daily_targets || {}).length ? Object.keys(p.daily_targets).map(function (k) { return esc(k.replace('_', ' ') + ' ≤ ' + p.daily_targets[k]); }).join(', ') : 'no daily targets') + '</div>' +
+        (rules.length ? rules.map(function (r) { return '<div class="list-item"><span class="badge ' + (r.severity === 'hard' ? 'bad' : 'warn') + '">' + esc(r.severity) + '</span><div class="grow">' + esc(describeRule(r)) + (r.source ? ' <span class="muted">— ' + esc(r.source) + '</span>' : '') + '</div><button class="icon-btn" onclick="DB.remove(\'profile_rules\',\'' + r.id + '\').then(loadAll).then(refresh)">&times;</button></div>'; }).join('') : '<p class="muted">No rules yet.</p>') +
+        '<div class="btn-row"><button class="btn sm" onclick="addRule(\'' + p.id + '\')">+ Rule</button><button class="btn sm ghost" onclick="starterPacks(\'' + p.id + '\')">Starter packs</button><button class="btn sm ghost" onclick="enableSimple(\'' + p.id + '\')">Simple view on this device</button></div></div>';
     }).join('') + '<div class="btn-row"><button class="btn" onclick="editProfile()">+ Add person</button></div>' +
     '<h2>Ingredients (' + State.ingredients.length + ')</h2><div class="card"><p class="muted">Canonical names that recipes and pantry share. Nutrition is per 100 g.</p><div class="btn-row"><button class="btn sm ghost" onclick="listIngredients()">Browse / edit</button></div></div>' +
-    '<h2>Data</h2><div class="card"><div class="btn-row"><button class="btn ghost" onclick="exportJSON()">Export JSON</button><button class="btn ghost" onclick="loadSample()">Load sample data</button><button class="btn danger" onclick="if(confirm(\'Erase everything on this device?\'))DB.wipe().then(function(){location.reload()})">Erase local data</button></div><p class="muted">v' + TCM_CONFIG.APP_VERSION + '</p></div>';
+    '<h2>Store aisle order</h2><div class="card"><p class="muted">The shopping list follows this order so you can walk the store once.</p>' + aisleOrder().map(function (a, i, all) {
+      return '<div class="list-item"><div class="grow">' + esc(a) + '</div><button class="icon-btn" aria-label="Move ' + a + ' up" ' + (i === 0 ? 'disabled' : '') + ' onclick="moveAisle(\'' + a + '\',-1)">&uarr;</button><button class="icon-btn" aria-label="Move ' + a + ' down" ' + (i === all.length - 1 ? 'disabled' : '') + ' onclick="moveAisle(\'' + a + '\',1)">&darr;</button></div>';
+    }).join('') + '</div>' +
+    '<h2>Data</h2><div class="card"><div class="btn-row"><button class="btn ghost" onclick="exportJSON()">Export JSON</button><button class="btn ghost" onclick="document.getElementById(\'importFile\').click()">Restore from backup</button><input id="importFile" type="file" accept="application/json,.json" class="hidden" onchange="importJSON(this)"><button class="btn ghost" onclick="loadSample()">Load sample data</button><button class="btn danger" onclick="if(confirm(\'Erase everything on this device?\'))DB.wipe().then(function(){location.reload()})">Erase local data</button></div><p class="muted">v' + TCM_CONFIG.APP_VERSION + '</p></div>';
+}
+function connectCloud() {
+  try { Sync.saveConfig(document.getElementById('cfgUrl').value, document.getElementById('cfgKey').value); }
+  catch (e) { return toast(e.message); }
+  toast('Connected. Sign in to start syncing.'); startAutoSync(); showScreen('settings');
+}
+function disconnectCloud() {
+  if (!confirm('Disconnect this device? Data already on it stays here; it just stops syncing.')) return;
+  Sync.clearConfig(); location.reload();
+}
+function copySetupLink() {
+  Sync.inviteCode().then(function (code) {
+    copyText(Sync.setupLink(code), 'Setup link copied. Anyone who signs in with it joins your household, so share it only with family.');
+  }).catch(function (e) { toast(e.message); });
 }
 function describeRule(r) {
   if (r.kind === 'avoid_ingredient') return 'Avoid ' + ((S.ingById[r.ingredient_id] || {}).name || '?') + (r.reason ? ' · ' + r.reason : '');
@@ -443,7 +732,7 @@ var PACKS = {
   'Kidney-aware (NKF)': { targets: { potassium_mg: 2500, sodium_mg: 2000 }, rules: [{ kind: 'limit_nutrient', nutrient: 'potassium_mg', max_per_serving: 700, severity: 'soft', reason: 'NKF: discuss potassium with nephrologist' }, { kind: 'limit_nutrient', nutrient: 'sodium_mg', max_per_serving: 600, severity: 'soft', reason: 'NKF sodium guidance' }] }
 };
 function starterPacks(pid) {
-  openSheet('<h2 style="margin-top:0">Starter packs</h2><p class="muted">Pre-filled, editable rule sets based on public guidelines. They are a starting point for a conversation with her doctor, not a prescription.</p>' +
+  openSheet('<h2 style="margin-top:0">Starter packs</h2><p class="muted">Pre-filled, editable rule sets based on public guidelines. They are a starting point for a conversation with a doctor or dietitian, not a prescription.</p>' +
     Object.keys(PACKS).map(function (n) { return '<div class="card row between"><div><b>' + esc(n) + '</b><div class="muted">' + PACKS[n].rules.map(function (r) { return r.nutrient.replace('_', ' ') + ' ≤ ' + r.max_per_serving; }).join(', ') + '</div></div><button class="btn sm" onclick="applyPack(\'' + pid + '\',\'' + esc(n) + '\')">Apply</button></div>'; }).join('') +
     '<div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
 }
@@ -476,11 +765,119 @@ function fetchNutrition(id) {
   var i = S.ingById[id]; toast('Looking up...');
   Sync.lookup('usda', i.name).then(function (res) { if (!res || res.kcal_100g == null) return toast('No match'); ['kcal_100g', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sodium_mg', 'sugar_g', 'potassium_mg'].forEach(function (k) { if (res[k] != null) document.getElementById('i-' + k).value = res[k]; }); i.nutrition_source = 'usda'; toast('Filled from USDA: ' + res.description); }).catch(function (e) { toast(e.message); });
 }
+// Backup keys (State names) -> IndexedDB stores.
+// Fields that point at another record's id (rewired when a backup is re-keyed).
+var BACKUP_REFS = ['recipe_id', 'ingredient_id', 'profile_id', 'for_profile_id'];
+var PHOTO_BACKUP_KEYS = ['recipes', 'diary']; // only these tables have photo_path
+// A backup file is untrusted input: every value is type-checked before it is stored,
+// so nothing in it can reach the page as markup.
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var IMAGE_RE = /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+\/]+=*$/;
+var NUM_FIELDS = ['qty', 'par_qty', 'servings', 'prep_min', 'cook_min', 'rating', 'times_cooked', 'kcal_per_serving', 'kcal_100g', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sodium_mg', 'sugar_g', 'potassium_mg', 'density', 'kcal', 'portion_mult', 'confidence', 'max_per_serving', 'pos'];
+var DATE_FIELDS = ['expires_on', 'opened_on', 'last_cooked_on'];
+var TIME_FIELDS = ['eaten_at', 'at'];
+function sanitizeBackupRecord(rec) {
+  if (!rec || typeof rec !== 'object' || !UUID_RE.test(String(rec.id))) return null;
+  var out = {};
+  Object.keys(rec).forEach(function (k) {
+    var v = rec[k];
+    if (v === null || v === undefined) { out[k] = null; return; }
+    if (BACKUP_REFS.indexOf(k) > -1) { out[k] = UUID_RE.test(String(v)) ? v : null; return; }
+    if (NUM_FIELDS.indexOf(k) > -1) { var n = Number(v); out[k] = isFinite(n) ? n : null; return; }
+    if (DATE_FIELDS.indexOf(k) > -1) { out[k] = /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null; return; }
+    if (TIME_FIELDS.indexOf(k) > -1) { var t = new Date(v); out[k] = isNaN(t) ? null : t.toISOString(); return; }
+    if (k === 'photo_data') { if (IMAGE_RE.test(v)) out[k] = v; return; }
+    if (k === 'photo_path') { out[k] = /^[0-9a-f-]{36}\/(diary|recipes)\/[A-Za-z0-9._-]+$/.test(v) ? v : null; return; }
+    if (k === 'severity') { out[k] = v === 'hard' ? 'hard' : 'soft'; return; }
+    if (k === 'daily_targets') { // only known nutrients, only finite numbers
+      out[k] = {};
+      if (v && typeof v === 'object') Logic.NUTRIENTS.forEach(function (n) { var x = Number(v[n]); if (n in v && isFinite(x)) out[k][n] = x; });
+      return;
+    }
+    if (typeof v === 'string' || typeof v === 'boolean' || typeof v === 'number') { out[k] = v; return; }
+    if (Array.isArray(v) || typeof v === 'object') { try { out[k] = JSON.parse(JSON.stringify(v)); } catch (e) {} } // steps, aliases, targets, body
+  });
+  if (TIME_FIELDS.some(function (f) { return f in rec && !out[f]; })) return null; // a diary/usage row needs its time
+  return out;
+}
+var BACKUP_STORES = { ingredients: 'ingredients', recipes: 'recipes', lines: 'recipe_ingredients', variations: 'recipe_variations', pantry: 'pantry_items', profiles: 'diet_profiles', rules: 'profile_rules', diary: 'diary_entries', shopping: 'shopping_list', usage: 'usage_log' };
+// Merge a backup into this device. Records with the same id are replaced; everything is
+// queued for sync like a normal edit. Photos stored inside the backup upload again.
+function importJSON(input) {
+  var file = input.files[0]; input.value = '';
+  if (!file) return;
+  file.text().then(function (text) {
+    var data;
+    try { data = JSON.parse(text); } catch (e) { throw new Error('That file is not a backup from this app.'); }
+    var keys = Object.keys(BACKUP_STORES).filter(function (k) { return Array.isArray(data[k]); });
+    if (!keys.length) throw new Error('That file is not a backup from this app.');
+    var total = keys.reduce(function (n, k) { return n + data[k].length; }, 0);
+    if (!confirm('Restore ' + total + ' records from ' + (data.exported_at || 'this backup').slice(0, 10) + '? Matching records on this device are replaced; nothing else is removed.')) return;
+    return DB.meta('household_id').then(function (here) {
+      // Ids are global. A backup from another household would collide with rows that
+      // household still owns, so it gets fresh ids with every reference rewired. Older
+      // backups do not say where they came from; with the cloud on, ask.
+      var rekey = data.household_id ? data.household_id !== here
+        : (Sync.enabled() && !!here && confirm('Did this backup come from a different household or account?\n\nOK: restore it as a fresh copy.\nCancel: it is from this household; merge it.'));
+      var idMap = {};
+      if (rekey) keys.forEach(function (k) { data[k].forEach(function (r) { if (r && UUID_RE.test(String(r.id))) idMap[r.id] = DB.uuid(); }); });
+      var map = function (v) { return v && idMap[v] ? idMap[v] : v; };
+      var writes = [];
+      keys.forEach(function (k) {
+        data[k].forEach(function (raw) {
+          var rec = sanitizeBackupRecord(raw);
+          if (!rec) return;
+          delete rec.household_id; delete rec.fts; delete rec.updated_at;
+          if (rekey) BACKUP_REFS.concat('id').forEach(function (f) { if (f in rec) rec[f] = map(rec[f]); });
+          // A photo carried in the backup uploads again here; another household's stored
+          // photo is not readable from this one, so that link is dropped.
+          var store = BACKUP_STORES[k];
+          if (PHOTO_BACKUP_KEYS.indexOf(k) > -1 && (rec.photo_data || rekey)) {
+            // Same household: the photo uploads again under a new name, so the copies it
+            // replaces (the backup's and this device's current one) are queued for removal.
+            var old = rekey ? null : rec.photo_path;
+            rec.photo_path = null;
+            if (!rekey) {
+              writes.push(DB.get(store, rec.id).then(function (local) {
+                if (old) Sync.removePhoto(old);
+                if (local && local.photo_path && local.photo_path !== old) Sync.removePhoto(local.photo_path);
+                return DB.put(store, rec);
+              }));
+              return;
+            }
+          }
+          writes.push(DB.put(store, rec));
+        });
+      });
+      return Promise.all(writes);
+    }).then(function (writes) { return loadAll().then(function () { return writes; }); }).then(function (writes) {
+      toast('Restored ' + writes.length + ' records'); refresh();
+      if (Sync.enabled()) syncNow();
+    });
+  }).catch(function (e) { toast(e.message); });
+}
+// The backup records which household it came from, so a restore elsewhere can re-key it.
+// Photos this device has not downloaded yet are fetched first, so the backup is complete.
+function buildBackup() {
+  var missing = 0;
+  var photoJobs = [['recipes', State.recipes], ['diary_entries', State.diary]].map(function (pair) {
+    return Promise.all(pair[1].filter(function (r) { return r.photo_path && !r.photo_data; }).map(function (r) {
+      return Sync.photoSrc(r, pair[0]).then(function (src) { if (!src) missing++; });
+    }));
+  });
+  return Promise.all(photoJobs).then(function () { return DB.meta('household_id'); }).then(function (hid) {
+    var out = { exported_at: new Date().toISOString(), version: TCM_CONFIG.APP_VERSION, household_id: hid || null, photos_missing: missing };
+    Object.keys(BACKUP_STORES).forEach(function (k) { out[k] = State[k]; });
+    return out;
+  });
+}
 function exportJSON() {
-  var out = { exported_at: new Date().toISOString(), version: TCM_CONFIG.APP_VERSION };
-  ['ingredients', 'recipes', 'lines', 'variations', 'pantry', 'profiles', 'rules', 'diary', 'shopping', 'usage'].forEach(function (k) { out[k] = State[k]; });
-  var blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
-  var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'caregiving-menu-' + todayISO() + '.json'; a.click();
+  toast('Preparing backup...');
+  buildBackup().then(function (out) {
+    if (out.photos_missing) toast(out.photos_missing + ' photo(s) could not be downloaded and are not in this backup. Try again when online.');
+    var blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'caregiving-menu-' + todayISO() + '.json'; a.click();
+  });
 }
 
 /* ---------- AI helpers (cloud only) ---------- */
@@ -497,7 +894,7 @@ function askSwaps(id, pid) {
   var p = State.profiles.find(function (x) { return x.id === pid; });
   toast('Thinking...');
   Sync.brain('diet_swaps', { recipe: recipePayload(id), profile: { name: p.person_name, targets: p.daily_targets, rules: (S.rulesByProfile[pid] || []).map(describeRule) } }).then(function (res) {
-    openSheet('<h2 style="margin-top:0">Swaps for ' + esc(p.person_name) + '</h2>' + (res.options || []).map(function (o, i) { S['opt' + i] = o; return '<div class="card"><h3>' + esc(o.title) + '</h3><div class="muted">' + esc(o.summary || '') + '</div>' + (o.changes || []).map(function (c) { return '<div>&bull; ' + esc(c) + '</div>'; }).join('') + '<div class="btn-row"><button class="btn sm" onclick="keepVariation(\'' + id + '\',' + i + ',\'diet_swap\',\'' + pid + '\')">Keep as her version</button></div></div>'; }).join('') + '<p class="note">Suggestions only. Confirm anything medical with her care team.</p><div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
+    openSheet('<h2 style="margin-top:0">Swaps for ' + esc(p.person_name) + '</h2>' + (res.options || []).map(function (o, i) { S['opt' + i] = o; return '<div class="card"><h3>' + esc(o.title) + '</h3><div class="muted">' + esc(o.summary || '') + '</div>' + (o.changes || []).map(function (c) { return '<div>&bull; ' + esc(c) + '</div>'; }).join('') + '<div class="btn-row"><button class="btn sm" onclick="keepVariation(\'' + id + '\',' + i + ',\'diet_swap\',\'' + pid + '\')">Keep as ' + esc(p.person_name) + '\'s version</button></div></div>'; }).join('') + '<p class="note">Suggestions only. Confirm anything medical with their care team.</p><div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
   }).catch(function (e) { toast(e.message); });
 }
 function keepVariation(id, i, kind, pid) {

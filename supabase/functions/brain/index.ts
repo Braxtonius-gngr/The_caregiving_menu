@@ -5,8 +5,8 @@
 // Secrets (supabase secrets set ...):
 //   ANTHROPIC_API_KEY   required
 //   CLAUDE_MODEL        optional, defaults to claude-opus-5-5
-import Anthropic from "npm:@anthropic-ai/sdk";
-import { createClient } from "npm:@supabase/supabase-js@2";
+import Anthropic from "npm:@anthropic-ai/sdk@1.3.0";
+import { createClient } from "npm:@supabase/supabase-js@2.118.0";
 import { corsHeaders, json } from "../_shared/cors.ts";
 
 const MODEL = Deno.env.get("CLAUDE_MODEL") ?? "claude-opus-5-5";
@@ -135,12 +135,27 @@ const canonSchema = {
   },
 };
 
+const strList = (description: string) => ({ type: "array", items: str, description });
+const summarySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["headline", "patterns", "watch_items", "questions_for_clinician", "foods_that_fit", "caveats"],
+  properties: {
+    headline: { type: "string", description: "One plain-language sentence summarising the period" },
+    patterns: strList("2-4 observations about what and how often they ate, grounded in the numbers given"),
+    watch_items: strList("Averages notably above or below target, or repeated rule hits. Empty if none"),
+    questions_for_clinician: strList("3-5 specific questions the caregiver could ask the doctor or dietitian"),
+    foods_that_fit: strList("Dishes from the list given that already fit the current rules"),
+    caveats: { type: "string", description: "One sentence on the limits of a home food diary" },
+  },
+};
+
 const SYSTEM = `You help a family caregiver run their kitchen: recipes, pantry, and a food diary, including for an older relative whose diet may need adjusting.
 Return only what the schema asks for. Use generic, lowercase, singular ingredient names ("yellow onion", not "Vidalia Onions 3lb").
 Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
 Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
 
-type Mode = "parse_recipe" | "parse_receipt" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize";
+type Mode = "parse_recipe" | "parse_receipt" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary";
 
 function imageBlock(dataUrl: string): Anthropic.ImageBlockParam {
   const m = dataUrl.match(/^data:(image\/[a-z+]+);base64,(.*)$/);
@@ -222,6 +237,8 @@ async function handle(mode: Mode, body: Record<string, any>) {
       return await ask(optionsSchema, [{ type: "text", text: `Suggest 2-3 versions of this recipe adjusted for ${body.profile?.name}. Keep it recognisably the same dish; say what each change saves (e.g. "~600 mg sodium per serving").\nTheir rules: ${JSON.stringify(body.profile?.rules ?? [])}\nDaily targets: ${JSON.stringify(body.profile?.targets ?? {})}\nRecipe: ${JSON.stringify(body.recipe)}` }], "medium");
     case "canonicalize":
       return await ask(canonSchema, [{ type: "text", text: `Map each input to an existing ingredient name if it is the same thing, otherwise propose a new generic name.\nInputs: ${JSON.stringify(body.inputs)}\nKnown: ${known}` }], "low");
+    case "appointment_summary":
+      return await ask(summarySchema, [{ type: "text", text: `Draft a short brief a family caregiver can bring to an appointment, from this home food diary summary. Use only the data given; do not diagnose or recommend treatment. Frame concerns as questions for the clinician. Write in plain language.\n${JSON.stringify(body.digest)}` }], "medium");
     default:
       throw new Error("unknown mode");
   }

@@ -3,8 +3,9 @@ function loadAll() {
   return Promise.all([
     DB.all('ingredients'), DB.all('recipes'), DB.all('recipe_ingredients'), DB.all('recipe_variations'),
     DB.all('pantry_items'), DB.all('diet_profiles'), DB.all('profile_rules'), DB.all('diary_entries'),
-    DB.all('shopping_list'), DB.all('usage_log')
+    DB.all('shopping_list'), DB.all('usage_log'), DB.meta('aisle_order')
   ]).then(function (r) {
+    State.aisleOrder = r[10] || [];
     State.ingredients = r[0]; State.recipes = r[1]; State.lines = r[2]; State.variations = r[3];
     State.pantry = r[4].filter(function (p) { return p.qty > 0; }); State.profiles = r[5]; State.rules = r[6];
     State.diary = r[7]; State.shopping = r[8]; State.usage = r[9];
@@ -39,7 +40,11 @@ function ensureIngredient(name, nutrition, upc) {
 }
 
 function addToPantry(ingredientId, qty, unit, location, event, extra) {
-  var existing = (S.pantryByIng[ingredientId] || []).find(function (p) { return (p.unit || '') === (unit || '') && p.location === location; });
+  var here = (S.pantryByIng[ingredientId] || []).filter(function (p) { return p.location === location; });
+  // A unitless purchase ("2 carrots") is a count. It may top up a record kept in a count
+  // unit such as "each", but never one kept in grams or cups.
+  if (!unit) { var countRec = here.find(function (p) { return Units.kind(p.unit) === 'count'; }); if (countRec) unit = countRec.unit || ''; }
+  var existing = here.find(function (p) { return (p.unit || '') === (unit || ''); });
   var rec = existing || { ingredient_id: ingredientId, qty: 0, unit: unit, location: location || 'pantry' };
   rec.qty = (rec.qty || 0) + (qty || 0);
   if (extra) { if (extra.expires_on) rec.expires_on = extra.expires_on; if (extra.par_qty != null) rec.par_qty = extra.par_qty; }
@@ -106,7 +111,7 @@ function addMissingToList(id) {
 function toggleShop(id) {
   var s = State.shopping.find(function (x) { return x.id === id; });
   s.done = true;
-  DB.put('shopping_list', s).then(function () { return addToPantry(s.ingredient_id, s.qty || 1, s.unit || '', (S.ingById[s.ingredient_id] || {}).category === 'dairy' || (S.ingById[s.ingredient_id] || {}).category === 'meat' || (S.ingById[s.ingredient_id] || {}).category === 'produce' ? 'fridge' : 'pantry', 'bought'); }).then(loadAll).then(function () { toast('Bought, added to pantry'); refresh(); });
+  DB.put('shopping_list', s).then(function () { return addToPantry(s.ingredient_id, s.qty || 1, s.unit || '', guessLocation(S.ingById[s.ingredient_id] || {}), 'bought'); }).then(loadAll).then(function () { toast('Bought, added to pantry'); refresh(); });
 }
 
 /* ---------- auth box in Settings ---------- */
@@ -114,17 +119,33 @@ function renderAuthBox() {
   var box = document.getElementById('authBox'); if (!box) return;
   Sync.session().then(function (s) {
     if (s) Sync.inviteCode().then(function (c) { var el = document.getElementById('inviteCode'); if (el) el.textContent = c; }).catch(function () {});
-    box.innerHTML = s ? '<p>Signed in as <b>' + esc(s.user.email) + '</b></p><p class="muted">Household invite code: <b id="inviteCode">...</b>. Family members sign in, then enter it below to share this kitchen.</p><div class="row"><input id="joinCode" placeholder="Join with a code" class="grow"><button class="btn sm" onclick="Sync.joinHousehold(document.getElementById(\'joinCode\').value.trim()).then(syncNow).then(function(){toast(\'Joined\');renderSettingsAgain()}).catch(function(e){toast(e.message)})">Join</button></div><div class="btn-row"><button class="btn sm" onclick="syncNow()">Sync now</button><button class="btn sm ghost" onclick="Sync.signOut().then(function(){renderSettingsAgain()})">Sign out</button></div>'
+    box.innerHTML = s ? '<p>Signed in as <b>' + esc(s.user.email) + '</b></p><p id="syncError" class="note' + (lastSyncError ? '' : ' hidden') + '">' + (lastSyncError ? 'Last sync failed: ' + esc(lastSyncError) : '') + '</p><p class="muted">Household invite code: <b id="inviteCode">...</b>. Family members sign in, then enter it below to share this kitchen.</p><div class="row"><input id="joinCode" placeholder="Join with a code" class="grow"><button class="btn sm" onclick="Sync.joinHousehold(document.getElementById(\'joinCode\').value.trim()).then(syncNow).then(function(){toast(\'Joined\');renderSettingsAgain()}).catch(function(e){toast(e.message)})">Join</button></div><div class="btn-row"><button class="btn sm" onclick="syncNow()">Sync now</button><button class="btn sm ghost" onclick="copySetupLink()">Copy setup link for another device</button><button class="btn sm ghost" onclick="Sync.signOut().then(function(){renderSettingsAgain()})">Sign out</button></div>'
       : '<label>Email for a sign-in link</label><input id="authEmail" type="email"><div class="btn-row"><button class="btn sm" onclick="Sync.signIn(document.getElementById(\'authEmail\').value).then(function(){toast(\'Check your email\')}).catch(function(e){toast(e.message)})">Send link</button></div>';
   });
 }
 function renderSettingsAgain() { showScreen('settings'); }
+// Background sync: once per page, whenever the cloud is (or becomes) configured.
+var autoSyncStarted = false;
+function startAutoSync() {
+  if (autoSyncStarted || !Sync.enabled()) return;
+  autoSyncStarted = true;
+  syncNow();
+  window.addEventListener('online', syncNow);
+  setInterval(syncNow, 5 * 60 * 1000);
+}
+var lastSyncError = null;
 function syncNow() {
   var dot = document.getElementById('syncDot');
-  return Sync.run().then(function (r) {
+  return Sync.joinPendingInvite().then(function (joined) { if (joined) toast('Joined your household'); }, function (e) { toast('Could not join: ' + e.message); })
+    .then(function () { return Sync.run(); }).then(function (r) {
     dot.classList.toggle('on', r.signedIn); dot.title = r.signedIn ? 'Synced' : 'Local only';
-    if (r.pulled) return loadAll().then(refresh);
-  }).catch(function (e) { dot.classList.remove('on'); dot.title = 'Sync error: ' + e.message; });
+    if (r.pulled || r.photos) return loadAll().then(refresh);
+  }).then(function () { lastSyncError = null; }, function (e) {
+    // Keep the error visible: a sync that keeps failing must never look like it worked.
+    lastSyncError = (e && e.message) || String(e);
+    dot.classList.remove('on'); dot.classList.add('err'); dot.title = 'Sync error: ' + lastSyncError;
+    var el = document.getElementById('syncError'); if (el) { el.textContent = 'Last sync failed: ' + lastSyncError; el.classList.remove('hidden'); }
+  }).then(function () { if (!lastSyncError) dot.classList.remove('err'); });
 }
 
 /* ---------- sample data ---------- */
@@ -197,22 +218,65 @@ function loadSample() {
 }
 
 /* ---------- boot ---------- */
+// Shared from another app. POST shares (with an optional photo) arrive via the service
+// worker as ?share=1; older GET shares carry ?url= or ?text= directly.
 function handleShareTarget() {
   var p = new URLSearchParams(location.search);
+  if (p.get('share') === '1') {
+    history.replaceState(null, '', location.pathname);
+    if (!('caches' in window)) return;
+    var base = new URL('./', location.href).href;
+    return caches.open('tcm-share').then(function (c) {
+      return Promise.all([c.match(base + '__share/meta'), c.match(base + '__share/image')]).then(function (r) {
+        var done = function () { return Promise.all([c.delete(base + '__share/meta'), c.delete(base + '__share/image')]); };
+        return Promise.all([r[0] ? r[0].json() : null, r[1] ? r[1].blob() : null]).then(function (v) { return done().then(function () { return v; }); });
+      });
+    }).then(function (v) {
+      var meta = v[0] || {}, image = v[1];
+      if (image) return askSharedPhoto(image);
+      openSharedText([meta.url, meta.text, meta.title].filter(Boolean).join('\n').trim());
+    }).catch(function () {});
+  }
   var shared = p.get('url') || p.get('text');
   if (!shared) return;
   history.replaceState(null, '', location.pathname);
-  showScreen('scan'); pasteRecipe(); document.getElementById('fPaste').value = shared;
+  openSharedText(shared);
+}
+function openSharedText(text) {
+  if (!text) return;
+  // A shared page usually puts its URL last in the text; prefer the URL if there is one.
+  var urlMatch = text.match(/https?:\/\/\S+/);
+  showScreen('scan'); pasteRecipe();
+  document.getElementById('fPaste').value = urlMatch ? urlMatch[0] : text;
+  if (Sync.enabled()) submitPaste(); // straight to the review screen
+}
+function askSharedPhoto(blob) {
+  S.sharedPhoto = blob;
+  showScreen('scan');
+  var cloud = Sync.enabled();
+  openSheet('<h2 style="margin-top:0">What is this photo?</h2><img class="photo-hero" alt="" src="' + URL.createObjectURL(blob) + '">' +
+    '<div class="btn-row"><button class="btn" onclick="logFoodWithSharedPhoto()">A meal for the diary</button>' +
+    '<button class="btn ghost" ' + (cloud ? '' : 'disabled ') + 'onclick="scanImage(\'recipe\', S.sharedPhoto)">A recipe</button>' +
+    '<button class="btn ghost" ' + (cloud ? '' : 'disabled ') + 'onclick="scanImage(\'receipt\', S.sharedPhoto)">A receipt</button></div>' +
+    (cloud ? '' : '<p class="muted">Reading recipes and receipts needs the cloud set up. The diary works offline.</p>'));
+}
+function logFoodWithSharedPhoto() {
+  logFood();
+  var note = document.createElement('p'); note.className = 'muted'; note.textContent = 'The shared photo is attached.';
+  document.getElementById('lPhoto').after(note);
 }
 
 var _origShowScreen = showScreen;
-showScreen = function (name, arg) { S.lastArg = arg; _origShowScreen(name, arg); if (name === 'settings') renderAuthBox(); };
+showScreen = function (name, arg) { if (State.simple && simpleProfile()) name = 'simple'; S.lastArg = arg; _origShowScreen(name, arg); if (name === 'settings') renderAuthBox(); hydratePhotos(); };
 
 document.addEventListener('DOMContentLoaded', function () {
-  DB.meta('active_profile').then(function (p) { State.activeProfile = p; return loadAll(); }).then(function () {
+  try { if (Sync.applySetupLink()) setTimeout(function () { toast(Sync.pendingInvite() ? 'Cloud connected. Sign in (Settings) to join your household.' : 'Cloud connected. Sign in in Settings.'); }, 400); }
+  catch (e) { setTimeout(function () { toast('That setup link did not work: ' + e.message); }, 400); }
+  Promise.all([DB.meta('active_profile'), DB.meta('simple_mode')]).then(function (m) { State.activeProfile = m[0]; State.simple = m[1]; return loadAll(); }).then(function () {
+    applySimpleChrome();
     showScreen('home');
     handleShareTarget();
-    if (Sync.enabled()) { syncNow(); window.addEventListener('online', syncNow); setInterval(syncNow, 5 * 60 * 1000); }
+    startAutoSync();
   });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js');
 });

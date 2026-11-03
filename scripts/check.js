@@ -25,7 +25,7 @@ sw.replace(/'\.\/([^']+)'/g, function (_, r) { if (r) refs.push(r); });
 var manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.webmanifest'), 'utf8'));
 manifest.icons.forEach(function (i) { refs.push(i.src); });
 refs.forEach(function (r) {
-  if (/^(https?:)?\/\//.test(r) || r.startsWith('#') || r === './') return;
+  if (/^(https?:)?\/\//.test(r) || r.startsWith('#') || r.startsWith('?') || r === './') return;
   if (r.startsWith('/')) fail('absolute local URL breaks GitHub Pages subpaths: ' + r);
   if (!fs.existsSync(path.join(root, r.replace(/^\.\//, '')))) fail('missing file referenced: ' + r);
 });
