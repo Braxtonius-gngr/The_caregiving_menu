@@ -72,7 +72,7 @@ var Sync = (function () {
           return Promise.all(r.data.map(function (row) {
             return DB.get(store, row.id).then(function (local) {
               // Postgres sends null for an unset path; a never-uploaded local entry has undefined.
-              if (local && local.photo_data && (local.photo_path || null) === (row.photo_path || null)) row.photo_data = local.photo_data;
+              if (local && local.photo_data && !row.deleted && (local.photo_path || null) === (row.photo_path || null)) row.photo_data = local.photo_data;
               return row;
             });
           })).then(function (rows) { return DB.bulkPut(store, rows); });
@@ -96,16 +96,17 @@ var Sync = (function () {
         res[i + 1].filter(function (e) { return e.photo_data && !e.photo_path; }).forEach(function (e) {
           chain = chain.then(function (n) {
             var path = hid + '/' + PHOTO_STORES[store] + '/' + e.id + '-' + Date.now().toString(36) + '.jpg';
+            var uploaded = false;
             return dataUrlToBlob(e.photo_data).then(function (blob) {
               return c.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: true });
             }).then(function (r) {
               if (r.error) throw r.error;
-              // Re-read: the record may have been deleted, edited or re-photographed meanwhile.
-              return DB.get(store, e.id).then(function (cur) {
-                if (!cur || cur.deleted || cur.photo_data !== e.photo_data) return queuePhotoDelete(path).then(function () { return n; });
-                return attachPhotoPath(c, store, cur, path).then(function (ok) { return ok ? n + 1 : n; });
-              });
-            }).catch(function () { return n; }); // leave it pending; never block the rest of the sync
+              uploaded = true;
+              return attachPhotoPath(c, store, e.id, e.photo_data, path);
+            }).then(function (ok) { return ok ? n + 1 : n; }).catch(function () {
+              // The next sync uploads under a new name, so this copy would be orphaned.
+              return (uploaded ? queuePhotoDelete(path) : Promise.resolve()).then(function () { return n; });
+            });
           });
         });
       });
@@ -113,22 +114,33 @@ var Sync = (function () {
     });
   }
 
+  // Set photo_path locally only if the record is still live and still holds the photo
+  // we uploaded. Runs atomically, so a deletion or a new photo taken meanwhile wins.
+  function adoptPath(store, id, photoData, path, silent) {
+    return DB.update(store, id, function (cur) {
+      if (!cur || cur.deleted || cur.photo_data !== photoData || cur.photo_path) return null;
+      cur.photo_path = path; return cur;
+    }, { silent: silent }).then(function (rec) {
+      if (rec) return true;
+      return queuePhotoDelete(path).then(function () { return false; }); // superseded: drop this upload
+    });
+  }
+
   // Photo-only update. Never re-push the whole row: that would overwrite a deletion
   // made on another device. Only a row that is still live on the server gets the path.
-  function attachPhotoPath(c, store, cur, path) {
-    return c.from(store).update({ photo_path: path }).eq('id', cur.id).eq('deleted', false).select('id').then(function (r) {
+  function attachPhotoPath(c, store, id, photoData, path) {
+    return c.from(store).update({ photo_path: path }).eq('id', id).eq('deleted', false).select('id').then(function (r) {
       if (r.error) throw r.error;
-      if (r.data && r.data.length) { cur.photo_path = path; return DB.put(store, cur, { silent: true }).then(function () { return true; }); }
-      return c.from(store).select('id').eq('id', cur.id).then(function (q) {
+      if (r.data && r.data.length) return adoptPath(store, id, photoData, path, true);
+      return c.from(store).select('id').eq('id', id).then(function (q) {
         if (q.error) throw q.error;
         if (q.data && q.data.length) {
           // Deleted elsewhere: mirror the tombstone and drop the photo we just uploaded.
-          cur.deleted = true; cur.photo_data = null;
-          return DB.put(store, cur, { silent: true }).then(function () { return queuePhotoDelete(path); }).then(function () { return false; });
+          return DB.update(store, id, function (cur) { if (!cur) return null; cur.deleted = true; cur.photo_data = null; return cur; }, { silent: true })
+            .then(function () { return queuePhotoDelete(path); }).then(function () { return false; });
         }
         // Not on the server yet (created mid-sync): it goes up whole with its next push.
-        cur.photo_path = path;
-        return DB.put(store, cur).then(function () { return true; });
+        return adoptPath(store, id, photoData, path, false);
       });
     });
   }
@@ -193,10 +205,11 @@ var Sync = (function () {
       if (r.error) throw r.error;
       return blobToDataUrl(r.data);
     }).then(function (dataUrl) {
-      return DB.get(store, rec.id).then(function (cur) {
-        // Only cache it if the record still points at this photo.
-        if (cur && cur.photo_path === rec.photo_path) { cur.photo_data = dataUrl; return DB.put(store, cur, { silent: true }); }
-      }).then(function () { rec.photo_data = dataUrl; return dataUrl; });
+      // Cache it only if the record is still live and still points at this photo.
+      return DB.update(store, rec.id, function (cur) {
+        if (!cur || cur.deleted || cur.photo_path !== rec.photo_path) return null;
+        cur.photo_data = dataUrl; return cur;
+      }, { silent: true }).then(function (saved) { if (saved) rec.photo_data = dataUrl; return dataUrl; });
     }).catch(function () { return null; }).then(function (src) { delete inflight[key]; return src; });
     return inflight[key];
   }
@@ -211,29 +224,50 @@ var Sync = (function () {
       return list;
     });
   }
+  // Queue items are exact Storage paths, or "record:<folder>/<id>" meaning every photo
+  // ever stored for that record. Deleting a record uses the second form, so cleanup
+  // does not depend on this device knowing the latest photo path.
   function flushPhotoDeletes() {
     var c = getClient();
     if (!c) return Promise.resolve(0);
     return DB.meta(DELETE_QUEUE).then(function (list) {
       if (!list || !list.length) return 0;
-      return c.storage.from(BUCKET).remove(list).then(function (r) {
+      var exact = list.filter(function (p) { return p.indexOf('record:') !== 0; });
+      var records = list.filter(function (p) { return p.indexOf('record:') === 0; });
+      return householdId().then(function (hid) {
+        return Promise.all(records.map(function (item) {
+          var parts = item.slice(7).split('/'), folder = parts[0], id = parts[1];
+          return c.storage.from(BUCKET).list(hid + '/' + folder, { search: id, limit: 100 }).then(function (r) {
+            if (r.error) throw r.error;
+            return (r.data || []).filter(function (o) { return o.name.indexOf(id) === 0; }).map(function (o) { return hid + '/' + folder + '/' + o.name; });
+          });
+        }));
+      }).then(function (found) {
+        var paths = exact.concat([].concat.apply([], found));
+        return paths.length ? c.storage.from(BUCKET).remove(paths) : { error: null };
+      }).then(function (r) {
         if (r.error) return 0;
-        // Atomic: a path queued while the request ran survives the cleanup.
+        // Atomic: anything queued while this ran survives the cleanup.
         return DB.metaUpdate(DELETE_QUEUE, function (now) {
           return (now || []).filter(function (p) { return list.indexOf(p) < 0; });
         }).then(function () { return list.length; });
-      }, function () { return 0; });
+      }).catch(function () { return 0; });
     });
   }
-  // Always queue a path, even if the Supabase library failed to load this session;
+  function flushIfSignedIn() {
+    if (!getClient()) return Promise.resolve(0);
+    return session().then(function (s) { return s ? flushPhotoDeletes() : 0; }).catch(function () { return 0; });
+  }
+  // Always queue, even if the Supabase library failed to load this session;
   // the network call waits for a signed-in sync.
   function removePhoto(path) {
-    if (!path) return Promise.resolve();
-    return queuePhotoDelete(path).then(function () {
-      if (!getClient()) return 0;
-      return session().then(function (s) { return s ? flushPhotoDeletes() : 0; }).catch(function () { return 0; });
-    });
+    if (!path || !TCM_CONFIG.SUPABASE_URL) return Promise.resolve();
+    return queuePhotoDelete(path).then(flushIfSignedIn);
+  }
+  function removeRecordPhotos(store, id) {
+    if (!PHOTO_STORES[store] || !id || !TCM_CONFIG.SUPABASE_URL) return Promise.resolve();
+    return queuePhotoDelete('record:' + PHOTO_STORES[store] + '/' + id).then(flushIfSignedIn);
   }
 
-  return { photoSrc: photoSrc, removePhoto: removePhoto, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
+  return { photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
 })();

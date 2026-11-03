@@ -266,8 +266,7 @@ function previewRecipePhoto(input) {
 }
 function deleteRecipe(id) {
   if (!confirm('Delete this recipe?')) return;
-  var r = State.recipes.find(function (x) { return x.id === id; });
-  if (r && r.photo_path) Sync.removePhoto(r.photo_path);
+  Sync.removeRecordPhotos('recipes', id);
   Promise.all((S.linesByRecipe[id] || []).map(function (l) { return DB.remove('recipe_ingredients', l.id); })).then(function () { return DB.remove('recipes', id); }).then(function () { closeSheet(); return loadAll(); }).then(function () { showScreen('recipes'); });
 }
 
@@ -324,8 +323,11 @@ function scanBarcode() {
 // Local match first (works offline), then the cloud lookup, then Open Food Facts directly.
 // codes: normalised candidates from Scanner.candidates, best first.
 function lookupBarcode(codes) {
-  var known = State.ingredients.find(function (i) { return codes.some(function (c) { return Scanner.sameProduct(c, i.upc); }); });
-  if (known) return Promise.resolve({ name: known.name, known: true, code: known.upc });
+  var hit = null;
+  var known = State.ingredients.find(function (i) {
+    return [i.upc].concat(i.barcodes || []).some(function (b) { return codes.some(function (c) { if (Scanner.sameProduct(c, b)) { hit = c; return true; } }); });
+  });
+  if (known) return Promise.resolve({ name: known.name, known: true, code: hit });
   var tryCode = function (i) {
     if (i >= codes.length) return Promise.resolve({ name: null, code: codes[0] });
     return remoteLookup(codes[i]).catch(function () { return { name: null }; }).then(function (res) {
@@ -350,7 +352,7 @@ function onBarcode(text, format) {
   var codes = Scanner.candidates(text, format);
   if (!codes.length) return toast('That number does not look like a barcode');
   Scanner.stop();
-  var mine = scanSession;
+  var mine = ++scanSession; // a newer lookup (or closing the sheet) supersedes this one
   var m = document.getElementById('scanMsg'); if (m) m.textContent = 'Found ' + codes[0] + ', looking it up...';
   lookupBarcode(codes).catch(function () { return { name: null, code: codes[0] }; }).then(function (res) {
     // The user closed the scanner (or opened another form) while this was in flight.
@@ -412,7 +414,10 @@ function commitPantryReview(scanNext) {
     if (!name) return; // blank line = skip it
     chain = chain.then(function () { return ensureIngredient(name, it.nutrition, it.upc); }).then(function (ing) {
       // Remember the barcode on whichever ingredient the user picked, so the next scan is instant.
-      var save = it.upc && !ing.upc ? DB.put('ingredients', Object.assign(ing, { upc: it.upc })) : Promise.resolve();
+      // Remember this barcode on the ingredient, even if it already has another (e.g. a second pack size).
+      var known = it.upc && (Scanner.sameProduct(ing.upc, it.upc) || (ing.barcodes || []).some(function (b) { return Scanner.sameProduct(b, it.upc); }));
+      var save = !it.upc || known ? Promise.resolve()
+        : DB.put('ingredients', ing.upc ? Object.assign(ing, { barcodes: (ing.barcodes || []).concat(it.upc) }) : Object.assign(ing, { upc: it.upc }));
       return save.then(function () { return addToPantry(ing.id, qty, unit, guessLocation(ing), 'bought'); });
     });
   });
@@ -558,9 +563,8 @@ function viewPhoto(id) {
 function deleteDiaryEntry(id) {
   var e = State.diary.find(function (x) { return x.id === id; });
   if (!e || !confirm('Delete this diary entry' + (e.photo_data || e.photo_path ? ' and its photo' : '') + '?')) return;
-  var path = e.photo_path;
-  e.photo_data = null;
-  DB.put('diary_entries', e, { silent: true }).then(function () { return DB.remove('diary_entries', id); }).then(function () { return Sync.removePhoto(path); }).then(loadAll).then(refresh);
+  DB.update('diary_entries', id, function (cur) { if (!cur) return null; cur.deleted = true; cur.photo_data = null; return cur; })
+    .then(function () { return Sync.removeRecordPhotos('diary_entries', id); }).then(loadAll).then(refresh);
 }
 function saveProfileNotes(id) { var p = State.profiles.find(function (x) { return x.id === id; }); p.notes = document.getElementById('profNotes').value; DB.put('diet_profiles', p).then(function () { toast('Saved'); }); }
 // Everything the digest, the copyable summary and the Claude draft are built from.

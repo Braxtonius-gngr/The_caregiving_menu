@@ -79,6 +79,32 @@ var DB = (function () {
     if (value === undefined) return get('meta', key).then(function (r) { return r ? r.value : null; });
     return tx('meta', 'readwrite', function (os) { os.put({ id: key, value: value }); });
   }
+  // Atomic read-modify-write of one record: fn gets the current record (or undefined)
+  // and returns the new one, or null/undefined to leave it untouched. The record and
+  // its outbox entry are written in the same transaction, so a write that waited on
+  // the network can never overwrite a change (such as a deletion) made in the meantime.
+  function update(store, id, fn, opts) {
+    opts = opts || {};
+    return open().then(function (d) {
+      return new Promise(function (resolve, reject) {
+        var t = d.transaction(opts.silent ? [store] : [store, 'outbox'], 'readwrite');
+        var os = t.objectStore(store);
+        var out = null;
+        var req = os.get(id);
+        req.onsuccess = function () {
+          var next = fn(req.result);
+          if (!next) return;
+          next.updated_at = new Date().toISOString();
+          if (next.deleted == null) next.deleted = false;
+          os.put(next); out = next;
+          if (!opts.silent) t.objectStore('outbox').put({ id: store + ':' + next.id, store: store, record: next });
+        };
+        t.oncomplete = function () { resolve(out); };
+        t.onerror = function () { reject(t.error); };
+      });
+    });
+  }
+
   // Read-modify-write of one meta value inside a single readwrite transaction,
   // so two overlapping updates cannot overwrite each other.
   function metaUpdate(key, fn) {
@@ -101,5 +127,5 @@ var DB = (function () {
   function clearOutbox(ids) { return tx('outbox', 'readwrite', function (os) { ids.forEach(function (id) { os.delete(id); }); }); }
   function wipe() { return open().then(function (d) { d.close(); dbp = null; return new Promise(function (res) { var r = indexedDB.deleteDatabase(NAME); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; }); }); }
 
-  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, metaUpdate: metaUpdate, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe };
+  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, metaUpdate: metaUpdate, update: update, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe };
 })();

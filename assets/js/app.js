@@ -41,8 +41,9 @@ function ensureIngredient(name, nutrition, upc) {
 
 function addToPantry(ingredientId, qty, unit, location, event, extra) {
   var here = (S.pantryByIng[ingredientId] || []).filter(function (p) { return p.location === location; });
-  // A purchase with no unit (e.g. from the shopping list) tops up the existing record in its unit.
-  if (!unit && here.length) unit = here[0].unit || '';
+  // A unitless purchase ("2 carrots") is a count. It may top up a record kept in a count
+  // unit such as "each", but never one kept in grams or cups.
+  if (!unit) { var countRec = here.find(function (p) { return Units.kind(p.unit) === 'count'; }); if (countRec) unit = countRec.unit || ''; }
   var existing = here.find(function (p) { return (p.unit || '') === (unit || ''); });
   var rec = existing || { ingredient_id: ingredientId, qty: 0, unit: unit, location: location || 'pantry' };
   rec.qty = (rec.qty || 0) + (qty || 0);
