@@ -125,4 +125,11 @@ t('stitchPages: far-apart pieces join only when unambiguous', function () {
   assert.strictEqual(amb.length, 6); // two open recipes, two loose pages: leave all for review
   assert.strictEqual(amb.filter(function (x) { return !x.complete; }).length, 4);
 });
+t('stitchPages: skipped photos keep their place and join nothing', function () {
+  var P = function (s, e) { return { starts_mid: s, ends_incomplete: e }; }, X = { skip: true };
+  // open A, skip, loose B, skip, open C, skip, loose D: two open and two loose, so nothing joins
+  var g = Logic.stitchPages([P(0, 1), X, P(1, 0), X, P(0, 1), X, P(1, 0)]);
+  assert.deepStrictEqual(pagesOf(g), [[0], [2], [4], [6]]);
+  assert.deepStrictEqual(pagesOf(Logic.stitchPages([P(0, 1), X, P(1, 0)])), [[0, 2]]); // one each: still joined
+});
 console.log(n + ' tests passed');

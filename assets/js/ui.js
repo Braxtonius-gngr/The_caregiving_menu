@@ -315,9 +315,10 @@ function scanImage(kind, fileOrBlob) {
     .catch(function (e) { toast('Scan failed: ' + e.message); });
 }
 function downscale(file, max) {
-  return new Promise(function (resolve) {
+  return new Promise(function (resolve, reject) {
     var img = new Image(); var url = URL.createObjectURL(file);
     img.onload = function () { var s = Math.min(1, max / Math.max(img.width, img.height)); var c = document.createElement('canvas'); c.width = img.width * s; c.height = img.height * s; c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', 0.82)); };
+    img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('This photo could not be opened.')); };
     img.src = url;
   });
 }
@@ -325,7 +326,7 @@ function downscale(file, max) {
 // Many saved photos at once. Each photo is read on its own; pages that look cut off are
 // matched up (Logic.stitchPages) and re-read together; every recipe is saved straight
 // away, and anything the reader was unsure about gets review_flag for a later look.
-var BATCH_MAX = 20;
+var BATCH_MAX = 20, BATCH_PAGES_MAX = 6; // the brain reads at most 6 photos in one call
 function batchImportRecipes() {
   if (!Sync.enabled()) return toast('Configure Supabase first (Settings)');
   document.getElementById('scanBatch').click();
@@ -352,19 +353,21 @@ function runRecipeBatch(files) {
   }
   function worker() { if (next >= total) return Promise.resolve(); var i = next++; return readOne(i).then(worker); }
   Promise.all([worker(), worker()]).then(function () {
-    var ok = [], failed = 0, empty = 0;
-    reads.forEach(function (r, i) {
-      if (r.error) failed++;
-      else if (!r.title && !(r.ingredients || []).length && !(r.steps || []).length) empty++;
-      else ok.push(i);
+    var failed = 0, empty = 0;
+    // Skipped photos keep their place, so pages on either side of one never look adjacent.
+    var pages = reads.map(function (r) {
+      if (r.error) { failed++; return { skip: true }; }
+      if (!r.title && !(r.ingredients || []).length && !(r.steps || []).length) { empty++; return { skip: true }; }
+      return { starts_mid: !!r.starts_mid_recipe, ends_incomplete: !!r.ends_incomplete };
     });
-    var groups = Logic.stitchPages(ok.map(function (i) { return { starts_mid: !!reads[i].starts_mid_recipe, ends_incomplete: !!reads[i].ends_incomplete }; }));
+    var groups = Logic.stitchPages(pages);
     var saved = 0, flagged = 0, chain = Promise.resolve();
     say('Saving ' + groups.length + ' recipe' + (groups.length === 1 ? '' : 's') + '...');
     groups.forEach(function (g) {
-      var idx = g.pages.map(function (k) { return ok[k]; });
+      var idx = g.pages;
       chain = chain.then(function () {
         if (idx.length === 1) return { draft: reads[idx[0]], incomplete: !g.complete };
+        if (idx.length > BATCH_PAGES_MAX) return { draft: joinDrafts(idx.map(function (i) { return reads[i]; })), incomplete: !g.complete };
         // Several pages: read them together so steps split across a page break join up.
         return Sync.brain('parse_recipe', { images: idx.map(function (i) { return shots[i]; }), batch: true, ingredients: known })
           .then(function (d) { return { draft: d, incomplete: d.starts_mid_recipe || d.ends_incomplete }; },

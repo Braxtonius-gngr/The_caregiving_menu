@@ -137,9 +137,10 @@ var Logic = (function () {
   // in the order the photos were picked. A page that ends incomplete is joined to an
   // unused page that starts mid-recipe: the next photo first, then the one before it.
   // Leftover pieces are joined anywhere in the batch only when the match is unambiguous
-  // (one open recipe, one loose page). Returns [{ pages: [i...], complete: bool }].
+  // (one open recipe, one loose page). A page with skip (unreadable, or no recipe) keeps
+  // its position but joins nothing. Returns [{ pages: [i...], complete: bool }].
   function stitchPages(pages) {
-    var used = pages.map(function () { return false; }), groups = [];
+    var used = pages.map(function (p) { return !!p.skip; }), groups = [];
     function isLoose(i) { return i >= 0 && i < pages.length && !used[i] && pages[i].starts_mid; }
     function extend(g) {
       var last = g.pages[g.pages.length - 1];
