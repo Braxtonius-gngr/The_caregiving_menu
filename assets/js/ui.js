@@ -344,15 +344,31 @@ function batchEl(id) {
   var sheet = document.getElementById('sheet'), el = document.getElementById(id);
   return el && sheet && !sheet.classList.contains('hidden') ? el : null;
 }
+// Capture order is the best guess at page order (a page and the next are usually shot
+// back to back). Use each photo's EXIF capture time when every photo has one; file dates
+// can be reset by saving or downloading, so they are only the fallback.
+function orderByCapture(files) {
+  return Promise.all(files.map(function (f) {
+    return f.slice(0, 131072).arrayBuffer().then(Logic.exifTakenAt, function () { return null; });
+  })).then(function (taken) {
+    var exif = taken.every(function (t) { return t != null; });
+    var key = files.map(function (f, i) { return exif ? taken[i] : f.lastModified; });
+    return files.map(function (f, i) { return i; })
+      .sort(function (a, b) { return (key[a] - key[b]) || files[a].name.localeCompare(files[b].name); })
+      .map(function (i) { return files[i]; });
+  });
+}
 function runRecipeBatch(files) {
   batchRunning = true;
-  // Capture order is the best guess at page order (a page and the next one are usually shot back to back).
-  files.sort(function (a, b) { return (a.lastModified - b.lastModified) || a.name.localeCompare(b.name); });
+  var total = files.length;
+  openSheet('<h2 style="margin-top:0">Importing ' + total + ' photo' + (total === 1 ? '' : 's') + '</h2>' +
+    '<p id="batchMsg">Getting the photos in order...</p><progress id="batchBar" max="' + total + '" value="0" style="width:100%"></progress>' +
+    '<p class="muted">Recipes save as they finish. You can close this; the import keeps going while the app is open.</p>');
+  orderByCapture(files).then(function (sorted) { readBatch(sorted); }, function (e) { batchRunning = false; toast('Import stopped: ' + e.message); });
+}
+function readBatch(files) {
   var total = files.length, known = State.ingredients.map(function (i) { return i.name; });
   var shots = [], reads = [], done = 0, next = 0;
-  openSheet('<h2 style="margin-top:0">Importing ' + total + ' photo' + (total === 1 ? '' : 's') + '</h2>' +
-    '<p id="batchMsg">Reading photos...</p><progress id="batchBar" max="' + total + '" value="0" style="width:100%"></progress>' +
-    '<p class="muted">Recipes save as they finish. You can close this; the import keeps going while the app is open.</p>');
   function say(text) { var m = batchEl('batchMsg'), b = batchEl('batchBar'); if (m) m.textContent = text; if (b) b.value = done; }
   function readOne(i) {
     return downscale(files[i], 1600).then(function (d) { shots[i] = d; return Sync.brain('parse_recipe', { image: d, batch: true, ingredients: known }); })

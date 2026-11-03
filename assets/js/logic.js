@@ -157,10 +157,41 @@ var Logic = (function () {
     var open = groups.filter(function (g) { return pages[g.pages[g.pages.length - 1]].ends_incomplete; });
     var loose = pages.map(function (p, i) { return i; }).filter(function (i) { return !used[i]; });
     if (open.length === 1 && loose.length === 1) { used[loose[0]] = true; open[0].pages.push(loose[0]); extend(open[0]); }
-    pages.forEach(function (p, i) { if (!used[i]) { used[i] = true; var g = { pages: [i] }; extend(g); groups.push(g); } });
+    // Whatever is left starts mid-recipe. Pages that carry on start their chains first,
+    // so a middle page still collects the last page even when the first page is missing.
+    var rest = pages.map(function (p, i) { return i; }).filter(function (i) { return !used[i]; });
+    rest.sort(function (a, b) { return (pages[b].ends_incomplete ? 1 : 0) - (pages[a].ends_incomplete ? 1 : 0) || a - b; });
+    rest.forEach(function (i) { if (!used[i]) { used[i] = true; var g = { pages: [i] }; extend(g); groups.push(g); } });
     groups.forEach(function (g) { g.complete = !pages[g.pages[0]].starts_mid && !pages[g.pages[g.pages.length - 1]].ends_incomplete; });
     return groups.sort(function (a, b) { return a.pages[0] - b.pages[0]; });
   }
 
-  return { DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages };
+  // When a JPEG was taken, from its EXIF DateTimeOriginal (or DateTime), as a sortable
+  // number; null when there is no EXIF date. Reads only the bytes given (the file's start).
+  function exifTakenAt(buf) {
+    try {
+      var v = new DataView(buf), off = 2;
+      if (v.getUint16(0) !== 0xFFD8) return null;
+      while (off + 4 <= v.byteLength) {
+        var marker = v.getUint16(off), size = v.getUint16(off + 2);
+        if (marker === 0xFFDA) return null;
+        if (marker === 0xFFE1 && v.getUint32(off + 4) === 0x45786966) return tiffDate(v, off + 10);
+        off += 2 + size;
+      }
+    } catch (e) { /* truncated or not a JPEG */ }
+    return null;
+  }
+  function tiffDate(v, t) {
+    var le = v.getUint16(t) === 0x4949;
+    var u16 = function (o) { return v.getUint16(o, le); }, u32 = function (o) { return v.getUint32(o, le); };
+    function find(ifd, tag) { var n = u16(ifd); for (var k = 0; k < n; k++) { var e = ifd + 2 + k * 12; if (u16(e) === tag) return e; } return -1; }
+    function text(e) { var s = ''; for (var k = 0; k < 19; k++) s += String.fromCharCode(v.getUint8(t + u32(e + 8) + k)); return s; }
+    var ifd0 = t + u32(t + 4), when = null, exifPtr = find(ifd0, 0x8769);
+    if (exifPtr > -1) { var e = find(t + u32(exifPtr + 8), 0x9003); if (e > -1) when = text(e); }
+    if (!when) { var d = find(ifd0, 0x0132); if (d > -1) when = text(d); }
+    var m = when && when.match(/^(\d{4}):(\d\d):(\d\d) (\d\d):(\d\d):(\d\d)$/);
+    return m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : null;
+  }
+
+  return { DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt };
 })();
