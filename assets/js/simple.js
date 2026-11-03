@@ -87,7 +87,7 @@ function simpleOther() {
   var p = simpleProfile();
   openSheet('<h2 style="margin-top:0">What did you eat?</h2>' +
     '<input id="lText" class="simple-input" placeholder="For example: soup and crackers">' +
-    '<label>Photo (optional)</label><input id="lPhoto" type="file" accept="image/*" capture="environment">' +
+    '<label>Photo (optional)</label><input id="lPhoto" type="file" accept="image/*">' +
     '<input id="lRecipe" type="hidden" value=""><input id="lPort" type="hidden" value="1"><input id="lWho" type="hidden" value="' + p.id + '">' +
     '<input id="lKcal" type="hidden" value=""><input id="lNa" type="hidden" value="">' +
     '<div class="btn-row"><button class="btn simple-btn" onclick="if (document.getElementById(\'lText\').value.trim()) saveLog(); else toast(\'Type a few words first\')">Save</button><button class="btn ghost simple-btn" onclick="closeSheet()">Cancel</button></div>');

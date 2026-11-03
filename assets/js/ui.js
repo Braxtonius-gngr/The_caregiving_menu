@@ -280,11 +280,14 @@ function renderScan() {
     '<div class="big-btn" onclick="scanBarcode()"><span class="ico">&#9646;&#9646;&#9646;</span>Barcode<div class="muted">packaged item</div></div>' +
     '<div class="big-btn" onclick="pasteRecipe()"><span class="ico">&#128279;</span>Link / paste<div class="muted">URL or text</div></div>' +
     '</div>' +
+    '<div class="btn-row"><button class="btn ghost" onclick="scanPhoto(\'recipe\', true)">&#128444; Recipe from saved photo</button><button class="btn ghost" onclick="scanPhoto(\'receipt\', true)">&#128444; Receipt from saved photo</button></div>' +
     '<h2>Manual</h2><div class="btn-row"><button class="btn ghost" onclick="editRecipe()">Type a recipe</button><button class="btn ghost" onclick="editPantryItem()">Add pantry item</button><button class="btn ghost" onclick="logFood()">Log a meal</button></div>' +
-    '<input id="scanFile" type="file" accept="image/*" capture="environment" class="hidden" onchange="onScanFile(this)">';
+    '<input id="scanFile" type="file" accept="image/*" capture="environment" class="hidden" onchange="onScanFile(this)">' +
+    '<input id="scanLibrary" type="file" accept="image/*" class="hidden" onchange="onScanFile(this)">';
 }
 var scanKind = 'recipe';
-function scanPhoto(kind) { scanKind = kind; if (!Sync.enabled()) return toast('Configure Supabase first (Settings)'); document.getElementById('scanFile').click(); }
+// fromLibrary opens the saved-photos picker; otherwise the camera opens directly.
+function scanPhoto(kind, fromLibrary) { scanKind = kind; if (!Sync.enabled()) return toast('Configure Supabase first (Settings)'); document.getElementById(fromLibrary ? 'scanLibrary' : 'scanFile').click(); }
 function onScanFile(input) {
   var file = input.files[0]; if (!file) return;
   scanImage(scanKind, file);
@@ -498,7 +501,7 @@ function logFood() {
     '<label>Recipe (or leave blank and describe below)</label><select id="lRecipe"><option value="">—</option>' + State.recipes.map(function (r) { return '<option value="' + r.id + '">' + esc(r.title) + '</option>'; }).join('') + '</select>' +
     '<label>Or describe it</label><input id="lText" placeholder="two eggs and toast">' +
     '<div class="row"><div class="grow"><label>Portion</label><select id="lPort"><option value="0.5">½</option><option value="1" selected>1</option><option value="1.5">1½</option><option value="2">2</option></select></div><div class="grow"><label>Who</label><select id="lWho"><option value="">me</option>' + State.profiles.map(function (p) { return '<option value="' + p.id + '" ' + (State.activeProfile === p.id ? 'selected' : '') + '>' + esc(p.person_name) + '</option>'; }).join('') + '</select></div></div>' +
-    '<label>Photo (optional)</label><input id="lPhoto" type="file" accept="image/*" capture="environment">' +
+    '<label>Photo (optional)</label><input id="lPhoto" type="file" accept="image/*">' +
     '<div class="row"><div class="grow"><label>kcal (if known)</label><input id="lKcal" type="number"></div><div class="grow"><label>sodium mg</label><input id="lNa" type="number"></div></div>' +
     '<div class="btn-row"><button class="btn" onclick="saveLog()">Log</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
 }
