@@ -19,3 +19,18 @@ jobs:
           node-version: 22
       # No install step: the checks and unit tests use only Node built-ins.
       - run: npm test
+
+  functions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      # Type-check the Edge Functions in a scratch copy, so Deno does not trip over the
+      # repo's test-only package.json.
+      - run: |
+          mkdir -p /tmp/fn && cp -r supabase/functions /tmp/fn/
+          echo '{"nodeModulesDir":"auto"}' > /tmp/fn/deno.json
+          cd /tmp/fn && deno check functions/brain/index.ts functions/lookup/index.ts

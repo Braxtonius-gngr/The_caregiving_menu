@@ -21,13 +21,18 @@ Conventions for anyone (human or agent) changing this repo.
 | `assets/js/ui.js` | Every screen and sheet. |
 | `assets/js/simple.js` | The large-text simple view for one person, locked on a device. |
 | `assets/js/app.js` | Boot, data loading, write actions, sample data. |
-| `supabase/migrations` | Schema and RLS. Every synced table needs `id`, `household_id`, `updated_at`, `deleted`. |
+| `supabase/migrations` | Schema and RLS. Every synced table needs `id`, `household_id`, `updated_at`, `deleted`. Never edit a migration that has been merged; add the next number. |
+| `supabase/config.toml` | Local stack settings for `supabase start` (realtime and studio are off; the app does not use them). |
+| `scripts/setup-supabase.sh` | One-command setup of a hosted project. |
+| `tests/live` | App and function tests against a real Supabase stack (see tests/README.md). |
 | `supabase/functions/brain` | All Claude calls, one JSON schema per mode. |
 | `supabase/functions/lookup` | Open Food Facts and USDA lookups. |
 
 ## Rules of thumb
 
 - Local IndexedDB is the source of truth. Every write goes through `DB.put`, which queues it for sync. Deletes are soft (`deleted: true`).
+- A write that happens after waiting on the network uses `DB.update(store, id, fn)`, which re-reads and writes atomically, so it cannot undo a change made meanwhile.
+- Only one sync runs at a time (`Sync.run` is single-flight).
 - A new field on a synced record needs a matching column in a new migration, or the upsert fails.
 - New script files must be added to the `SHELL` list in `sw.js`; `npm run check` enforces this.
 - Keep AI behind the Edge Function. Never put an API key in the client.
@@ -35,4 +40,4 @@ Conventions for anyone (human or agent) changing this repo.
 
 ## Before finishing
 
-Run `npm test`. It checks syntax, local references, that inline handlers resolve to globals, and runs the logic tests.
+Run `npm test`. It checks syntax, local references, that inline handlers resolve to globals, and runs the logic tests. If you touched sync, the schema or the functions, also run the live tests in `tests/` against `supabase start`.

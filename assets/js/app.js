@@ -119,17 +119,24 @@ function renderAuthBox() {
   var box = document.getElementById('authBox'); if (!box) return;
   Sync.session().then(function (s) {
     if (s) Sync.inviteCode().then(function (c) { var el = document.getElementById('inviteCode'); if (el) el.textContent = c; }).catch(function () {});
-    box.innerHTML = s ? '<p>Signed in as <b>' + esc(s.user.email) + '</b></p><p class="muted">Household invite code: <b id="inviteCode">...</b>. Family members sign in, then enter it below to share this kitchen.</p><div class="row"><input id="joinCode" placeholder="Join with a code" class="grow"><button class="btn sm" onclick="Sync.joinHousehold(document.getElementById(\'joinCode\').value.trim()).then(syncNow).then(function(){toast(\'Joined\');renderSettingsAgain()}).catch(function(e){toast(e.message)})">Join</button></div><div class="btn-row"><button class="btn sm" onclick="syncNow()">Sync now</button><button class="btn sm ghost" onclick="Sync.signOut().then(function(){renderSettingsAgain()})">Sign out</button></div>'
+    box.innerHTML = s ? '<p>Signed in as <b>' + esc(s.user.email) + '</b></p><p id="syncError" class="note' + (lastSyncError ? '' : ' hidden') + '">' + (lastSyncError ? 'Last sync failed: ' + esc(lastSyncError) : '') + '</p><p class="muted">Household invite code: <b id="inviteCode">...</b>. Family members sign in, then enter it below to share this kitchen.</p><div class="row"><input id="joinCode" placeholder="Join with a code" class="grow"><button class="btn sm" onclick="Sync.joinHousehold(document.getElementById(\'joinCode\').value.trim()).then(syncNow).then(function(){toast(\'Joined\');renderSettingsAgain()}).catch(function(e){toast(e.message)})">Join</button></div><div class="btn-row"><button class="btn sm" onclick="syncNow()">Sync now</button><button class="btn sm ghost" onclick="copySetupLink()">Copy setup link for another device</button><button class="btn sm ghost" onclick="Sync.signOut().then(function(){renderSettingsAgain()})">Sign out</button></div>'
       : '<label>Email for a sign-in link</label><input id="authEmail" type="email"><div class="btn-row"><button class="btn sm" onclick="Sync.signIn(document.getElementById(\'authEmail\').value).then(function(){toast(\'Check your email\')}).catch(function(e){toast(e.message)})">Send link</button></div>';
   });
 }
 function renderSettingsAgain() { showScreen('settings'); }
+var lastSyncError = null;
 function syncNow() {
   var dot = document.getElementById('syncDot');
-  return Sync.run().then(function (r) {
+  return Sync.joinPendingInvite().then(function (joined) { if (joined) toast('Joined your household'); }, function (e) { toast('Could not join: ' + e.message); })
+    .then(function () { return Sync.run(); }).then(function (r) {
     dot.classList.toggle('on', r.signedIn); dot.title = r.signedIn ? 'Synced' : 'Local only';
     if (r.pulled || r.photos) return loadAll().then(refresh);
-  }).catch(function (e) { dot.classList.remove('on'); dot.title = 'Sync error: ' + e.message; });
+  }).then(function () { lastSyncError = null; }, function (e) {
+    // Keep the error visible: a sync that keeps failing must never look like it worked.
+    lastSyncError = (e && e.message) || String(e);
+    dot.classList.remove('on'); dot.classList.add('err'); dot.title = 'Sync error: ' + lastSyncError;
+    var el = document.getElementById('syncError'); if (el) { el.textContent = 'Last sync failed: ' + lastSyncError; el.classList.remove('hidden'); }
+  }).then(function () { if (!lastSyncError) dot.classList.remove('err'); });
 }
 
 /* ---------- sample data ---------- */
@@ -254,6 +261,8 @@ var _origShowScreen = showScreen;
 showScreen = function (name, arg) { if (State.simple && simpleProfile()) name = 'simple'; S.lastArg = arg; _origShowScreen(name, arg); if (name === 'settings') renderAuthBox(); hydratePhotos(); };
 
 document.addEventListener('DOMContentLoaded', function () {
+  try { if (Sync.applySetupLink()) setTimeout(function () { toast(Sync.pendingInvite() ? 'Cloud connected. Sign in (Settings) to join your household.' : 'Cloud connected. Sign in in Settings.'); }, 400); }
+  catch (e) { setTimeout(function () { toast('That setup link did not work: ' + e.message); }, 400); }
   Promise.all([DB.meta('active_profile'), DB.meta('simple_mode')]).then(function (m) { State.activeProfile = m[0]; State.simple = m[1]; return loadAll(); }).then(function () {
     applySimpleChrome();
     showScreen('home');

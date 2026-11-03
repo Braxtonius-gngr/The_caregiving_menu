@@ -4,11 +4,59 @@ var Sync = (function () {
   var client = null;
   var SYNCED = ['ingredients', 'recipes', 'recipe_ingredients', 'recipe_variations', 'pantry_items', 'diet_profiles', 'profile_rules', 'diary_entries', 'shopping_list', 'usage_log'];
 
-  function enabled() { return !!(TCM_CONFIG.SUPABASE_URL && TCM_CONFIG.SUPABASE_ANON_KEY && window.supabase); }
+  // Where the cloud lives: details saved on this device (Settings or a setup link) win,
+  // then the values baked into config.js. The anon key is public by design; RLS guards data.
+  var LS_CONFIG = 'tcm_cloud', LS_INVITE = 'tcm_pending_invite';
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+  function config() {
+    var saved = null;
+    try { saved = JSON.parse(lsGet(LS_CONFIG) || 'null'); } catch (e) {}
+    if (saved && saved.url && saved.key) return { url: saved.url, key: saved.key, source: 'device' };
+    return { url: TCM_CONFIG.SUPABASE_URL, key: TCM_CONFIG.SUPABASE_ANON_KEY, source: 'file' };
+  }
+  function configured() { var c = config(); return !!(c.url && c.key); }
+  function enabled() { return configured() && !!window.supabase; }
+  function validUrl(u) { return /^https:\/\/[^\s/]+/.test(u) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(u); }
+  function saveConfig(url, key) {
+    url = String(url || '').trim().replace(/\/+$/, ''); key = String(key || '').trim();
+    if (!validUrl(url)) throw new Error('That does not look like a Supabase URL (https://...supabase.co).');
+    if (key.length < 20) throw new Error('Paste the full anon (public) key.');
+    lsSet(LS_CONFIG, JSON.stringify({ url: url, key: key })); client = null;
+  }
+  function clearConfig() { lsSet(LS_CONFIG, null); lsSet(LS_INVITE, null); client = null; }
+
+  // Setup links carry the cloud details and, optionally, a household invite code:
+  //   https://host/app/#connect=<base64url JSON {u, k, i}>
+  function setupLink(invite) {
+    var c = config();
+    var payload = btoa(JSON.stringify({ u: c.url, k: c.key, i: invite || undefined })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return location.href.split('#')[0].split('?')[0] + '#connect=' + payload;
+  }
+  // Returns true if the page was opened from a setup link (and applies it).
+  function applySetupLink() {
+    var m = location.hash.match(/^#connect=([A-Za-z0-9_-]+)$/);
+    if (!m) return false;
+    history.replaceState(null, '', location.pathname + location.search);
+    var data = JSON.parse(atob(m[1].replace(/-/g, '+').replace(/_/g, '/')));
+    saveConfig(data.u, data.k);
+    if (data.i) lsSet(LS_INVITE, String(data.i));
+    return true;
+  }
+  // After sign-in on a device set up from a link, join the household it was meant for.
+  function joinPendingInvite() {
+    var code = lsGet(LS_INVITE);
+    if (!code || !enabled()) return Promise.resolve(false);
+    return session().then(function (s) {
+      if (!s) return false;
+      return joinHousehold(code).then(function () { lsSet(LS_INVITE, null); return true; });
+    });
+  }
+  function pendingInvite() { return lsGet(LS_INVITE); }
 
   function getClient() {
     if (!enabled()) return null;
-    if (!client) client = window.supabase.createClient(TCM_CONFIG.SUPABASE_URL, TCM_CONFIG.SUPABASE_ANON_KEY);
+    if (!client) { var c = config(); client = window.supabase.createClient(c.url, c.key); }
     return client;
   }
 
@@ -280,13 +328,13 @@ var Sync = (function () {
   // Always queue, even if the Supabase library failed to load this session;
   // the network call waits for a signed-in sync.
   function removePhoto(path) {
-    if (!path || !TCM_CONFIG.SUPABASE_URL) return Promise.resolve();
+    if (!path || !configured()) return Promise.resolve();
     return queuePhotoDelete(path).then(flushIfSignedIn);
   }
   function removeRecordPhotos(store, id) {
-    if (!PHOTO_STORES[store] || !id || !TCM_CONFIG.SUPABASE_URL) return Promise.resolve();
+    if (!PHOTO_STORES[store] || !id || !configured()) return Promise.resolve();
     return queuePhotoDelete('record:' + PHOTO_STORES[store] + '/' + id).then(flushIfSignedIn);
   }
 
-  return { photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
+  return { config: config, configured: configured, saveConfig: saveConfig, clearConfig: clearConfig, setupLink: setupLink, applySetupLink: applySetupLink, joinPendingInvite: joinPendingInvite, pendingInvite: pendingInvite, photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
 })();

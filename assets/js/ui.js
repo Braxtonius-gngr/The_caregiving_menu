@@ -650,7 +650,12 @@ function addQuestionsToNotes() {
 /* ---------- Settings ---------- */
 function renderSettings() {
   var cloud = Sync.enabled();
-  return '<h2>Cloud sync</h2><div class="card">' + (cloud ? '<div id="authBox">Checking...</div>' : '<p class="muted">Not configured. Put your Supabase URL and anon key in <code>assets/js/config.js</code>, apply <code>supabase/migrations</code>, deploy the two Edge Functions. Until then everything stays on this device.</p>') + '</div>' +
+  return '<h2>Cloud sync</h2><div class="card">' + (cloud ? '<div id="authBox">Checking...</div>' + (Sync.config().source === 'device' ? '<p><button class="linkish" onclick="disconnectCloud()">Disconnect this device from the cloud</button></p>' : '')
+    : Sync.configured() ? '<p class="muted">Cloud details are set, but the sync library did not load. Check the connection and reload.</p>'
+    : '<p class="muted">Everything stays on this device until you connect your Supabase project. If someone sent you a setup link, just open it on this device instead.</p>' +
+      '<label>Project URL</label><input id="cfgUrl" placeholder="https://abcd1234.supabase.co" autocomplete="off">' +
+      '<label>Anon (public) key</label><input id="cfgKey" placeholder="eyJ..." autocomplete="off">' +
+      '<div class="btn-row"><button class="btn sm" onclick="connectCloud()">Connect</button></div>') + '</div>' +
     '<h2>Diet profiles</h2>' + State.profiles.map(function (p) {
       var rules = S.rulesByProfile[p.id] || [];
       return '<div class="card"><div class="row between"><h3>' + esc(p.person_name) + '</h3><button class="btn sm ghost" onclick="editProfile(\'' + p.id + '\')">Edit</button></div><div class="muted">' + (Object.keys(p.daily_targets || {}).length ? Object.keys(p.daily_targets).map(function (k) { return k.replace('_', ' ') + ' ≤ ' + p.daily_targets[k]; }).join(', ') : 'no daily targets') + '</div>' +
@@ -661,7 +666,21 @@ function renderSettings() {
     '<h2>Store aisle order</h2><div class="card"><p class="muted">The shopping list follows this order so you can walk the store once.</p>' + aisleOrder().map(function (a, i, all) {
       return '<div class="list-item"><div class="grow">' + esc(a) + '</div><button class="icon-btn" aria-label="Move ' + a + ' up" ' + (i === 0 ? 'disabled' : '') + ' onclick="moveAisle(\'' + a + '\',-1)">&uarr;</button><button class="icon-btn" aria-label="Move ' + a + ' down" ' + (i === all.length - 1 ? 'disabled' : '') + ' onclick="moveAisle(\'' + a + '\',1)">&darr;</button></div>';
     }).join('') + '</div>' +
-    '<h2>Data</h2><div class="card"><div class="btn-row"><button class="btn ghost" onclick="exportJSON()">Export JSON</button><button class="btn ghost" onclick="loadSample()">Load sample data</button><button class="btn danger" onclick="if(confirm(\'Erase everything on this device?\'))DB.wipe().then(function(){location.reload()})">Erase local data</button></div><p class="muted">v' + TCM_CONFIG.APP_VERSION + '</p></div>';
+    '<h2>Data</h2><div class="card"><div class="btn-row"><button class="btn ghost" onclick="exportJSON()">Export JSON</button><button class="btn ghost" onclick="document.getElementById(\'importFile\').click()">Restore from backup</button><input id="importFile" type="file" accept="application/json,.json" class="hidden" onchange="importJSON(this)"><button class="btn ghost" onclick="loadSample()">Load sample data</button><button class="btn danger" onclick="if(confirm(\'Erase everything on this device?\'))DB.wipe().then(function(){location.reload()})">Erase local data</button></div><p class="muted">v' + TCM_CONFIG.APP_VERSION + '</p></div>';
+}
+function connectCloud() {
+  try { Sync.saveConfig(document.getElementById('cfgUrl').value, document.getElementById('cfgKey').value); }
+  catch (e) { return toast(e.message); }
+  toast('Connected. Sign in to start syncing.'); showScreen('settings');
+}
+function disconnectCloud() {
+  if (!confirm('Disconnect this device? Data already on it stays here; it just stops syncing.')) return;
+  Sync.clearConfig(); location.reload();
+}
+function copySetupLink() {
+  Sync.inviteCode().then(function (code) {
+    copyText(Sync.setupLink(code), 'Setup link copied. Anyone who signs in with it joins your household, so share it only with family.');
+  }).catch(function (e) { toast(e.message); });
 }
 function describeRule(r) {
   if (r.kind === 'avoid_ingredient') return 'Avoid ' + ((S.ingById[r.ingredient_id] || {}).name || '?') + (r.reason ? ' · ' + r.reason : '');
@@ -739,11 +758,63 @@ function fetchNutrition(id) {
   var i = S.ingById[id]; toast('Looking up...');
   Sync.lookup('usda', i.name).then(function (res) { if (!res || res.kcal_100g == null) return toast('No match'); ['kcal_100g', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sodium_mg', 'sugar_g', 'potassium_mg'].forEach(function (k) { if (res[k] != null) document.getElementById('i-' + k).value = res[k]; }); i.nutrition_source = 'usda'; toast('Filled from USDA: ' + res.description); }).catch(function (e) { toast(e.message); });
 }
+// Backup keys (State names) -> IndexedDB stores.
+// Fields that point at another record's id (rewired when a backup is re-keyed).
+var BACKUP_REFS = ['recipe_id', 'ingredient_id', 'profile_id', 'for_profile_id'];
+var PHOTO_BACKUP_KEYS = ['recipes', 'diary']; // only these tables have photo_path
+var BACKUP_STORES = { ingredients: 'ingredients', recipes: 'recipes', lines: 'recipe_ingredients', variations: 'recipe_variations', pantry: 'pantry_items', profiles: 'diet_profiles', rules: 'profile_rules', diary: 'diary_entries', shopping: 'shopping_list', usage: 'usage_log' };
+// Merge a backup into this device. Records with the same id are replaced; everything is
+// queued for sync like a normal edit. Photos stored inside the backup upload again.
+function importJSON(input) {
+  var file = input.files[0]; input.value = '';
+  if (!file) return;
+  file.text().then(function (text) {
+    var data;
+    try { data = JSON.parse(text); } catch (e) { throw new Error('That file is not a backup from this app.'); }
+    var keys = Object.keys(BACKUP_STORES).filter(function (k) { return Array.isArray(data[k]); });
+    if (!keys.length) throw new Error('That file is not a backup from this app.');
+    var total = keys.reduce(function (n, k) { return n + data[k].length; }, 0);
+    if (!confirm('Restore ' + total + ' records from ' + (data.exported_at || 'this backup').slice(0, 10) + '? Matching records on this device are replaced; nothing else is removed.')) return;
+    return DB.meta('household_id').then(function (here) {
+      // Ids are global. A backup from another household would collide with rows that
+      // household still owns, so it gets fresh ids with every reference rewired.
+      var rekey = !!data.household_id && data.household_id !== here;
+      var idMap = {};
+      if (rekey) keys.forEach(function (k) { data[k].forEach(function (r) { if (r && r.id) idMap[r.id] = DB.uuid(); }); });
+      var map = function (v) { return v && idMap[v] ? idMap[v] : v; };
+      var writes = [];
+      keys.forEach(function (k) {
+        data[k].forEach(function (rec) {
+          if (!rec || !rec.id) return;
+          rec = Object.assign({}, rec);
+          delete rec.household_id; delete rec.fts;
+          if (rekey) BACKUP_REFS.concat('id').forEach(function (f) { if (f in rec) rec[f] = map(rec[f]); });
+          // A photo carried in the backup uploads again here; another household's stored
+          // photo is not readable from this one, so that link is dropped.
+          if (PHOTO_BACKUP_KEYS.indexOf(k) > -1 && (rec.photo_data || rekey)) rec.photo_path = null;
+          writes.push(DB.put(BACKUP_STORES[k], rec));
+        });
+      });
+      return Promise.all(writes);
+    }).then(function (writes) { return loadAll().then(function () { return writes; }); }).then(function (writes) {
+      toast('Restored ' + writes.length + ' records'); refresh();
+      if (Sync.enabled()) syncNow();
+    });
+  }).catch(function (e) { toast(e.message); });
+}
+// The backup records which household it came from, so a restore elsewhere can re-key it.
+function buildBackup() {
+  return DB.meta('household_id').then(function (hid) {
+    var out = { exported_at: new Date().toISOString(), version: TCM_CONFIG.APP_VERSION, household_id: hid || null };
+    Object.keys(BACKUP_STORES).forEach(function (k) { out[k] = State[k]; });
+    return out;
+  });
+}
 function exportJSON() {
-  var out = { exported_at: new Date().toISOString(), version: TCM_CONFIG.APP_VERSION };
-  ['ingredients', 'recipes', 'lines', 'variations', 'pantry', 'profiles', 'rules', 'diary', 'shopping', 'usage'].forEach(function (k) { out[k] = State[k]; });
-  var blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
-  var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'caregiving-menu-' + todayISO() + '.json'; a.click();
+  buildBackup().then(function (out) {
+    var blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'caregiving-menu-' + todayISO() + '.json'; a.click();
+  });
 }
 
 /* ---------- AI helpers (cloud only) ---------- */

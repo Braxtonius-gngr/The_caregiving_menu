@@ -5,8 +5,8 @@
 // Secrets (supabase secrets set ...):
 //   ANTHROPIC_API_KEY   required
 //   CLAUDE_MODEL        optional, defaults to claude-opus-5-5
-import Anthropic from "npm:@anthropic-ai/sdk";
-import { createClient } from "npm:@supabase/supabase-js@2";
+import Anthropic from "npm:@anthropic-ai/sdk@1.3.0";
+import { createClient } from "npm:@supabase/supabase-js@2.118.0";
 import { corsHeaders, json } from "../_shared/cors.ts";
 
 const MODEL = Deno.env.get("CLAUDE_MODEL") ?? "claude-opus-5-5";
