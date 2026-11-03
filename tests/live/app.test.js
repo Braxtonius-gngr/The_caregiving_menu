@@ -20,7 +20,7 @@ const admin = (p, init = {}) => fetch(env.API_URL + p, Object.assign({}, init, {
 const rows = (table, q) => admin('/rest/v1/' + table + '?' + q);
 const objects = prefix => admin('/storage/v1/object/list/photos', { method: 'POST', body: JSON.stringify({ prefix, limit: 1000 }) });
 // Mirrors ensure_household(): invite memberships first, then newest.
-async function householdOf(userId) { const m = await rows('members', 'select=household_id&user_id=eq.' + userId + '&order=via_invite.desc,created_at.desc'); return m[0] && m[0].household_id; }
+async function householdOf(userId) { const m = await rows('members', 'select=household_id&user_id=eq.' + userId + '&order=via_invite.desc,joined_at.desc'); return m[0] && m[0].household_id; }
 
 async function user(name) {
   const email = name + '-' + RUN + '@example.com';
@@ -43,7 +43,7 @@ function serve() {
 
 async function device(browser, app, u, opts = {}) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  const key = 'sb-' + new URL(env.API_URL).hostname.split('.')[0] + '-auth-token';
+  const key = 'tcm-auth:' + new URL(env.API_URL).host; // Sync.authStorageKey
   if (u) await ctx.addInitScript(([k, s]) => { localStorage.setItem(k, s); }, [key, JSON.stringify(u.session)]);
   if (!opts.unconfigured) await ctx.route('**/assets/js/config.js', r => r.fulfill({ contentType: 'application/javascript', body: `var TCM_CONFIG = { SUPABASE_URL: '${env.API_URL}', SUPABASE_ANON_KEY: '${env.ANON_KEY}', APP_VERSION: 'live-test' };` }));
   // Serve supabase-js locally so the test does not depend on the CDN.
@@ -94,9 +94,18 @@ const sync = p => p.evaluate(() => syncNow().then(() => Sync.run()).then(r => r,
   check('joined member downloads the photo', !!bThumb && bThumb.startsWith('data:image'));
   check('the invited household wins for a two-household member', (await householdOf(sibling.id)) === hid);
 
+  // 3b. Joining another household and then rejoining this one makes this one the choice again.
+  const C0 = await device(browser, app, outsider);
+  await sync(C0);
+  const otherCode = await C0.evaluate(() => Sync.inviteCode());
+  await B.evaluate(c => Sync.joinHousehold(c), otherCode);
+  const joinedOther = await householdOf(sibling.id);
+  await B.evaluate(c => Sync.joinHousehold(c), code);
+  check('rejoining a household makes it the choice for new devices', joinedOther !== hid && (await householdOf(sibling.id)) === hid);
+  await sync(B);
+
   // 4. Someone in another household sees and changes nothing, even asking directly.
-  const C = await device(browser, app, outsider);
-  await sync(C);
+  const C = C0;
   const leak = await C.evaluate(async ({ hid, p }) => {
     const c = Sync.getClient();
     const r = await c.from('recipes').select('id').eq('household_id', hid);
@@ -172,6 +181,18 @@ const sync = p => p.evaluate(() => syncNow().then(() => Sync.run()).then(r => r,
   check('original household is untouched', (await rows('recipes', 'select=id&household_id=eq.' + hid)).length === 4);
   check('restored photos are re-uploaded to the new household', fDiary.length === 1 && !!fDiary[0].photo_path && fDiary[0].photo_path.startsWith(fh + '/') && (await objects(fh + '/diary')).length === 1);
   fs.unlinkSync(tmp);
+
+  // 10. Restoring this household's own backup re-uploads photos without leaving the old copies.
+  await sync(A);
+  const before = (await objects(hid + '/diary')).length + (await objects(hid + '/recipes')).length;
+  const own = await A.evaluate(async () => { await loadAll(); return JSON.stringify(await buildBackup()); });
+  const tmp2 = path.join(require('os').tmpdir(), 'tcm-own-' + RUN + '.json'); fs.writeFileSync(tmp2, own);
+  await A.click('button[aria-label=Settings]'); await A.setInputFiles('#importFile', tmp2); await A.waitForTimeout(2500);
+  await sync(A); await sync(A);
+  const after = (await objects(hid + '/diary')).length + (await objects(hid + '/recipes')).length;
+  const linked = (await rows('diary_entries', 'select=photo_path&household_id=eq.' + hid + '&deleted=eq.false&photo_path=not.is.null')).length + (await rows('recipes', 'select=photo_path&household_id=eq.' + hid + '&photo_path=not.is.null')).length;
+  check('same-household restore leaves no extra photo copies', after === before && after === linked, before + ' -> ' + after + ' objects, ' + linked + ' linked');
+  fs.unlinkSync(tmp2);
 
   const errs = [A, B, C, D, E, F].flatMap(p => p.errors);
   check('no page errors', errs.length === 0, errs.join(' | '));

@@ -124,6 +124,15 @@ function renderAuthBox() {
   });
 }
 function renderSettingsAgain() { showScreen('settings'); }
+// Background sync: once per page, whenever the cloud is (or becomes) configured.
+var autoSyncStarted = false;
+function startAutoSync() {
+  if (autoSyncStarted || !Sync.enabled()) return;
+  autoSyncStarted = true;
+  syncNow();
+  window.addEventListener('online', syncNow);
+  setInterval(syncNow, 5 * 60 * 1000);
+}
 var lastSyncError = null;
 function syncNow() {
   var dot = document.getElementById('syncDot');
@@ -267,7 +276,7 @@ document.addEventListener('DOMContentLoaded', function () {
     applySimpleChrome();
     showScreen('home');
     handleShareTarget();
-    if (Sync.enabled()) { syncNow(); window.addEventListener('online', syncNow); setInterval(syncNow, 5 * 60 * 1000); }
+    startAutoSync();
   });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js');
 });

@@ -110,6 +110,30 @@ var DB = (function () {
     });
   }
 
+  // Apply rows pulled from the server. A record with an edit still waiting in the outbox
+  // is left alone (the local edit is newer and goes up on the next push); merge(row, local)
+  // can carry local-only fields such as photo bytes across. One transaction, so an edit
+  // made while the pull was in flight cannot be overwritten.
+  function reconcile(store, rows, merge) {
+    if (!rows.length) return Promise.resolve(0);
+    return open().then(function (d) {
+      return new Promise(function (resolve, reject) {
+        var t = d.transaction([store, 'outbox'], 'readwrite');
+        var os = t.objectStore(store), ob = t.objectStore('outbox'), applied = 0;
+        rows.forEach(function (row) {
+          var pend = ob.get(store + ':' + row.id);
+          pend.onsuccess = function () {
+            if (pend.result) return; // unpushed local edit wins
+            var cur = os.get(row.id);
+            cur.onsuccess = function () { os.put(merge ? merge(row, cur.result) : row); applied++; };
+          };
+        });
+        t.oncomplete = function () { resolve(applied); };
+        t.onerror = function () { reject(t.error); };
+      });
+    });
+  }
+
   // Read-modify-write of one meta value inside a single readwrite transaction,
   // so two overlapping updates cannot overwrite each other.
   function metaUpdate(key, fn) {
@@ -132,5 +156,5 @@ var DB = (function () {
   function clearOutbox(ids) { return tx('outbox', 'readwrite', function (os) { ids.forEach(function (id) { os.delete(id); }); }); }
   function wipe() { return open().then(function (d) { d.close(); dbp = null; return new Promise(function (res) { var r = indexedDB.deleteDatabase(NAME); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; }); }); }
 
-  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, metaUpdate: metaUpdate, update: update, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe };
+  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, metaUpdate: metaUpdate, update: update, reconcile: reconcile, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe };
 })();

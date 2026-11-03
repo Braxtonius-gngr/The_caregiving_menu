@@ -598,8 +598,9 @@ function digestText(d) {
 function weeklyDigest(pid, span) {
   span = span || 7;
   var d = digestData(pid, span);
+  d.token = (S.digestSeq = (S.digestSeq || 0) + 1);
   S.digest = d;
-  openSheet('<h2 style="margin-top:0">' + esc(d.prof.person_name) + ' · last ' + span + ' days</h2>' +
+  openSheet('<h2 style="margin-top:0" id="digestSheet" data-token="' + d.token + '">' + esc(d.prof.person_name) + ' · last ' + span + ' days</h2>' +
     '<div class="chips">' + [7, 14, 30].map(function (n) { return '<span class="chip ' + (n === span ? 'on' : '') + '" onclick="weeklyDigest(\'' + pid + '\',' + n + ')">' + n + ' days</span>'; }).join('') + '</div>' +
     '<p class="muted">' + plural(d.entries, 'entry', 'entries') + ' over ' + plural(d.days, 'day') + '. Daily averages:</p>' + dvTiles(d.avg, d.prof.daily_targets) +
     '<h3 style="margin-top:14px">Rules hit</h3>' + (d.hits.length ? d.hits.map(function (h) { return '<div class="note">' + esc(h.dish + ': ' + h.reasons.join('; ')) + '</div>'; }).join('') : '<p class="muted">' + (d.rules.length ? 'None.' : 'No rules set up yet.') + '</p>') +
@@ -621,7 +622,9 @@ function draftAppointmentSummary() {
   var payload = { person: d.prof.person_name, span_days: d.span, meals_logged: d.entries, days_logged: d.days, daily_averages: d.avg, daily_targets: d.targets, eaten_most: d.top, rule_hits: d.hits, rules: d.rules, dishes_that_fit: d.fits, caregiver_notes: d.prof.notes || '' };
   Sync.brain('appointment_summary', { digest: payload }).then(function (res) {
     // A newer draft started, or the caregiver moved on to another digest: drop this one.
-    if (token !== S.summaryToken || S.digest !== d) return;
+    var marker = document.getElementById('digestSheet');
+    var open = marker && marker.dataset.token === String(d.token) && !document.getElementById('sheet').classList.contains('hidden');
+    if (token !== S.summaryToken || S.digest !== d || !open) return;
     document.getElementById('toast').classList.add('hidden');
     S.summary = { res: res, d: d }; // actions below use this pair, never the current S.digest
     var list = function (title, items) { return items && items.length ? '<h3 style="margin-top:14px">' + title + '</h3>' + items.map(function (x) { return '<div>&bull; ' + esc(x) + '</div>'; }).join('') : ''; };
@@ -662,7 +665,7 @@ function renderSettings() {
       '<div class="btn-row"><button class="btn sm" onclick="connectCloud()">Connect</button></div>') + '</div>' +
     '<h2>Diet profiles</h2>' + State.profiles.map(function (p) {
       var rules = S.rulesByProfile[p.id] || [];
-      return '<div class="card"><div class="row between"><h3>' + esc(p.person_name) + '</h3><button class="btn sm ghost" onclick="editProfile(\'' + p.id + '\')">Edit</button></div><div class="muted">' + (Object.keys(p.daily_targets || {}).length ? Object.keys(p.daily_targets).map(function (k) { return k.replace('_', ' ') + ' ≤ ' + p.daily_targets[k]; }).join(', ') : 'no daily targets') + '</div>' +
+      return '<div class="card"><div class="row between"><h3>' + esc(p.person_name) + '</h3><button class="btn sm ghost" onclick="editProfile(\'' + p.id + '\')">Edit</button></div><div class="muted">' + (Object.keys(p.daily_targets || {}).length ? Object.keys(p.daily_targets).map(function (k) { return esc(k.replace('_', ' ') + ' ≤ ' + p.daily_targets[k]); }).join(', ') : 'no daily targets') + '</div>' +
         (rules.length ? rules.map(function (r) { return '<div class="list-item"><span class="badge ' + (r.severity === 'hard' ? 'bad' : 'warn') + '">' + esc(r.severity) + '</span><div class="grow">' + esc(describeRule(r)) + (r.source ? ' <span class="muted">— ' + esc(r.source) + '</span>' : '') + '</div><button class="icon-btn" onclick="DB.remove(\'profile_rules\',\'' + r.id + '\').then(loadAll).then(refresh)">&times;</button></div>'; }).join('') : '<p class="muted">No rules yet.</p>') +
         '<div class="btn-row"><button class="btn sm" onclick="addRule(\'' + p.id + '\')">+ Rule</button><button class="btn sm ghost" onclick="starterPacks(\'' + p.id + '\')">Starter packs</button><button class="btn sm ghost" onclick="enableSimple(\'' + p.id + '\')">Simple view on this device</button></div></div>';
     }).join('') + '<div class="btn-row"><button class="btn" onclick="editProfile()">+ Add person</button></div>' +
@@ -675,7 +678,7 @@ function renderSettings() {
 function connectCloud() {
   try { Sync.saveConfig(document.getElementById('cfgUrl').value, document.getElementById('cfgKey').value); }
   catch (e) { return toast(e.message); }
-  toast('Connected. Sign in to start syncing.'); showScreen('settings');
+  toast('Connected. Sign in to start syncing.'); startAutoSync(); showScreen('settings');
 }
 function disconnectCloud() {
   if (!confirm('Disconnect this device? Data already on it stays here; it just stops syncing.')) return;
@@ -786,6 +789,11 @@ function sanitizeBackupRecord(rec) {
     if (k === 'photo_data') { if (IMAGE_RE.test(v)) out[k] = v; return; }
     if (k === 'photo_path') { out[k] = /^[0-9a-f-]{36}\/(diary|recipes)\/[A-Za-z0-9._-]+$/.test(v) ? v : null; return; }
     if (k === 'severity') { out[k] = v === 'hard' ? 'hard' : 'soft'; return; }
+    if (k === 'daily_targets') { // only known nutrients, only finite numbers
+      out[k] = {};
+      if (v && typeof v === 'object') Logic.NUTRIENTS.forEach(function (n) { var x = Number(v[n]); if (n in v && isFinite(x)) out[k][n] = x; });
+      return;
+    }
     if (typeof v === 'string' || typeof v === 'boolean' || typeof v === 'number') { out[k] = v; return; }
     if (Array.isArray(v) || typeof v === 'object') { try { out[k] = JSON.parse(JSON.stringify(v)); } catch (e) {} } // steps, aliases, targets, body
   });
@@ -823,8 +831,22 @@ function importJSON(input) {
           if (rekey) BACKUP_REFS.concat('id').forEach(function (f) { if (f in rec) rec[f] = map(rec[f]); });
           // A photo carried in the backup uploads again here; another household's stored
           // photo is not readable from this one, so that link is dropped.
-          if (PHOTO_BACKUP_KEYS.indexOf(k) > -1 && (rec.photo_data || rekey)) rec.photo_path = null;
-          writes.push(DB.put(BACKUP_STORES[k], rec));
+          var store = BACKUP_STORES[k];
+          if (PHOTO_BACKUP_KEYS.indexOf(k) > -1 && (rec.photo_data || rekey)) {
+            // Same household: the photo uploads again under a new name, so the copies it
+            // replaces (the backup's and this device's current one) are queued for removal.
+            var old = rekey ? null : rec.photo_path;
+            rec.photo_path = null;
+            if (!rekey) {
+              writes.push(DB.get(store, rec.id).then(function (local) {
+                if (old) Sync.removePhoto(old);
+                if (local && local.photo_path && local.photo_path !== old) Sync.removePhoto(local.photo_path);
+                return DB.put(store, rec);
+              }));
+              return;
+            }
+          }
+          writes.push(DB.put(store, rec));
         });
       });
       return Promise.all(writes);
