@@ -11,12 +11,16 @@ The full design lives in [docs/design.md](docs/design.md).
 | Area | Offline | With cloud |
 |---|---|---|
 | Recipes: add, edit, search, filter by fit / meal / grocery type | yes | synced |
+| Recipe photos (kept from a scanned card, or added by hand) | kept on the device | uploaded to the private bucket and shared across devices |
 | "Cook tonight", "One trip away", "Use it up" | yes | |
 | "I cooked this" subtracts from the pantry | yes | |
-| Shopping list grouped by aisle; checking an item adds it to the pantry | yes | |
+| Shopping list in your store's aisle order (set in Settings), shareable to texts or notes; checking an item adds it to the pantry | yes | |
 | Restock suggestions from par levels and recent usage | yes | |
 | Diet profiles, rules, starter packs, ✓ ⚠ ✕ badges | yes | |
-| Food diary with daily-value bars, weekly digest | yes | synced |
+| Food diary with daily-value bars | yes | synced |
+| Appointment summary for a person over 7, 14 or 30 days, to share or copy | plain summary | Claude drafts a brief with questions to ask |
+| Simple view: a large-text screen for one person, locked on their device | yes | |
+| Share to the app from other Android apps: links, text, or a photo of a recipe, receipt or meal | links prefill; meal photos log to the diary | links and recipe/receipt photos are read by Claude |
 | Diary photos | kept on the device | uploaded to a private bucket, visible on every household device, and cached for offline viewing |
 | Paste a recipe as text | basic parser | Claude parses it |
 | Recipe photo, receipt photo, recipe URL | | Claude parses it |
@@ -46,6 +50,14 @@ Try it without any setup: **Settings → Load sample data**.
 
 The AI function uses Claude Opus 5.5 by default (`CLAUDE_MODEL` secret overrides it) and turns on Anthropic's server-side fallback, so a request a safety filter declines is retried on a recommended model instead of failing. Only signed-in household members can call it.
 
+## Setting up a device for the person you care for
+
+1. Open the app on their phone or tablet and add it to the home screen.
+2. Sign in with your household (Settings), so it shares your recipes and diary.
+3. In Settings, under their profile, tap **Simple view on this device**.
+
+The device then opens straight to their large-text screen: today's key numbers in plain words, dishes that fit their rules with a one-tap "I ate this" (with Undo), and "I ate something else". **Exit simple view** at the bottom asks for confirmation before showing the full app again.
+
 ## Development
 
 No build step and nothing to install for the app. Serve the folder with any static server:
@@ -54,6 +66,8 @@ No build step and nothing to install for the app. Serve the folder with any stat
 python3 -m http.server 8000
 npm test   # syntax, references, inline handlers, and logic unit tests
 ```
+
+The same `npm test` runs on every pull request through GitHub Actions (`.github/workflows/test.yml`).
 
 See [AGENTS.md](AGENTS.md) for conventions.
 
