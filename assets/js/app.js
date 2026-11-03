@@ -3,8 +3,9 @@ function loadAll() {
   return Promise.all([
     DB.all('ingredients'), DB.all('recipes'), DB.all('recipe_ingredients'), DB.all('recipe_variations'),
     DB.all('pantry_items'), DB.all('diet_profiles'), DB.all('profile_rules'), DB.all('diary_entries'),
-    DB.all('shopping_list'), DB.all('usage_log')
+    DB.all('shopping_list'), DB.all('usage_log'), DB.meta('aisle_order')
   ]).then(function (r) {
+    State.aisleOrder = r[10] || [];
     State.ingredients = r[0]; State.recipes = r[1]; State.lines = r[2]; State.variations = r[3];
     State.pantry = r[4].filter(function (p) { return p.qty > 0; }); State.profiles = r[5]; State.rules = r[6];
     State.diary = r[7]; State.shopping = r[8]; State.usage = r[9];
@@ -200,19 +201,60 @@ function loadSample() {
 }
 
 /* ---------- boot ---------- */
+// Shared from another app. POST shares (with an optional photo) arrive via the service
+// worker as ?share=1; older GET shares carry ?url= or ?text= directly.
 function handleShareTarget() {
   var p = new URLSearchParams(location.search);
+  if (p.get('share') === '1') {
+    history.replaceState(null, '', location.pathname);
+    if (!('caches' in window)) return;
+    var base = new URL('./', location.href).href;
+    return caches.open('tcm-share').then(function (c) {
+      return Promise.all([c.match(base + '__share/meta'), c.match(base + '__share/image')]).then(function (r) {
+        var done = function () { return Promise.all([c.delete(base + '__share/meta'), c.delete(base + '__share/image')]); };
+        return Promise.all([r[0] ? r[0].json() : null, r[1] ? r[1].blob() : null]).then(function (v) { return done().then(function () { return v; }); });
+      });
+    }).then(function (v) {
+      var meta = v[0] || {}, image = v[1];
+      if (image) return askSharedPhoto(image);
+      openSharedText([meta.url, meta.text, meta.title].filter(Boolean).join('\n').trim());
+    }).catch(function () {});
+  }
   var shared = p.get('url') || p.get('text');
   if (!shared) return;
   history.replaceState(null, '', location.pathname);
-  showScreen('scan'); pasteRecipe(); document.getElementById('fPaste').value = shared;
+  openSharedText(shared);
+}
+function openSharedText(text) {
+  if (!text) return;
+  // A shared page usually puts its URL last in the text; prefer the URL if there is one.
+  var urlMatch = text.match(/https?:\/\/\S+/);
+  showScreen('scan'); pasteRecipe();
+  document.getElementById('fPaste').value = urlMatch ? urlMatch[0] : text;
+  if (Sync.enabled()) submitPaste(); // straight to the review screen
+}
+function askSharedPhoto(blob) {
+  S.sharedPhoto = blob;
+  showScreen('scan');
+  var cloud = Sync.enabled();
+  openSheet('<h2 style="margin-top:0">What is this photo?</h2><img class="photo-hero" alt="" src="' + URL.createObjectURL(blob) + '">' +
+    '<div class="btn-row"><button class="btn" onclick="logFoodWithSharedPhoto()">A meal for the diary</button>' +
+    '<button class="btn ghost" ' + (cloud ? '' : 'disabled ') + 'onclick="scanImage(\'recipe\', S.sharedPhoto)">A recipe</button>' +
+    '<button class="btn ghost" ' + (cloud ? '' : 'disabled ') + 'onclick="scanImage(\'receipt\', S.sharedPhoto)">A receipt</button></div>' +
+    (cloud ? '' : '<p class="muted">Reading recipes and receipts needs the cloud set up. The diary works offline.</p>'));
+}
+function logFoodWithSharedPhoto() {
+  logFood();
+  var note = document.createElement('p'); note.className = 'muted'; note.textContent = 'The shared photo is attached.';
+  document.getElementById('lPhoto').after(note);
 }
 
 var _origShowScreen = showScreen;
-showScreen = function (name, arg) { S.lastArg = arg; _origShowScreen(name, arg); if (name === 'settings') renderAuthBox(); if (name === 'diary') hydratePhotos(); };
+showScreen = function (name, arg) { if (State.simple && simpleProfile()) name = 'simple'; S.lastArg = arg; _origShowScreen(name, arg); if (name === 'settings') renderAuthBox(); hydratePhotos(); };
 
 document.addEventListener('DOMContentLoaded', function () {
-  DB.meta('active_profile').then(function (p) { State.activeProfile = p; return loadAll(); }).then(function () {
+  Promise.all([DB.meta('active_profile'), DB.meta('simple_mode')]).then(function (m) { State.activeProfile = m[0]; State.simple = m[1]; return loadAll(); }).then(function () {
+    applySimpleChrome();
     showScreen('home');
     handleShareTarget();
     if (Sync.enabled()) { syncNow(); window.addEventListener('online', syncNow); setInterval(syncNow, 5 * 60 * 1000); }

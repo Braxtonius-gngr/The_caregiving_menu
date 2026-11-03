@@ -67,7 +67,7 @@ var Sync = (function () {
           if (r.error) throw r.error;
           r.data.forEach(function (row) { if (row.updated_at > newest) newest = row.updated_at; });
           n += r.data.length;
-          if (store !== 'diary_entries') return DB.bulkPut(store, r.data);
+          if (!PHOTO_STORES[store]) return DB.bulkPut(store, r.data);
           // Keep the local photo copy when the server row still points at the same photo.
           return Promise.all(r.data.map(function (row) {
             return DB.get(store, row.id).then(function (local) {
@@ -81,26 +81,32 @@ var Sync = (function () {
     });
   }
 
-  // Diary photos taken offline (or before sign-in) carry photo_data but no photo_path.
-  // Upload them first so the rows pushed next already point at Storage.
+  // Which records carry a photo, and the Storage folder each one uses.
+  var PHOTO_STORES = { diary_entries: 'diary', recipes: 'recipes' };
+
+  // Photos taken offline (or before sign-in) carry photo_data but no photo_path.
+  // Each upload gets a fresh versioned name, so replacing a photo changes the path
+  // and other devices know to fetch the new one instead of keeping their old copy.
   function uploadPendingPhotos() {
     var c = getClient();
-    return Promise.all([DB.all('diary_entries'), householdId()]).then(function (res) {
-      var pending = res[0].filter(function (e) { return e.photo_data && !e.photo_path; }), hid = res[1];
-      var chain = Promise.resolve(0);
-      pending.forEach(function (e) {
-        chain = chain.then(function (n) {
-          var path = hid + '/diary/' + e.id + '.jpg';
-          return dataUrlToBlob(e.photo_data).then(function (blob) {
-            return c.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: true });
-          }).then(function (r) {
-            if (r.error) throw r.error;
-            // Re-read: the entry may have been deleted or edited while the upload ran.
-            return DB.get('diary_entries', e.id).then(function (cur) {
-              if (!cur || cur.deleted) return queuePhotoDelete(path).then(function () { return n; });
-              return attachPhotoPath(c, cur, path).then(function (ok) { return ok ? n + 1 : n; });
-            });
-          }).catch(function () { return n; }); // leave it pending; never block the rest of the sync
+    var stores = Object.keys(PHOTO_STORES);
+    return Promise.all([householdId()].concat(stores.map(function (st) { return DB.all(st); }))).then(function (res) {
+      var hid = res[0], chain = Promise.resolve(0);
+      stores.forEach(function (store, i) {
+        res[i + 1].filter(function (e) { return e.photo_data && !e.photo_path; }).forEach(function (e) {
+          chain = chain.then(function (n) {
+            var path = hid + '/' + PHOTO_STORES[store] + '/' + e.id + '-' + Date.now().toString(36) + '.jpg';
+            return dataUrlToBlob(e.photo_data).then(function (blob) {
+              return c.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+            }).then(function (r) {
+              if (r.error) throw r.error;
+              // Re-read: the record may have been deleted, edited or re-photographed meanwhile.
+              return DB.get(store, e.id).then(function (cur) {
+                if (!cur || cur.deleted || cur.photo_data !== e.photo_data) return queuePhotoDelete(path).then(function () { return n; });
+                return attachPhotoPath(c, store, cur, path).then(function (ok) { return ok ? n + 1 : n; });
+              });
+            }).catch(function () { return n; }); // leave it pending; never block the rest of the sync
+          });
         });
       });
       return chain;
@@ -109,20 +115,20 @@ var Sync = (function () {
 
   // Photo-only update. Never re-push the whole row: that would overwrite a deletion
   // made on another device. Only a row that is still live on the server gets the path.
-  function attachPhotoPath(c, cur, path) {
-    return c.from('diary_entries').update({ photo_path: path }).eq('id', cur.id).eq('deleted', false).select('id').then(function (r) {
+  function attachPhotoPath(c, store, cur, path) {
+    return c.from(store).update({ photo_path: path }).eq('id', cur.id).eq('deleted', false).select('id').then(function (r) {
       if (r.error) throw r.error;
-      if (r.data && r.data.length) { cur.photo_path = path; return DB.put('diary_entries', cur, { silent: true }).then(function () { return true; }); }
-      return c.from('diary_entries').select('id').eq('id', cur.id).then(function (q) {
+      if (r.data && r.data.length) { cur.photo_path = path; return DB.put(store, cur, { silent: true }).then(function () { return true; }); }
+      return c.from(store).select('id').eq('id', cur.id).then(function (q) {
         if (q.error) throw q.error;
         if (q.data && q.data.length) {
           // Deleted elsewhere: mirror the tombstone and drop the photo we just uploaded.
           cur.deleted = true; cur.photo_data = null;
-          return DB.put('diary_entries', cur, { silent: true }).then(function () { return queuePhotoDelete(path); }).then(function () { return false; });
+          return DB.put(store, cur, { silent: true }).then(function () { return queuePhotoDelete(path); }).then(function () { return false; });
         }
-        // Not on the server yet (logged mid-sync): it goes up whole with its next push.
+        // Not on the server yet (created mid-sync): it goes up whole with its next push.
         cur.photo_path = path;
-        return DB.put('diary_entries', cur).then(function () { return true; });
+        return DB.put(store, cur).then(function () { return true; });
       });
     });
   }
@@ -172,24 +178,27 @@ var Sync = (function () {
     return new Promise(function (resolve, reject) { var fr = new FileReader(); fr.onload = function () { resolve(fr.result); }; fr.onerror = reject; fr.readAsDataURL(blob); });
   }
 
-  // Returns a displayable src for a diary entry's photo: the local copy if we have one,
+  // Returns a displayable src for a record's photo: the local copy if we have one,
   // otherwise downloads it from Storage once and keeps it locally for offline viewing.
   var inflight = {};
-  function photoSrc(entry) {
-    if (entry.photo_data) return Promise.resolve(entry.photo_data);
-    if (!entry.photo_path) return Promise.resolve(null);
+  function photoSrc(rec, store) {
+    store = store || 'diary_entries';
+    if (rec.photo_data) return Promise.resolve(rec.photo_data);
+    if (!rec.photo_path) return Promise.resolve(null);
     var c = getClient();
     if (!c) return Promise.resolve(null);
-    if (inflight[entry.id]) return inflight[entry.id];
-    inflight[entry.id] = c.storage.from(BUCKET).download(entry.photo_path).then(function (r) {
+    var key = store + ':' + rec.id + ':' + rec.photo_path;
+    if (inflight[key]) return inflight[key];
+    inflight[key] = c.storage.from(BUCKET).download(rec.photo_path).then(function (r) {
       if (r.error) throw r.error;
       return blobToDataUrl(r.data);
     }).then(function (dataUrl) {
-      return DB.get('diary_entries', entry.id).then(function (rec) {
-        if (rec) { rec.photo_data = dataUrl; return DB.put('diary_entries', rec, { silent: true }); }
-      }).then(function () { entry.photo_data = dataUrl; return dataUrl; });
-    }).catch(function () { return null; }).then(function (src) { delete inflight[entry.id]; return src; });
-    return inflight[entry.id];
+      return DB.get(store, rec.id).then(function (cur) {
+        // Only cache it if the record still points at this photo.
+        if (cur && cur.photo_path === rec.photo_path) { cur.photo_data = dataUrl; return DB.put(store, cur, { silent: true }); }
+      }).then(function () { rec.photo_data = dataUrl; return dataUrl; });
+    }).catch(function () { return null; }).then(function (src) { delete inflight[key]; return src; });
+    return inflight[key];
   }
 
   // Photo deletions are queued in local meta and retried on every signed-in sync

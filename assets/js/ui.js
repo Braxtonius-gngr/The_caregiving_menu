@@ -3,6 +3,7 @@ var State = { ingredients: [], recipes: [], lines: [], variations: [], pantry: [
 var S = {}; // derived indexes, rebuilt by rebuildIndexes()
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
 function fmtQty(q, u) { if (q == null) return ''; var n = Math.round(q * 100) / 100; return n + (u ? ' ' + u : ''); }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
@@ -24,18 +25,29 @@ function rebuildIndexes() {
   });
 }
 
-function toast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(t._h); t._h = setTimeout(function () { t.classList.add('hidden'); }, 2200); }
+// toast(msg) or toast(msg, actionLabel, actionFn) for a short "Undo"-style action.
+function toast(msg, actionLabel, actionFn) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  if (actionLabel) {
+    var b = document.createElement('button'); b.className = 'toast-action'; b.textContent = actionLabel;
+    b.onclick = function () { t.classList.add('hidden'); actionFn(); };
+    t.appendChild(b);
+  }
+  t.classList.remove('hidden'); clearTimeout(t._h);
+  t._h = setTimeout(function () { t.classList.add('hidden'); }, actionLabel ? 6000 : 2200);
+}
 function openSheet(html) { document.getElementById('sheetBody').innerHTML = html; document.getElementById('sheet').classList.remove('hidden'); }
 var scanSession = 0; // bumped when the scanner opens or a sheet closes; late lookups compare against it
 function closeSheet() { scanSession++; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
 
-var TITLES = { home: 'Home', recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe' };
+var TITLES = { simple: '', home: 'Home', recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe' };
 var currentScreen = 'home';
 function showScreen(name, arg) {
   currentScreen = name;
   document.getElementById('screenTitle').textContent = TITLES[name] || name;
   document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
-  var fn = { home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe }[name];
+  var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe }[name];
   document.getElementById('screen').innerHTML = fn ? fn(arg) : '';
   window.scrollTo(0, 0);
 }
@@ -53,11 +65,11 @@ function recipeCard(r) {
   var info = S.recipeInfo[r.id];
   var miss = info.cov.missing.slice(0, 3).map(function (l) { return esc((S.ingById[l.ingredient_id] || {}).name || '?'); }).join(', ');
   return '<div class="card tappable row" onclick="showScreen(\'recipe\',\'' + r.id + '\')">' +
-    '<div class="ring" style="--pct:' + info.cov.pct + '"><span>' + info.cov.pct + '%</span></div>' +
+    (r.photo_data || r.photo_path ? '<img class="photo-thumb" alt="" data-photo="' + r.id + '" data-store="recipes"' + (r.photo_data ? ' src="' + r.photo_data + '"' : '') + '>' : '') +
     '<div class="grow"><h3>' + esc(r.title) + '</h3>' +
     '<div class="muted">' + (r.cuisine ? esc(r.cuisine) + ' · ' : '') + (info.nut.perServing.kcal ? '~' + info.nut.perServing.kcal + ' kcal/serving · ' : '') + info.cov.have + '/' + info.cov.total + ' on hand' + (miss ? ' · need ' + miss : '') + '</div>' +
     '<div class="chips" style="margin:4px 0 0">' + profileBadge(r.id) + (r.meal_type || []).map(function (m) { return '<span class="badge">' + esc(m) + '</span>'; }).join('') + '</div>' +
-    '</div></div>';
+    '</div><div class="ring" style="--pct:' + info.cov.pct + '" title="' + info.cov.pct + '% of ingredients on hand"><span>' + info.cov.pct + '%</span></div></div>';
 }
 function dvTiles(totals, targets) {
   var keys = ['kcal', 'sodium_mg', 'fiber_g', 'protein_g', 'sugar_g', 'potassium_mg'];
@@ -96,14 +108,46 @@ function renderHome() {
   if (open.length) html += '<h2>Shopping list (' + open.length + ')</h2>' + renderShoppingList(open);
   return html;
 }
-function renderShoppingList(items) {
+// Walk-the-store order. Each device keeps its own (stores differ); the default suits most US groceries.
+var DEFAULT_AISLES = ['produce', 'bakery', 'meat', 'dairy', 'pantry', 'spice', 'frozen', 'drink', 'other'];
+function aisleOrder() {
+  var saved = State.aisleOrder || [];
+  return saved.concat(DEFAULT_AISLES.filter(function (a) { return saved.indexOf(a) < 0; }));
+}
+function shoppingByAisle(items) {
   var byCat = {};
   items.forEach(function (s) { var cat = (S.ingById[s.ingredient_id] || {}).category || 'other'; (byCat[cat] = byCat[cat] || []).push(s); });
-  return Object.keys(byCat).sort().map(function (cat) {
-    return '<div class="card"><h3>' + esc(cat) + '</h3>' + byCat[cat].map(function (s) {
-      return '<div class="list-item"><input type="checkbox" style="width:auto" onchange="toggleShop(\'' + s.id + '\')"><div class="grow">' + esc((S.ingById[s.ingredient_id] || {}).name) + ' <span class="muted">' + fmtQty(s.qty, s.unit) + ' · ' + esc(s.reason || '') + '</span></div></div>';
+  return aisleOrder().filter(function (a) { return byCat[a]; }).map(function (a) { return { aisle: a, items: byCat[a] }; })
+    .concat(Object.keys(byCat).filter(function (c) { return aisleOrder().indexOf(c) < 0; }).map(function (c) { return { aisle: c, items: byCat[c] }; }));
+}
+function renderShoppingList(items) {
+  return shoppingByAisle(items).map(function (g) {
+    return '<div class="card"><h3>' + esc(g.aisle) + '</h3>' + g.items.map(function (s) {
+      return '<label class="list-item"><input type="checkbox" style="width:auto" onchange="toggleShop(\'' + s.id + '\')"><div class="grow">' + esc((S.ingById[s.ingredient_id] || {}).name) + ' <span class="muted">' + fmtQty(s.qty, s.unit) + ' · ' + esc((s.reason || '').replace(/_/g, ' ')) + '</span></div></label>';
     }).join('') + '</div>';
-  }).join('');
+  }).join('') + '<div class="btn-row"><button class="btn ghost sm" onclick="shareShoppingList()">Share list</button></div>';
+}
+function shoppingListText() {
+  return 'Shopping list\n' + shoppingByAisle(State.shopping.filter(function (s) { return !s.done; })).map(function (g) {
+    return '\n' + g.aisle.toUpperCase() + '\n' + g.items.map(function (s) { return '- ' + (S.ingById[s.ingredient_id] || {}).name + (s.qty ? ' (' + fmtQty(s.qty, s.unit) + ')' : ''); }).join('\n');
+  }).join('\n');
+}
+// Hand the list to texts, notes or email; fall back to the clipboard.
+function shareShoppingList() {
+  var text = shoppingListText();
+  if (navigator.share) return navigator.share({ title: 'Shopping list', text: text }).catch(function () {});
+  copyText(text, 'List copied');
+}
+function copyText(text, msg) {
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(function () { toast(msg || 'Copied'); }, function () { toast('Could not copy'); });
+  toast('Copy is not available here');
+}
+function moveAisle(aisle, dir) {
+  var order = aisleOrder(), i = order.indexOf(aisle), j = i + dir;
+  if (i < 0 || j < 0 || j >= order.length) return;
+  order.splice(i, 1); order.splice(j, 0, aisle);
+  State.aisleOrder = order;
+  DB.meta('aisle_order', order).then(refresh);
 }
 
 /* ---------- Recipes ---------- */
@@ -144,7 +188,7 @@ function renderRecipes() {
     '<div class="btn-row"><button class="btn" onclick="editRecipe()">+ New recipe</button></div>' +
     '<div id="recipeList">' + (list.length ? list.map(recipeCard).join('') : '<div class="empty">No matches.</div>' + buyHint) + '</div>';
 }
-function refreshList() { var el = document.getElementById('recipeList'); if (el) { var list = filteredRecipes(); el.innerHTML = list.length ? list.map(recipeCard).join('') : '<div class="empty">No matches.</div>'; } }
+function refreshList() { var el = document.getElementById('recipeList'); if (el) { var list = filteredRecipes(); el.innerHTML = list.length ? list.map(recipeCard).join('') : '<div class="empty">No matches.</div>'; hydratePhotos(); } }
 
 function renderRecipe(id) {
   S.lastArg = id;
@@ -154,7 +198,8 @@ function renderRecipe(id) {
   var vars = State.variations.filter(function (v) { return v.recipe_id === id; });
   var fitHtml = '';
   State.profiles.forEach(function (p) { var f = info.fits[p.id]; if (f.reasons.length) fitHtml += '<div class="note"><b>' + esc(p.person_name) + ':</b> ' + esc(f.reasons.join('; ')) + ' <button class="btn sm ghost" onclick="askSwaps(\'' + id + '\',\'' + p.id + '\')">Suggest swaps</button></div>'; });
-  return '<div class="card"><div class="row between"><h2 style="margin:0">' + esc(r.title) + '</h2><div class="ring" style="--pct:' + info.cov.pct + '"><span>' + info.cov.pct + '%</span></div></div>' +
+  return (r.photo_data || r.photo_path ? '<img class="photo-hero" alt="Photo of ' + esc(r.title) + '" data-photo="' + r.id + '" data-store="recipes"' + (r.photo_data ? ' src="' + r.photo_data + '"' : '') + '>' : '') +
+    '<div class="card"><div class="row between"><h2 style="margin:0">' + esc(r.title) + '</h2><div class="ring" style="--pct:' + info.cov.pct + '"><span>' + info.cov.pct + '%</span></div></div>' +
     '<div class="muted">' + [r.cuisine, r.servings ? r.servings + ' servings' : '', (r.prep_min || r.cook_min) ? ((r.prep_min || 0) + (r.cook_min || 0)) + ' min' : '', r.times_cooked ? 'cooked ' + r.times_cooked + 'x' : ''].filter(Boolean).map(esc).join(' · ') + '</div>' +
     '<div class="chips">' + profileBadge(id) + '</div>' + fitHtml +
     '<div class="btn-row"><button class="btn" onclick="cookedThis(\'' + id + '\')">I cooked this</button><button class="btn ghost" onclick="logFromRecipe(\'' + id + '\')">I ate this</button><button class="btn ghost" onclick="addMissingToList(\'' + id + '\')">Add missing to list</button><button class="btn ghost" onclick="editRecipe(\'' + id + '\')">Edit</button></div></div>' +
@@ -170,7 +215,9 @@ function renderRecipe(id) {
 }
 
 function editRecipe(id) {
+  S.pendingDraft = null; S.pendingPhoto = null;
   var r = id ? State.recipes.find(function (x) { return x.id === id; }) : { title: '', servings: 4, steps: [], meal_type: [] };
+  var hasPhoto = !!(r.photo_data || r.photo_path);
   var lines = id ? (S.linesByRecipe[id] || []).map(function (l) { return fmtQty(l.qty, l.unit) + ' ' + ((S.ingById[l.ingredient_id] || {}).name || '') + (l.prep_note ? ', ' + l.prep_note : ''); }).join('\n') : '';
   openSheet('<h2 style="margin-top:0">' + (id ? 'Edit' : 'New') + ' recipe</h2>' +
     '<label>Title</label><input id="fTitle" value="' + esc(r.title) + '">' +
@@ -180,6 +227,10 @@ function editRecipe(id) {
     '<label>Ingredients, one per line ("2 cups flour, sifted")</label><textarea id="fIng" rows="7">' + esc(lines) + '</textarea>' +
     '<label>Steps, one per line</label><textarea id="fSteps" rows="6">' + esc((r.steps || []).join('\n')) + '</textarea>' +
     '<label>Notes</label><textarea id="fNotes" rows="3">' + esc(r.notes || '') + '</textarea>' +
+    '<label>Photo</label><div class="row">' + '<img id="fPhotoPrev" class="photo-thumb' + (hasPhoto ? '' : ' hidden') + '" alt=""' + (r.photo_data ? ' src="' + r.photo_data + '"' : '') + '>' +
+    '<input id="fPhoto" type="file" accept="image/*" class="grow" onchange="previewRecipePhoto(this)"></div>' +
+    (hasPhoto ? '<label class="row" style="color:inherit"><input id="fPhotoRemove" type="checkbox" style="width:auto"> Remove photo</label>' : '') +
+    '<p class="muted hidden" id="fPhotoNote">The scanned photo will be kept with this recipe.</p>' +
     '<div class="btn-row"><button class="btn" onclick="saveRecipeForm(' + (id ? '\'' + id + '\'' : 'null') + ')">Save</button><button class="btn ghost" onclick="closeSheet()">Cancel</button>' + (id ? '<button class="btn danger" onclick="deleteRecipe(\'' + id + '\')">Delete</button>' : '') + '</div>');
 }
 function saveRecipeForm(id) {
@@ -190,11 +241,33 @@ function saveRecipeForm(id) {
   rec.meal_type = [].map.call(document.querySelectorAll('.meal-chip.on'), function (c) { return c.dataset.v; });
   rec.steps = v('fSteps').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
   rec.notes = v('fNotes').trim();
+  if (!id && S.pendingDraft) { rec.source_type = S.pendingDraft.source_type || 'manual'; if (S.pendingDraft.source_ref) rec.source_ref = S.pendingDraft.source_ref; }
   var lineTexts = v('fIng').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
-  saveRecipeWithLines(rec, lineTexts.map(Units.parseLine)).then(function (saved) { closeSheet(); toast('Saved'); return loadAll().then(function () { showScreen('recipe', saved.id); }); });
+  var file = document.getElementById('fPhoto').files[0];
+  var remove = document.getElementById('fPhotoRemove') && document.getElementById('fPhotoRemove').checked;
+  var photo = file ? downscale(file, 1280) : Promise.resolve(remove ? null : S.pendingPhoto);
+  photo.then(function (dataUrl) {
+    if (dataUrl || remove) {
+      // Replacing or removing: the old cloud copy is queued for deletion; a new one uploads on sync.
+      if (rec.photo_path) Sync.removePhoto(rec.photo_path);
+      rec.photo_path = null; rec.photo_data = dataUrl || null;
+    }
+    return saveRecipeWithLines(rec, lineTexts.map(Units.parseLine));
+  }).then(function (saved) {
+    closeSheet(); toast('Saved');
+    if (Sync.enabled() && saved.photo_data && !saved.photo_path) syncNow();
+    return loadAll().then(function () { showScreen('recipe', saved.id); });
+  });
+}
+function previewRecipePhoto(input) {
+  var f = input.files[0], img = document.getElementById('fPhotoPrev');
+  if (!f || !img) return;
+  img.src = URL.createObjectURL(f); img.classList.remove('hidden');
 }
 function deleteRecipe(id) {
   if (!confirm('Delete this recipe?')) return;
+  var r = State.recipes.find(function (x) { return x.id === id; });
+  if (r && r.photo_path) Sync.removePhoto(r.photo_path);
   Promise.all((S.linesByRecipe[id] || []).map(function (l) { return DB.remove('recipe_ingredients', l.id); })).then(function () { return DB.remove('recipes', id); }).then(function () { closeSheet(); return loadAll(); }).then(function () { showScreen('recipes'); });
 }
 
@@ -215,12 +288,18 @@ var scanKind = 'recipe';
 function scanPhoto(kind) { scanKind = kind; if (!Sync.enabled()) return toast('Configure Supabase first (Settings)'); document.getElementById('scanFile').click(); }
 function onScanFile(input) {
   var file = input.files[0]; if (!file) return;
-  toast('Reading photo...');
-  downscale(file, 1600).then(function (dataUrl) {
-    return Sync.brain(scanKind === 'receipt' ? 'parse_receipt' : 'parse_recipe', { image: dataUrl, ingredients: State.ingredients.map(function (i) { return i.name; }) });
-  }).then(function (res) { scanKind === 'receipt' ? reviewPantry((res.items || []).filter(function (i) { return i.is_food !== false; }), 'receipt') : reviewRecipe(res, 'photo'); })
-    .catch(function (e) { toast('Scan failed: ' + e.message); });
+  scanImage(scanKind, file);
   input.value = '';
+}
+// Recipe or receipt photo (from the camera, a file, or a share) -> cloud parse -> review screen.
+function scanImage(kind, fileOrBlob) {
+  closeSheet(); toast('Reading photo...');
+  var shot;
+  downscale(fileOrBlob, 1600).then(function (dataUrl) {
+    shot = dataUrl;
+    return Sync.brain(kind === 'receipt' ? 'parse_receipt' : 'parse_recipe', { image: dataUrl, ingredients: State.ingredients.map(function (i) { return i.name; }) });
+  }).then(function (res) { kind === 'receipt' ? reviewPantry((res.items || []).filter(function (i) { return i.is_food !== false; }), 'receipt') : reviewRecipe(res, 'photo', shot); })
+    .catch(function (e) { toast('Scan failed: ' + e.message); });
 }
 function downscale(file, max) {
   return new Promise(function (resolve) {
@@ -299,10 +378,15 @@ function localParse(text) {
   ls.forEach(function (l) { (/^[\d½¼¾]/.test(l) ? ing : steps).push(l); });
   return { title: title, servings: 4, ingredients: ing.map(Units.parseLine), steps: steps.map(function (s) { return s.replace(/^\d+[.)]\s*/, ''); }), confidence: 0.4 };
 }
-function reviewRecipe(draft, source) {
+function reviewRecipe(draft, source, photoDataUrl) {
   var lines = (draft.ingredients || []).map(function (l) { return fmtQty(l.qty, l.unit) + ' ' + (l.name || '') + (l.prep ? ', ' + l.prep : ''); }).join('\n');
+  editRecipe(); // resets pending state, so set it afterwards
   S.pendingDraft = Object.assign({ source_type: source }, draft);
-  editRecipe();
+  if (photoDataUrl) {
+    S.pendingPhoto = photoDataUrl;
+    var prev = document.getElementById('fPhotoPrev'); prev.src = photoDataUrl; prev.classList.remove('hidden');
+    document.getElementById('fPhotoNote').classList.remove('hidden');
+  }
   document.getElementById('fTitle').value = draft.title || '';
   document.getElementById('fServ').value = draft.servings || 4;
   document.getElementById('fCuis').value = draft.cuisine || '';
@@ -421,7 +505,8 @@ function saveLog() {
   if (rid) { var per = S.recipeInfo[rid].nut.perServing; Logic.NUTRIENTS.forEach(function (k) { e[k] = per[k]; }); e.estimate_source = 'recipe'; }
   if (v('lKcal')) { e.kcal = +v('lKcal'); e.estimate_source = 'manual'; }
   if (v('lNa')) e.sodium_mg = +v('lNa');
-  var file = document.getElementById('lPhoto').files[0];
+  var file = document.getElementById('lPhoto').files[0] || S.sharedPhoto;
+  S.sharedPhoto = null;
   var p = file ? downscale(file, 1280).then(function (d) { e.photo_data = d; }) : Promise.resolve();
   p.then(function () {
     if (!rid && text && Sync.enabled() && !v('lKcal')) {
@@ -448,11 +533,14 @@ function photoStatus(e) {
   return e.photo_path ? ' · &#9729; photo saved' : ' · photo uploads on next sync';
 }
 // Fill in thumbnails that only exist in the cloud. Called after the diary renders.
+// Fill in photos that only exist in the cloud. Runs after every screen render.
 function hydratePhotos() {
   document.querySelectorAll('img[data-photo]:not([src])').forEach(function (img) {
-    var e = State.diary.find(function (x) { return x.id === img.dataset.photo; });
-    if (!e) return;
-    Sync.photoSrc(e).then(function (src) { if (src && img.isConnected) img.src = src; });
+    var store = img.dataset.store || 'diary_entries';
+    var list = store === 'recipes' ? State.recipes : State.diary;
+    var rec = list.find(function (x) { return x.id === img.dataset.photo; });
+    if (!rec) return;
+    Sync.photoSrc(rec, store).then(function (src) { if (src && img.isConnected) img.src = src; });
   });
 }
 function viewPhoto(id) {
@@ -475,19 +563,81 @@ function deleteDiaryEntry(id) {
   DB.put('diary_entries', e, { silent: true }).then(function () { return DB.remove('diary_entries', id); }).then(function () { return Sync.removePhoto(path); }).then(loadAll).then(refresh);
 }
 function saveProfileNotes(id) { var p = State.profiles.find(function (x) { return x.id === id; }); p.notes = document.getElementById('profNotes').value; DB.put('diet_profiles', p).then(function () { toast('Saved'); }); }
-function weeklyDigest(pid) {
-  var since = Date.now() - 7 * 864e5;
-  var entries = State.diary.filter(function (e) { return e.for_profile_id === pid && new Date(e.eaten_at).getTime() >= since; });
-  var t = Logic.dayTotals(entries); var days = Math.max(1, new Set(entries.map(function (e) { return e.eaten_at.slice(0, 10); })).size);
+// Everything the digest, the copyable summary and the Claude draft are built from.
+function digestData(pid, span) {
+  var since = Date.now() - span * 864e5;
   var prof = State.profiles.find(function (x) { return x.id === pid; });
-  var rules = S.rulesByProfile[pid] || [];
+  var entries = State.diary.filter(function (e) { return e.for_profile_id === pid && new Date(e.eaten_at).getTime() >= since; });
+  var t = Logic.dayTotals(entries);
+  var days = Math.max(1, new Set(entries.map(function (e) { return e.eaten_at.slice(0, 10); })).size);
+  var avg = {}; Logic.NUTRIENTS.forEach(function (k) { avg[k] = Math.round(t[k] / days); });
+  var counts = {};
+  entries.forEach(function (e) { var r = e.recipe_id && State.recipes.find(function (x) { return x.id === e.recipe_id; }); var name = r ? r.title : (e.free_text || 'unnamed'); counts[name] = (counts[name] || 0) + 1; });
+  var top = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 6).map(function (n) { return { name: n, times: counts[n] }; });
   var hits = [];
-  State.recipes.forEach(function (r) { var f = S.recipeInfo[r.id].fits[pid]; if (f.level !== 'ok' && entries.some(function (e) { return e.recipe_id === r.id; })) hits.push(r.title + ': ' + f.reasons.join('; ')); });
-  var good = State.recipes.filter(function (r) { return S.recipeInfo[r.id].fits[pid].level === 'ok' && r.times_cooked; }).sort(function (a, b) { return b.times_cooked - a.times_cooked; }).slice(0, 3);
-  openSheet('<h2 style="margin-top:0">Last 7 days · ' + esc(prof.person_name) + '</h2><p class="muted">' + entries.length + ' entries over ' + days + ' day' + (days > 1 ? 's' : '') + '. Daily averages:</p>' + dvTiles({ kcal: t.kcal / days, sodium_mg: t.sodium_mg / days, fiber_g: t.fiber_g / days, protein_g: t.protein_g / days, sugar_g: t.sugar_g / days, potassium_mg: t.potassium_mg / days }, prof.daily_targets) +
-    '<h3 style="margin-top:14px">Rules hit</h3>' + (hits.length ? hits.map(function (h) { return '<div class="note">' + esc(h) + '</div>'; }).join('') : '<p class="muted">' + (rules.length ? 'None.' : 'No rules set up yet.') + '</p>') +
-    '<h3 style="margin-top:14px">Dishes that already fit</h3>' + (good.length ? good.map(function (r) { return '<div>&bull; ' + esc(r.title) + '</div>'; }).join('') : '<p class="muted">Cook a few things first.</p>') +
-    '<p class="note" style="margin-top:14px">This is a summary of what was logged, not medical advice. Bring it to her doctor or dietitian.</p><div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
+  State.recipes.forEach(function (r) { var f = S.recipeInfo[r.id].fits[pid]; if (f.level !== 'ok' && entries.some(function (e) { return e.recipe_id === r.id; })) hits.push({ dish: r.title, reasons: f.reasons }); });
+  var fits = State.recipes.filter(function (r) { return S.recipeInfo[r.id].fits[pid].level === 'ok'; }).sort(function (a, b) { return (b.times_cooked || 0) - (a.times_cooked || 0); }).slice(0, 5).map(function (r) { return r.title; });
+  var targets = {}; Logic.NUTRIENTS.forEach(function (k) { targets[k] = (prof.daily_targets || {})[k] || Logic.DV[k]; });
+  return { prof: prof, span: span, entries: entries.length, days: days, avg: avg, targets: targets, top: top, hits: hits, fits: fits, rules: (S.rulesByProfile[pid] || []).map(describeRule) };
+}
+var NUTRIENT_LABEL = { kcal: 'Calories', sodium_mg: 'Sodium (mg)', sugar_g: 'Sugar (g)', fiber_g: 'Fiber (g)', protein_g: 'Protein (g)', potassium_mg: 'Potassium (mg)', carbs_g: 'Carbs (g)', fat_g: 'Fat (g)' };
+function digestText(d) {
+  var L = [d.prof.person_name + ': food diary summary, last ' + d.span + ' days', plural(d.entries, 'meal') + ' logged on ' + plural(d.days, 'day') + '.', '', 'Daily averages (target):'];
+  ['kcal', 'sodium_mg', 'sugar_g', 'fiber_g', 'protein_g', 'potassium_mg'].forEach(function (k) { L.push('- ' + NUTRIENT_LABEL[k] + ': ' + d.avg[k] + ' (' + d.targets[k] + ')'); });
+  if (d.top.length) { L.push('', 'Eaten most:'); d.top.forEach(function (x) { L.push('- ' + x.name + ' x' + x.times); }); }
+  if (d.hits.length) { L.push('', 'Dishes outside the current rules:'); d.hits.forEach(function (h) { L.push('- ' + h.dish + ': ' + h.reasons.join('; ')); }); }
+  if (d.rules.length) { L.push('', 'Rules in the app:'); d.rules.forEach(function (r) { L.push('- ' + r); }); }
+  if (d.prof.notes) L.push('', 'Caregiver notes:', d.prof.notes);
+  L.push('', 'Estimates from a home food diary, not a medical record.');
+  return L.join('\n');
+}
+function weeklyDigest(pid, span) {
+  span = span || 7;
+  var d = digestData(pid, span);
+  S.digest = d;
+  openSheet('<h2 style="margin-top:0">' + esc(d.prof.person_name) + ' · last ' + span + ' days</h2>' +
+    '<div class="chips">' + [7, 14, 30].map(function (n) { return '<span class="chip ' + (n === span ? 'on' : '') + '" onclick="weeklyDigest(\'' + pid + '\',' + n + ')">' + n + ' days</span>'; }).join('') + '</div>' +
+    '<p class="muted">' + plural(d.entries, 'entry', 'entries') + ' over ' + plural(d.days, 'day') + '. Daily averages:</p>' + dvTiles(d.avg, d.prof.daily_targets) +
+    '<h3 style="margin-top:14px">Rules hit</h3>' + (d.hits.length ? d.hits.map(function (h) { return '<div class="note">' + esc(h.dish + ': ' + h.reasons.join('; ')) + '</div>'; }).join('') : '<p class="muted">' + (d.rules.length ? 'None.' : 'No rules set up yet.') + '</p>') +
+    '<h3 style="margin-top:14px">Dishes that already fit</h3>' + (d.fits.length ? d.fits.map(function (t) { return '<div>&bull; ' + esc(t) + '</div>'; }).join('') : '<p class="muted">Add a few recipes first.</p>') +
+    '<p class="note" style="margin-top:14px">A summary of what was logged, not medical advice. Bring it to ' + esc(d.prof.person_name) + '\'s doctor or dietitian.</p>' +
+    '<div class="btn-row"><button class="btn" onclick="shareDigest()">Share summary</button><button class="btn ghost" onclick="copyText(digestText(S.digest), \'Summary copied\')">Copy</button>' +
+    (Sync.enabled() ? '<button class="btn ghost" onclick="draftAppointmentSummary()">Draft with Claude</button>' : '') +
+    '<button class="btn ghost" onclick="closeSheet()">Close</button></div>');
+}
+function shareDigest() {
+  var text = digestText(S.digest);
+  if (navigator.share) return navigator.share({ title: S.digest.prof.person_name + ' food summary', text: text }).catch(function () {});
+  copyText(text, 'Summary copied');
+}
+// Claude turns the numbers into a short brief with questions to bring to the appointment.
+function draftAppointmentSummary() {
+  var d = S.digest; toast('Drafting...');
+  var payload = { person: d.prof.person_name, span_days: d.span, meals_logged: d.entries, days_logged: d.days, daily_averages: d.avg, daily_targets: d.targets, eaten_most: d.top, rule_hits: d.hits, rules: d.rules, dishes_that_fit: d.fits, caregiver_notes: d.prof.notes || '' };
+  Sync.brain('appointment_summary', { digest: payload }).then(function (res) {
+    document.getElementById('toast').classList.add('hidden');
+    S.summary = res;
+    var list = function (title, items) { return items && items.length ? '<h3 style="margin-top:14px">' + title + '</h3>' + items.map(function (x) { return '<div>&bull; ' + esc(x) + '</div>'; }).join('') : ''; };
+    openSheet('<h2 style="margin-top:0">For ' + esc(d.prof.person_name) + '\'s next appointment</h2><p>' + esc(res.headline) + '</p>' +
+      list('Patterns', res.patterns) + list('Worth watching', res.watch_items) + list('Questions to ask', res.questions_for_clinician) + list('Foods that already fit', res.foods_that_fit) +
+      '<p class="note" style="margin-top:14px">' + esc(res.caveats || 'Drafted from a home food diary. Not medical advice.') + '</p>' +
+      '<div class="btn-row"><button class="btn" onclick="shareSummary()">Share</button><button class="btn ghost" onclick="addQuestionsToNotes()">Add questions to notes</button><button class="btn ghost" onclick="weeklyDigest(\'' + d.prof.id + '\',' + d.span + ')">Back</button></div>');
+  }).catch(function (e) { toast(e.message); });
+}
+function summaryText(res, d) {
+  var sec = function (t, xs) { return xs && xs.length ? '\n' + t + ':\n' + xs.map(function (x) { return '- ' + x; }).join('\n') : ''; };
+  return d.prof.person_name + ', last ' + d.span + ' days\n' + res.headline + sec('Patterns', res.patterns) + sec('Worth watching', res.watch_items) + sec('Questions to ask', res.questions_for_clinician) + sec('Foods that already fit', res.foods_that_fit) + '\n\n' + (res.caveats || '');
+}
+function shareSummary() {
+  var text = summaryText(S.summary, S.digest);
+  if (navigator.share) return navigator.share({ title: 'Appointment notes', text: text }).catch(function () {});
+  copyText(text, 'Copied');
+}
+function addQuestionsToNotes() {
+  var p = S.digest.prof, qs = S.summary.questions_for_clinician || [];
+  if (!qs.length) return toast('No questions to add');
+  p.notes = (p.notes ? p.notes + '\n\n' : '') + 'Questions (' + todayISO() + '):\n' + qs.map(function (q) { return '- ' + q; }).join('\n');
+  DB.put('diet_profiles', p).then(function () { toast('Added to notes'); closeSheet(); return loadAll(); }).then(refresh);
 }
 
 /* ---------- Settings ---------- */
@@ -498,9 +648,12 @@ function renderSettings() {
       var rules = S.rulesByProfile[p.id] || [];
       return '<div class="card"><div class="row between"><h3>' + esc(p.person_name) + '</h3><button class="btn sm ghost" onclick="editProfile(\'' + p.id + '\')">Edit</button></div><div class="muted">' + (Object.keys(p.daily_targets || {}).length ? Object.keys(p.daily_targets).map(function (k) { return k.replace('_', ' ') + ' ≤ ' + p.daily_targets[k]; }).join(', ') : 'no daily targets') + '</div>' +
         (rules.length ? rules.map(function (r) { return '<div class="list-item"><span class="badge ' + (r.severity === 'hard' ? 'bad' : 'warn') + '">' + r.severity + '</span><div class="grow">' + esc(describeRule(r)) + (r.source ? ' <span class="muted">— ' + esc(r.source) + '</span>' : '') + '</div><button class="icon-btn" onclick="DB.remove(\'profile_rules\',\'' + r.id + '\').then(loadAll).then(refresh)">&times;</button></div>'; }).join('') : '<p class="muted">No rules yet.</p>') +
-        '<div class="btn-row"><button class="btn sm" onclick="addRule(\'' + p.id + '\')">+ Rule</button><button class="btn sm ghost" onclick="starterPacks(\'' + p.id + '\')">Starter packs</button></div></div>';
+        '<div class="btn-row"><button class="btn sm" onclick="addRule(\'' + p.id + '\')">+ Rule</button><button class="btn sm ghost" onclick="starterPacks(\'' + p.id + '\')">Starter packs</button><button class="btn sm ghost" onclick="enableSimple(\'' + p.id + '\')">Simple view on this device</button></div></div>';
     }).join('') + '<div class="btn-row"><button class="btn" onclick="editProfile()">+ Add person</button></div>' +
     '<h2>Ingredients (' + State.ingredients.length + ')</h2><div class="card"><p class="muted">Canonical names that recipes and pantry share. Nutrition is per 100 g.</p><div class="btn-row"><button class="btn sm ghost" onclick="listIngredients()">Browse / edit</button></div></div>' +
+    '<h2>Store aisle order</h2><div class="card"><p class="muted">The shopping list follows this order so you can walk the store once.</p>' + aisleOrder().map(function (a, i, all) {
+      return '<div class="list-item"><div class="grow">' + esc(a) + '</div><button class="icon-btn" aria-label="Move ' + a + ' up" ' + (i === 0 ? 'disabled' : '') + ' onclick="moveAisle(\'' + a + '\',-1)">&uarr;</button><button class="icon-btn" aria-label="Move ' + a + ' down" ' + (i === all.length - 1 ? 'disabled' : '') + ' onclick="moveAisle(\'' + a + '\',1)">&darr;</button></div>';
+    }).join('') + '</div>' +
     '<h2>Data</h2><div class="card"><div class="btn-row"><button class="btn ghost" onclick="exportJSON()">Export JSON</button><button class="btn ghost" onclick="loadSample()">Load sample data</button><button class="btn danger" onclick="if(confirm(\'Erase everything on this device?\'))DB.wipe().then(function(){location.reload()})">Erase local data</button></div><p class="muted">v' + TCM_CONFIG.APP_VERSION + '</p></div>';
 }
 function describeRule(r) {
@@ -546,7 +699,7 @@ var PACKS = {
   'Kidney-aware (NKF)': { targets: { potassium_mg: 2500, sodium_mg: 2000 }, rules: [{ kind: 'limit_nutrient', nutrient: 'potassium_mg', max_per_serving: 700, severity: 'soft', reason: 'NKF: discuss potassium with nephrologist' }, { kind: 'limit_nutrient', nutrient: 'sodium_mg', max_per_serving: 600, severity: 'soft', reason: 'NKF sodium guidance' }] }
 };
 function starterPacks(pid) {
-  openSheet('<h2 style="margin-top:0">Starter packs</h2><p class="muted">Pre-filled, editable rule sets based on public guidelines. They are a starting point for a conversation with her doctor, not a prescription.</p>' +
+  openSheet('<h2 style="margin-top:0">Starter packs</h2><p class="muted">Pre-filled, editable rule sets based on public guidelines. They are a starting point for a conversation with a doctor or dietitian, not a prescription.</p>' +
     Object.keys(PACKS).map(function (n) { return '<div class="card row between"><div><b>' + esc(n) + '</b><div class="muted">' + PACKS[n].rules.map(function (r) { return r.nutrient.replace('_', ' ') + ' ≤ ' + r.max_per_serving; }).join(', ') + '</div></div><button class="btn sm" onclick="applyPack(\'' + pid + '\',\'' + esc(n) + '\')">Apply</button></div>'; }).join('') +
     '<div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
 }
@@ -600,7 +753,7 @@ function askSwaps(id, pid) {
   var p = State.profiles.find(function (x) { return x.id === pid; });
   toast('Thinking...');
   Sync.brain('diet_swaps', { recipe: recipePayload(id), profile: { name: p.person_name, targets: p.daily_targets, rules: (S.rulesByProfile[pid] || []).map(describeRule) } }).then(function (res) {
-    openSheet('<h2 style="margin-top:0">Swaps for ' + esc(p.person_name) + '</h2>' + (res.options || []).map(function (o, i) { S['opt' + i] = o; return '<div class="card"><h3>' + esc(o.title) + '</h3><div class="muted">' + esc(o.summary || '') + '</div>' + (o.changes || []).map(function (c) { return '<div>&bull; ' + esc(c) + '</div>'; }).join('') + '<div class="btn-row"><button class="btn sm" onclick="keepVariation(\'' + id + '\',' + i + ',\'diet_swap\',\'' + pid + '\')">Keep as her version</button></div></div>'; }).join('') + '<p class="note">Suggestions only. Confirm anything medical with her care team.</p><div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
+    openSheet('<h2 style="margin-top:0">Swaps for ' + esc(p.person_name) + '</h2>' + (res.options || []).map(function (o, i) { S['opt' + i] = o; return '<div class="card"><h3>' + esc(o.title) + '</h3><div class="muted">' + esc(o.summary || '') + '</div>' + (o.changes || []).map(function (c) { return '<div>&bull; ' + esc(c) + '</div>'; }).join('') + '<div class="btn-row"><button class="btn sm" onclick="keepVariation(\'' + id + '\',' + i + ',\'diet_swap\',\'' + pid + '\')">Keep as ' + esc(p.person_name) + '\'s version</button></div></div>'; }).join('') + '<p class="note">Suggestions only. Confirm anything medical with their care team.</p><div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
   }).catch(function (e) { toast(e.message); });
 }
 function keepVariation(id, i, kind, pid) {
