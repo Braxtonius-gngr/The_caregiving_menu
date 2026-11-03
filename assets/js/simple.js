@@ -71,11 +71,14 @@ function simpleAte(rid) {
   var p = simpleProfile(), per = S.recipeInfo[rid].nut.perServing;
   var e = { eaten_at: new Date().toISOString(), recipe_id: rid, free_text: '', portion_mult: 1, for_profile_id: p.id, estimate_source: 'recipe' };
   Logic.NUTRIENTS.forEach(function (k) { e[k] = per[k]; });
-  var writes = [DB.put('diary_entries', e)];
-  (S.linesByRecipe[rid] || []).forEach(function (l) { writes.push(DB.put('usage_log', { ingredient_id: l.ingredient_id, qty: 1, unit: l.unit, event: 'logged', at: e.eaten_at })); });
-  Promise.all(writes).then(loadAll).then(function () {
+  var usage = (S.linesByRecipe[rid] || []).map(function (l) { return { ingredient_id: l.ingredient_id, qty: 1, unit: l.unit, event: 'logged', at: e.eaten_at }; });
+  Promise.all([DB.put('diary_entries', e)].concat(usage.map(function (u) { return DB.put('usage_log', u); }))).then(loadAll).then(function () {
     refresh();
-    toast('Saved. Enjoy!', 'Undo', function () { DB.remove('diary_entries', e.id).then(loadAll).then(function () { refresh(); toast('Removed'); }); });
+    // Undo takes back the usage rows too, so an accidental tap never feeds restock suggestions.
+    toast('Saved. Enjoy!', 'Undo', function () {
+      Promise.all([DB.remove('diary_entries', e.id)].concat(usage.map(function (u) { return DB.remove('usage_log', u.id); })))
+        .then(loadAll).then(function () { refresh(); toast('Removed'); });
+    });
   });
 }
 

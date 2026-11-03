@@ -39,7 +39,7 @@ function toast(msg, actionLabel, actionFn) {
 }
 function openSheet(html) { document.getElementById('sheetBody').innerHTML = html; document.getElementById('sheet').classList.remove('hidden'); }
 var scanSession = 0; // bumped when the scanner opens or a sheet closes; late lookups compare against it
-function closeSheet() { scanSession++; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
+function closeSheet() { scanSession++; S.sharedPhoto = null; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
 
 var TITLES = { simple: '', home: 'Home', recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe' };
 var currentScreen = 'home';
@@ -617,10 +617,13 @@ function shareDigest() {
 // Claude turns the numbers into a short brief with questions to bring to the appointment.
 function draftAppointmentSummary() {
   var d = S.digest; toast('Drafting...');
+  var token = S.summaryToken = (S.summaryToken || 0) + 1;
   var payload = { person: d.prof.person_name, span_days: d.span, meals_logged: d.entries, days_logged: d.days, daily_averages: d.avg, daily_targets: d.targets, eaten_most: d.top, rule_hits: d.hits, rules: d.rules, dishes_that_fit: d.fits, caregiver_notes: d.prof.notes || '' };
   Sync.brain('appointment_summary', { digest: payload }).then(function (res) {
+    // A newer draft started, or the caregiver moved on to another digest: drop this one.
+    if (token !== S.summaryToken || S.digest !== d) return;
     document.getElementById('toast').classList.add('hidden');
-    S.summary = res;
+    S.summary = { res: res, d: d }; // actions below use this pair, never the current S.digest
     var list = function (title, items) { return items && items.length ? '<h3 style="margin-top:14px">' + title + '</h3>' + items.map(function (x) { return '<div>&bull; ' + esc(x) + '</div>'; }).join('') : ''; };
     openSheet('<h2 style="margin-top:0">For ' + esc(d.prof.person_name) + '\'s next appointment</h2><p>' + esc(res.headline) + '</p>' +
       list('Patterns', res.patterns) + list('Worth watching', res.watch_items) + list('Questions to ask', res.questions_for_clinician) + list('Foods that already fit', res.foods_that_fit) +
@@ -633,12 +636,12 @@ function summaryText(res, d) {
   return d.prof.person_name + ', last ' + d.span + ' days\n' + res.headline + sec('Patterns', res.patterns) + sec('Worth watching', res.watch_items) + sec('Questions to ask', res.questions_for_clinician) + sec('Foods that already fit', res.foods_that_fit) + '\n\n' + (res.caveats || '');
 }
 function shareSummary() {
-  var text = summaryText(S.summary, S.digest);
+  var text = summaryText(S.summary.res, S.summary.d);
   if (navigator.share) return navigator.share({ title: 'Appointment notes', text: text }).catch(function () {});
   copyText(text, 'Copied');
 }
 function addQuestionsToNotes() {
-  var p = S.digest.prof, qs = S.summary.questions_for_clinician || [];
+  var p = S.summary.d.prof, qs = S.summary.res.questions_for_clinician || [];
   if (!qs.length) return toast('No questions to add');
   p.notes = (p.notes ? p.notes + '\n\n' : '') + 'Questions (' + todayISO() + '):\n' + qs.map(function (q) { return '- ' + q; }).join('\n');
   DB.put('diet_profiles', p).then(function () { toast('Added to notes'); closeSheet(); return loadAll(); }).then(refresh);
