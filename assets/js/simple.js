@@ -53,7 +53,7 @@ function renderSimple() {
     '<h2>Today</h2><div class="card">' + bars + '</div>' +
     '<h2>Good choices</h2>' + (choices.length ? choices.map(function (r) {
       var per = S.recipeInfo[r.id].nut.perServing, ready = S.recipeInfo[r.id].cov.pct === 100;
-      return '<div class="card simple-choice">' + (r.photo_data || r.photo_path ? '<img class="photo-thumb" alt="" data-photo="' + r.id + '" data-store="recipes"' + (r.photo_data ? ' src="' + r.photo_data + '"' : '') + '>' : '') +
+      return '<div class="card simple-choice">' + (r.photo_data || r.photo_path ? '<img class="photo-thumb" alt="" data-photo="' + r.id + '" data-store="recipes"' + (r.photo_data ? ' src=\"' + esc(r.photo_data) + '\"' : '') + '>' : '') +
         '<div class="grow"><b>' + esc(r.title) + '</b><div class="muted">' + (ready ? 'Ready to make · ' : '') + (per[keyNut] != null ? per[keyNut] + (SIMPLE_UNIT[keyNut] !== undefined ? SIMPLE_UNIT[keyNut] : ' g') + ' ' + SIMPLE_LABEL[keyNut].toLowerCase() : '') + '</div></div>' +
         '<button class="btn simple-btn" onclick="simpleAte(\'' + r.id + '\')">I ate this</button></div>';
     }).join('') : '<div class="empty">No dishes are marked as a good fit yet.</div>') +

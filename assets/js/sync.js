@@ -73,8 +73,15 @@ var Sync = (function () {
   }
   function signOut() { var c = getClient(); return c ? c.auth.signOut() : Promise.resolve(); }
 
+  // The cached household and pull cursor belong to one project. If this device is now
+  // pointed at a different project (Settings or a setup link), start over against it.
   function householdId() {
-    return DB.meta('household_id').then(function (h) {
+    var url = config().url;
+    return Promise.all([DB.meta('household_id'), DB.meta('project_url')]).then(function (m) {
+      if (m[0] && m[1] === url) return m[0];
+      if (m[1] !== url) return Promise.all([DB.meta('household_id', null), DB.meta('last_pull', null), DB.meta('project_url', url)]).then(function () { return null; });
+      return null;
+    }).then(function (h) {
       if (h) return h;
       var c = getClient();
       return c.rpc('ensure_household').then(function (r) {
@@ -165,10 +172,12 @@ var Sync = (function () {
   // Set photo_path locally only if the record is still live and still holds the photo
   // we uploaded. Runs atomically, so a deletion or a new photo taken meanwhile wins.
   function adoptPath(store, id, photoData, path, silent) {
+    // mergePending: if an edit to this record is still waiting to upload, that queued copy
+    // gets the path too, so pushing it later cannot clear the photo on the server.
     return DB.update(store, id, function (cur) {
       if (!cur || cur.deleted || cur.photo_data !== photoData || cur.photo_path) return null;
       cur.photo_path = path; return cur;
-    }, { silent: silent }).then(function (rec) {
+    }, { silent: silent, mergePending: true }).then(function (rec) {
       if (rec) return true;
       return queuePhotoDelete(path).then(function () { return false; }); // superseded: drop this upload
     });

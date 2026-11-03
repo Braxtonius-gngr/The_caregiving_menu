@@ -4,7 +4,7 @@ var S = {}; // derived indexes, rebuilt by rebuildIndexes()
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
-function fmtQty(q, u) { if (q == null) return ''; var n = Math.round(q * 100) / 100; return n + (u ? ' ' + u : ''); }
+function fmtQty(q, u) { if (q == null) return ''; var n = Math.round(q * 100) / 100; return (isFinite(n) ? n : '') + (u ? ' ' + esc(u) : ''); }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
 function rebuildIndexes() {
@@ -65,7 +65,7 @@ function recipeCard(r) {
   var info = S.recipeInfo[r.id];
   var miss = info.cov.missing.slice(0, 3).map(function (l) { return esc((S.ingById[l.ingredient_id] || {}).name || '?'); }).join(', ');
   return '<div class="card tappable row" onclick="showScreen(\'recipe\',\'' + r.id + '\')">' +
-    (r.photo_data || r.photo_path ? '<img class="photo-thumb" alt="" data-photo="' + r.id + '" data-store="recipes"' + (r.photo_data ? ' src="' + r.photo_data + '"' : '') + '>' : '') +
+    (r.photo_data || r.photo_path ? '<img class="photo-thumb" alt="" data-photo="' + r.id + '" data-store="recipes"' + (r.photo_data ? ' src=\"' + esc(r.photo_data) + '\"' : '') + '>' : '') +
     '<div class="grow"><h3>' + esc(r.title) + '</h3>' +
     '<div class="muted">' + (r.cuisine ? esc(r.cuisine) + ' · ' : '') + (info.nut.perServing.kcal ? '~' + info.nut.perServing.kcal + ' kcal/serving · ' : '') + info.cov.have + '/' + info.cov.total + ' on hand' + (miss ? ' · need ' + miss : '') + '</div>' +
     '<div class="chips" style="margin:4px 0 0">' + profileBadge(r.id) + (r.meal_type || []).map(function (m) { return '<span class="badge">' + esc(m) + '</span>'; }).join('') + '</div>' +
@@ -102,7 +102,7 @@ function renderHome() {
   if (!State.recipes.length) html += '<div class="card"><h3>Welcome</h3><p class="muted">Add a recipe and a few pantry items and this screen fills in with what you can cook tonight. Try <b>Settings &rarr; Load sample data</b> to see it working.</p></div>';
   html += '<h2>Cook tonight</h2>' + (cookNow.length ? cookNow.slice(0, 6).map(recipeCard).join('') : '<div class="empty">Nothing fully covered yet.</div>');
   html += '<h2>One trip away</h2>' + (oneTrip.length ? oneTrip.slice(0, 6).map(recipeCard).join('') : '<div class="empty">No near-misses.</div>');
-  if (useUp.length) html += '<h2>Use it up</h2><p class="muted">' + expiring.map(function (p) { return esc(S.ingById[p.ingredient_id].name) + ' (' + p.expires_on + ')'; }).join(', ') + '</p>' + useUp.slice(0, 4).map(recipeCard).join('');
+  if (useUp.length) html += '<h2>Use it up</h2><p class="muted">' + expiring.map(function (p) { return esc(S.ingById[p.ingredient_id].name) + ' (' + esc(p.expires_on) + ')'; }).join(', ') + '</p>' + useUp.slice(0, 4).map(recipeCard).join('');
   if (restock.length) html += '<h2>Restock</h2>' + restock.map(function (s) { return '<div class="list-item"><div class="grow"><b>' + esc(S.ingById[s.ingredient_id].name) + '</b><div class="muted">' + esc(s.why) + '</div></div><button class="btn sm" onclick="addToList(\'' + s.ingredient_id + '\',\'low_stock\')">+ list</button></div>'; }).join('');
   var open = State.shopping.filter(function (s) { return !s.done; });
   if (open.length) html += '<h2>Shopping list (' + open.length + ')</h2>' + renderShoppingList(open);
@@ -198,7 +198,7 @@ function renderRecipe(id) {
   var vars = State.variations.filter(function (v) { return v.recipe_id === id; });
   var fitHtml = '';
   State.profiles.forEach(function (p) { var f = info.fits[p.id]; if (f.reasons.length) fitHtml += '<div class="note"><b>' + esc(p.person_name) + ':</b> ' + esc(f.reasons.join('; ')) + ' <button class="btn sm ghost" onclick="askSwaps(\'' + id + '\',\'' + p.id + '\')">Suggest swaps</button></div>'; });
-  return (r.photo_data || r.photo_path ? '<img class="photo-hero" alt="Photo of ' + esc(r.title) + '" data-photo="' + r.id + '" data-store="recipes"' + (r.photo_data ? ' src="' + r.photo_data + '"' : '') + '>' : '') +
+  return (r.photo_data || r.photo_path ? '<img class="photo-hero" alt="Photo of ' + esc(r.title) + '" data-photo="' + r.id + '" data-store="recipes"' + (r.photo_data ? ' src=\"' + esc(r.photo_data) + '\"' : '') + '>' : '') +
     '<div class="card"><div class="row between"><h2 style="margin:0">' + esc(r.title) + '</h2><div class="ring" style="--pct:' + info.cov.pct + '"><span>' + info.cov.pct + '%</span></div></div>' +
     '<div class="muted">' + [r.cuisine, r.servings ? r.servings + ' servings' : '', (r.prep_min || r.cook_min) ? ((r.prep_min || 0) + (r.cook_min || 0)) + ' min' : '', r.times_cooked ? 'cooked ' + r.times_cooked + 'x' : ''].filter(Boolean).map(esc).join(' · ') + '</div>' +
     '<div class="chips">' + profileBadge(id) + '</div>' + fitHtml +
@@ -227,7 +227,7 @@ function editRecipe(id) {
     '<label>Ingredients, one per line ("2 cups flour, sifted")</label><textarea id="fIng" rows="7">' + esc(lines) + '</textarea>' +
     '<label>Steps, one per line</label><textarea id="fSteps" rows="6">' + esc((r.steps || []).join('\n')) + '</textarea>' +
     '<label>Notes</label><textarea id="fNotes" rows="3">' + esc(r.notes || '') + '</textarea>' +
-    '<label>Photo</label><div class="row">' + '<img id="fPhotoPrev" class="photo-thumb' + (hasPhoto ? '' : ' hidden') + '" alt=""' + (r.photo_data ? ' src="' + r.photo_data + '"' : '') + '>' +
+    '<label>Photo</label><div class="row">' + '<img id="fPhotoPrev" class="photo-thumb' + (hasPhoto ? '' : ' hidden') + '" alt=""' + (r.photo_data ? ' src=\"' + esc(r.photo_data) + '\"' : '') + '>' +
     '<input id="fPhoto" type="file" accept="image/*" class="grow" onchange="previewRecipePhoto(this)"></div>' +
     (hasPhoto ? '<label class="row" style="color:inherit"><input id="fPhotoRemove" type="checkbox" style="width:auto"> Remove photo</label>' : '') +
     '<p class="muted hidden" id="fPhotoNote">The scanned photo will be kept with this recipe.</p>' +
@@ -446,7 +446,7 @@ function renderPantry() {
     (items.length ? ['fridge', 'freezer', 'pantry', 'counter'].filter(function (l) { return byLoc[l]; }).map(function (loc) {
       return '<h2>' + loc + ' (' + byLoc[loc].length + ')</h2><div class="card">' + byLoc[loc].sort(function (a, b) { return S.ingById[a.ingredient_id].name.localeCompare(S.ingById[b.ingredient_id].name); }).map(function (p) {
         var ing = S.ingById[p.ingredient_id] || {};
-        return '<div class="list-item"><div class="grow" onclick="editPantryItem(\'' + p.id + '\')"><b>' + esc(ing.name) + '</b> <span class="muted">' + esc(ing.category || '') + (p.expires_on ? ' · exp ' + p.expires_on : '') + (p.par_qty != null ? ' · par ' + p.par_qty : '') + '</span></div><div class="qty-ctl"><button onclick="bumpQty(\'' + p.id + '\',-1)">&minus;</button><span>' + fmtQty(p.qty, p.unit) + '</span><button onclick="bumpQty(\'' + p.id + '\',1)">+</button></div></div>';
+        return '<div class="list-item"><div class="grow" onclick="editPantryItem(\'' + p.id + '\')"><b>' + esc(ing.name) + '</b> <span class="muted">' + esc(ing.category || '') + (p.expires_on ? ' · exp ' + esc(p.expires_on) : '') + (p.par_qty != null ? ' · par ' + esc(p.par_qty) : '') + '</span></div><div class="qty-ctl"><button onclick="bumpQty(\'' + p.id + '\',-1)">&minus;</button><span>' + fmtQty(p.qty, p.unit) + '</span><button onclick="bumpQty(\'' + p.id + '\',1)">+</button></div></div>';
       }).join('') + '</div>';
     }).join('') : '<div class="empty">Pantry is empty. Add items or scan a receipt.</div>');
 }
@@ -489,7 +489,7 @@ function renderDiary() {
     (entries.length ? entries.map(function (e) {
       var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
       var who = State.profiles.find(function (p) { return p.id === e.for_profile_id; });
-      return '<div class="card row">' + photoThumb(e) + '<div class="grow"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + e.eaten_at.slice(11, 16) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + e.portion_mult + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
+      return '<div class="card row">' + photoThumb(e) + '<div class="grow"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(e.eaten_at.slice(11, 16)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
     }).join('') : '<div class="empty">Nothing logged.</div>') +
     (prof ? '<h2>Notes for ' + esc(prof.person_name) + '\'s next appointment</h2><div class="card"><textarea id="profNotes" rows="4" placeholder="Questions to ask, patterns you noticed...">' + esc(prof.notes || '') + '</textarea><div class="btn-row"><button class="btn sm" onclick="saveProfileNotes(\'' + prof.id + '\')">Save notes</button><button class="btn sm ghost" onclick="weeklyDigest(\'' + prof.id + '\')">Weekly digest</button></div></div>' : '');
 }
@@ -531,7 +531,7 @@ function saveLog() {
 function photoThumb(e) {
   if (!e.photo_data && !e.photo_path) return '';
   // A real button so the full view is reachable by keyboard and announced as a control.
-  return '<button type="button" class="photo-btn" aria-label="View meal photo" onclick="viewPhoto(\'' + e.id + '\')"><img class="photo-thumb" alt="" data-photo="' + e.id + '"' + (e.photo_data ? ' src="' + e.photo_data + '"' : '') + '></button>';
+  return '<button type="button" class="photo-btn" aria-label="View meal photo" onclick="viewPhoto(\'' + e.id + '\')"><img class="photo-thumb" alt="" data-photo="' + e.id + '"' + (e.photo_data ? ' src=\"' + esc(e.photo_data) + '\"' : '') + '></button>';
 }
 function photoStatus(e) {
   if (!Sync.enabled() || (!e.photo_data && !e.photo_path)) return '';
@@ -641,10 +641,14 @@ function shareSummary() {
   copyText(text, 'Copied');
 }
 function addQuestionsToNotes() {
-  var p = S.summary.d.prof, qs = S.summary.res.questions_for_clinician || [];
+  var pid = S.summary.d.prof.id, qs = S.summary.res.questions_for_clinician || [];
   if (!qs.length) return toast('No questions to add');
-  p.notes = (p.notes ? p.notes + '\n\n' : '') + 'Questions (' + todayISO() + '):\n' + qs.map(function (q) { return '- ' + q; }).join('\n');
-  DB.put('diet_profiles', p).then(function () { toast('Added to notes'); closeSheet(); return loadAll(); }).then(refresh);
+  var block = 'Questions (' + todayISO() + '):\n' + qs.map(function (q) { return '- ' + q; }).join('\n');
+  // Append to the profile as it is now, not the copy from when the digest opened.
+  DB.update('diet_profiles', pid, function (cur) {
+    if (!cur || cur.deleted) return null;
+    cur.notes = (cur.notes ? cur.notes + '\n\n' : '') + block; return cur;
+  }).then(function (saved) { toast(saved ? 'Added to notes' : 'That profile no longer exists'); closeSheet(); return loadAll(); }).then(refresh);
 }
 
 /* ---------- Settings ---------- */
@@ -659,7 +663,7 @@ function renderSettings() {
     '<h2>Diet profiles</h2>' + State.profiles.map(function (p) {
       var rules = S.rulesByProfile[p.id] || [];
       return '<div class="card"><div class="row between"><h3>' + esc(p.person_name) + '</h3><button class="btn sm ghost" onclick="editProfile(\'' + p.id + '\')">Edit</button></div><div class="muted">' + (Object.keys(p.daily_targets || {}).length ? Object.keys(p.daily_targets).map(function (k) { return k.replace('_', ' ') + ' ≤ ' + p.daily_targets[k]; }).join(', ') : 'no daily targets') + '</div>' +
-        (rules.length ? rules.map(function (r) { return '<div class="list-item"><span class="badge ' + (r.severity === 'hard' ? 'bad' : 'warn') + '">' + r.severity + '</span><div class="grow">' + esc(describeRule(r)) + (r.source ? ' <span class="muted">— ' + esc(r.source) + '</span>' : '') + '</div><button class="icon-btn" onclick="DB.remove(\'profile_rules\',\'' + r.id + '\').then(loadAll).then(refresh)">&times;</button></div>'; }).join('') : '<p class="muted">No rules yet.</p>') +
+        (rules.length ? rules.map(function (r) { return '<div class="list-item"><span class="badge ' + (r.severity === 'hard' ? 'bad' : 'warn') + '">' + esc(r.severity) + '</span><div class="grow">' + esc(describeRule(r)) + (r.source ? ' <span class="muted">— ' + esc(r.source) + '</span>' : '') + '</div><button class="icon-btn" onclick="DB.remove(\'profile_rules\',\'' + r.id + '\').then(loadAll).then(refresh)">&times;</button></div>'; }).join('') : '<p class="muted">No rules yet.</p>') +
         '<div class="btn-row"><button class="btn sm" onclick="addRule(\'' + p.id + '\')">+ Rule</button><button class="btn sm ghost" onclick="starterPacks(\'' + p.id + '\')">Starter packs</button><button class="btn sm ghost" onclick="enableSimple(\'' + p.id + '\')">Simple view on this device</button></div></div>';
     }).join('') + '<div class="btn-row"><button class="btn" onclick="editProfile()">+ Add person</button></div>' +
     '<h2>Ingredients (' + State.ingredients.length + ')</h2><div class="card"><p class="muted">Canonical names that recipes and pantry share. Nutrition is per 100 g.</p><div class="btn-row"><button class="btn sm ghost" onclick="listIngredients()">Browse / edit</button></div></div>' +
@@ -762,6 +766,32 @@ function fetchNutrition(id) {
 // Fields that point at another record's id (rewired when a backup is re-keyed).
 var BACKUP_REFS = ['recipe_id', 'ingredient_id', 'profile_id', 'for_profile_id'];
 var PHOTO_BACKUP_KEYS = ['recipes', 'diary']; // only these tables have photo_path
+// A backup file is untrusted input: every value is type-checked before it is stored,
+// so nothing in it can reach the page as markup.
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var IMAGE_RE = /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+\/]+=*$/;
+var NUM_FIELDS = ['qty', 'par_qty', 'servings', 'prep_min', 'cook_min', 'rating', 'times_cooked', 'kcal_per_serving', 'kcal_100g', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sodium_mg', 'sugar_g', 'potassium_mg', 'density', 'kcal', 'portion_mult', 'confidence', 'max_per_serving', 'pos'];
+var DATE_FIELDS = ['expires_on', 'opened_on', 'last_cooked_on'];
+var TIME_FIELDS = ['eaten_at', 'at'];
+function sanitizeBackupRecord(rec) {
+  if (!rec || typeof rec !== 'object' || !UUID_RE.test(String(rec.id))) return null;
+  var out = {};
+  Object.keys(rec).forEach(function (k) {
+    var v = rec[k];
+    if (v === null || v === undefined) { out[k] = null; return; }
+    if (BACKUP_REFS.indexOf(k) > -1) { out[k] = UUID_RE.test(String(v)) ? v : null; return; }
+    if (NUM_FIELDS.indexOf(k) > -1) { var n = Number(v); out[k] = isFinite(n) ? n : null; return; }
+    if (DATE_FIELDS.indexOf(k) > -1) { out[k] = /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null; return; }
+    if (TIME_FIELDS.indexOf(k) > -1) { var t = new Date(v); out[k] = isNaN(t) ? null : t.toISOString(); return; }
+    if (k === 'photo_data') { if (IMAGE_RE.test(v)) out[k] = v; return; }
+    if (k === 'photo_path') { out[k] = /^[0-9a-f-]{36}\/(diary|recipes)\/[A-Za-z0-9._-]+$/.test(v) ? v : null; return; }
+    if (k === 'severity') { out[k] = v === 'hard' ? 'hard' : 'soft'; return; }
+    if (typeof v === 'string' || typeof v === 'boolean' || typeof v === 'number') { out[k] = v; return; }
+    if (Array.isArray(v) || typeof v === 'object') { try { out[k] = JSON.parse(JSON.stringify(v)); } catch (e) {} } // steps, aliases, targets, body
+  });
+  if (TIME_FIELDS.some(function (f) { return f in rec && !out[f]; })) return null; // a diary/usage row needs its time
+  return out;
+}
 var BACKUP_STORES = { ingredients: 'ingredients', recipes: 'recipes', lines: 'recipe_ingredients', variations: 'recipe_variations', pantry: 'pantry_items', profiles: 'diet_profiles', rules: 'profile_rules', diary: 'diary_entries', shopping: 'shopping_list', usage: 'usage_log' };
 // Merge a backup into this device. Records with the same id are replaced; everything is
 // queued for sync like a normal edit. Photos stored inside the backup upload again.
@@ -777,17 +807,19 @@ function importJSON(input) {
     if (!confirm('Restore ' + total + ' records from ' + (data.exported_at || 'this backup').slice(0, 10) + '? Matching records on this device are replaced; nothing else is removed.')) return;
     return DB.meta('household_id').then(function (here) {
       // Ids are global. A backup from another household would collide with rows that
-      // household still owns, so it gets fresh ids with every reference rewired.
-      var rekey = !!data.household_id && data.household_id !== here;
+      // household still owns, so it gets fresh ids with every reference rewired. Older
+      // backups do not say where they came from; with the cloud on, ask.
+      var rekey = data.household_id ? data.household_id !== here
+        : (Sync.enabled() && !!here && confirm('Did this backup come from a different household or account?\n\nOK: restore it as a fresh copy.\nCancel: it is from this household; merge it.'));
       var idMap = {};
-      if (rekey) keys.forEach(function (k) { data[k].forEach(function (r) { if (r && r.id) idMap[r.id] = DB.uuid(); }); });
+      if (rekey) keys.forEach(function (k) { data[k].forEach(function (r) { if (r && UUID_RE.test(String(r.id))) idMap[r.id] = DB.uuid(); }); });
       var map = function (v) { return v && idMap[v] ? idMap[v] : v; };
       var writes = [];
       keys.forEach(function (k) {
-        data[k].forEach(function (rec) {
-          if (!rec || !rec.id) return;
-          rec = Object.assign({}, rec);
-          delete rec.household_id; delete rec.fts;
+        data[k].forEach(function (raw) {
+          var rec = sanitizeBackupRecord(raw);
+          if (!rec) return;
+          delete rec.household_id; delete rec.fts; delete rec.updated_at;
           if (rekey) BACKUP_REFS.concat('id').forEach(function (f) { if (f in rec) rec[f] = map(rec[f]); });
           // A photo carried in the backup uploads again here; another household's stored
           // photo is not readable from this one, so that link is dropped.
@@ -803,15 +835,24 @@ function importJSON(input) {
   }).catch(function (e) { toast(e.message); });
 }
 // The backup records which household it came from, so a restore elsewhere can re-key it.
+// Photos this device has not downloaded yet are fetched first, so the backup is complete.
 function buildBackup() {
-  return DB.meta('household_id').then(function (hid) {
-    var out = { exported_at: new Date().toISOString(), version: TCM_CONFIG.APP_VERSION, household_id: hid || null };
+  var missing = 0;
+  var photoJobs = [['recipes', State.recipes], ['diary_entries', State.diary]].map(function (pair) {
+    return Promise.all(pair[1].filter(function (r) { return r.photo_path && !r.photo_data; }).map(function (r) {
+      return Sync.photoSrc(r, pair[0]).then(function (src) { if (!src) missing++; });
+    }));
+  });
+  return Promise.all(photoJobs).then(function () { return DB.meta('household_id'); }).then(function (hid) {
+    var out = { exported_at: new Date().toISOString(), version: TCM_CONFIG.APP_VERSION, household_id: hid || null, photos_missing: missing };
     Object.keys(BACKUP_STORES).forEach(function (k) { out[k] = State[k]; });
     return out;
   });
 }
 function exportJSON() {
+  toast('Preparing backup...');
   buildBackup().then(function (out) {
+    if (out.photos_missing) toast(out.photos_missing + ' photo(s) could not be downloaded and are not in this backup. Try again when online.');
     var blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
     var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'caregiving-menu-' + todayISO() + '.json'; a.click();
   });

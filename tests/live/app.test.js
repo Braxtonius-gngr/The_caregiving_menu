@@ -136,6 +136,11 @@ const sync = p => p.evaluate(() => syncNow().then(() => Sync.run()).then(r => r,
   await sync(D); await D.evaluate(() => loadAll());
   check('setup link connects and joins', (await D.evaluate(() => Sync.config().source)) === 'device' && (await householdOf(newcomer.id)) === hid && (await D.evaluate(() => State.recipes.length)) === 4);
 
+  // 7b. A device that used to point at another project starts over against this one.
+  await D.evaluate(() => Promise.all([DB.meta('household_id', '00000000-0000-4000-8000-000000000000'), DB.meta('project_url', 'https://old-project.supabase.co'), DB.meta('last_pull', '2999-01-01T00:00:00Z')]));
+  const switched = await sync(D);
+  check('switching projects resets the cached household and pull cursor', !switched.error && (await D.evaluate(() => DB.meta('household_id'))) === hid && (await D.evaluate(() => DB.meta('last_pull'))) < '2999', JSON.stringify(switched));
+
   // 8. The Settings form connects an unconfigured device.
   const E = await device(browser, app, null, { unconfigured: true });
   await E.click('button[aria-label=Settings]');
@@ -146,8 +151,11 @@ const sync = p => p.evaluate(() => syncNow().then(() => Sync.run()).then(r => r,
   await A.click('[data-tab=diary]'); await A.click('text=+ Log a meal');
   await A.selectOption('#lRecipe', { label: 'Buttered toast and eggs' }); await A.setInputFiles('#lPhoto', FIX + '/meal.jpg');
   await A.click('#sheetBody .btn:has-text("Log")'); await A.waitForTimeout(1500); await sync(A);
-  // Same object the Export button downloads (photos fetched into the backup first).
-  const backup = await A.evaluate(async () => { await loadAll(); for (const e of State.diary) await Sync.photoSrc(e); return JSON.stringify(await buildBackup()); });
+  // Exported from B, which never opened the new diary photo: the export must fetch it.
+  await sync(B);
+  const backup = await B.evaluate(async () => { await loadAll(); return JSON.stringify(await buildBackup()); });
+  const parsed = JSON.parse(backup);
+  check('export includes photos this device had not downloaded', parsed.photos_missing === 0 && parsed.diary.some(e => e.photo_data && e.photo_data.startsWith('data:image')));
   const tmp = path.join(require('os').tmpdir(), 'tcm-backup-' + RUN + '.json'); fs.writeFileSync(tmp, backup);
   const F = await device(browser, app, restorer);
   await sync(F);

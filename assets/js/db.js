@@ -87,7 +87,7 @@ var DB = (function () {
     opts = opts || {};
     return open().then(function (d) {
       return new Promise(function (resolve, reject) {
-        var t = d.transaction(opts.silent ? [store] : [store, 'outbox'], 'readwrite');
+        var t = d.transaction([store, 'outbox'], 'readwrite');
         var os = t.objectStore(store);
         var out = null;
         var req = os.get(id);
@@ -97,7 +97,12 @@ var DB = (function () {
           next.updated_at = new Date().toISOString();
           if (next.deleted == null) next.deleted = false;
           os.put(next); out = next;
-          if (!opts.silent) t.objectStore('outbox').put({ id: store + ':' + next.id, store: store, record: next });
+          var ob = t.objectStore('outbox'), key = store + ':' + next.id;
+          if (!opts.silent) ob.put({ id: key, store: store, record: next });
+          else if (opts.mergePending) {
+            var pend = ob.get(key);
+            pend.onsuccess = function () { if (pend.result) ob.put({ id: key, store: store, record: next }); };
+          }
         };
         t.oncomplete = function () { resolve(out); };
         t.onerror = function () { reject(t.error); };
