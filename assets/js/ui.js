@@ -327,8 +327,10 @@ function downscale(file, max) {
 // matched up (Logic.stitchPages) and re-read together; every recipe is saved straight
 // away, and anything the reader was unsure about gets review_flag for a later look.
 var BATCH_MAX = 20, BATCH_PAGES_MAX = 6; // the brain reads at most 6 photos in one call
+var batchRunning = false; // one import at a time, so progress and summaries never mix
 function batchImportRecipes() {
   if (!Sync.enabled()) return toast('Configure Supabase first (Settings)');
+  if (batchRunning) return toast('An import is still running. Wait for it to finish first.');
   document.getElementById('scanBatch').click();
 }
 function onBatchFiles(input) {
@@ -337,7 +339,13 @@ function onBatchFiles(input) {
   if (files.length > BATCH_MAX) { toast('Importing the first ' + BATCH_MAX + ' photos'); files = files.slice(0, BATCH_MAX); }
   runRecipeBatch(files);
 }
+// The batch panel's element, only while that panel is still the open sheet.
+function batchEl(id) {
+  var sheet = document.getElementById('sheet'), el = document.getElementById(id);
+  return el && sheet && !sheet.classList.contains('hidden') ? el : null;
+}
 function runRecipeBatch(files) {
+  batchRunning = true;
   // Capture order is the best guess at page order (a page and the next one are usually shot back to back).
   files.sort(function (a, b) { return (a.lastModified - b.lastModified) || a.name.localeCompare(b.name); });
   var total = files.length, known = State.ingredients.map(function (i) { return i.name; });
@@ -345,7 +353,7 @@ function runRecipeBatch(files) {
   openSheet('<h2 style="margin-top:0">Importing ' + total + ' photo' + (total === 1 ? '' : 's') + '</h2>' +
     '<p id="batchMsg">Reading photos...</p><progress id="batchBar" max="' + total + '" value="0" style="width:100%"></progress>' +
     '<p class="muted">Recipes save as they finish. You can close this; the import keeps going while the app is open.</p>');
-  function say(text) { var m = document.getElementById('batchMsg'), b = document.getElementById('batchBar'); if (m) m.textContent = text; if (b) b.value = done; }
+  function say(text) { var m = batchEl('batchMsg'), b = batchEl('batchBar'); if (m) m.textContent = text; if (b) b.value = done; }
   function readOne(i) {
     return downscale(files[i], 1600).then(function (d) { shots[i] = d; return Sync.brain('parse_recipe', { image: d, batch: true, ingredients: known }); })
       .then(function (r) { reads[i] = r; }, function (e) { reads[i] = { error: e.message }; })
@@ -353,10 +361,10 @@ function runRecipeBatch(files) {
   }
   function worker() { if (next >= total) return Promise.resolve(); var i = next++; return readOne(i).then(worker); }
   Promise.all([worker(), worker()]).then(function () {
-    var failed = 0, empty = 0;
+    var failed = 0, empty = 0, firstError = '';
     // Skipped photos keep their place, so pages on either side of one never look adjacent.
     var pages = reads.map(function (r) {
-      if (r.error) { failed++; return { skip: true }; }
+      if (r.error) { failed++; firstError = firstError || r.error; return { skip: true }; }
       if (!r.title && !(r.ingredients || []).length && !(r.steps || []).length) { empty++; return { skip: true }; }
       return { starts_mid: !!r.starts_mid_recipe, ends_incomplete: !!r.ends_incomplete };
     });
@@ -375,22 +383,22 @@ function runRecipeBatch(files) {
       }).then(function (res) {
         var flag = batchFlag(res.draft, idx.length, res.incomplete);
         return saveBatchRecipe(res.draft, shots[idx[0]], flag).then(function () { saved++; if (flag) flagged++; });
-      }).catch(function () { failed++; });
+      }).catch(function (e) { failed++; firstError = firstError || ('saving failed: ' + e.message); });
     });
     return chain.then(function () {
       var parts = ['Saved ' + saved + ' recipe' + (saved === 1 ? '' : 's')];
       if (flagged) parts.push(flagged + ' flagged to check');
       if (empty) parts.push(empty + ' photo' + (empty === 1 ? '' : 's') + ' had no recipe');
-      if (failed) parts.push(failed + ' could not be read');
+      if (failed) parts.push(failed + ' failed (' + firstError + ')');
       done = total; say(parts.join(', ') + '.');
       return loadAll().then(function () {
-        var m = document.getElementById('batchMsg');
+        var m = batchEl('batchMsg');
         if (m) m.insertAdjacentHTML('afterend', '<div class="btn-row"><button class="btn" onclick="closeSheet();State.filters.review=' + (flagged ? 'true' : 'false') + ';showScreen(\'recipes\')">' + (flagged ? 'Review flagged' : 'See recipes') + '</button><button class="btn ghost" onclick="closeSheet()">Done</button></div>');
         else toast(parts.join(', '));
         if (Sync.enabled()) syncNow();
       });
     });
-  });
+  }).then(function () { batchRunning = false; }, function (e) { batchRunning = false; toast('Import stopped: ' + e.message); });
 }
 // Fallback when the combined re-read fails: stack the single-page reads in order.
 function joinDrafts(drafts) {
@@ -401,17 +409,17 @@ function joinDrafts(drafts) {
     steps: [].concat.apply([], drafts.map(function (d) { return d.steps || []; })),
     notes: drafts.map(function (d) { return d.notes; }).filter(Boolean).join('\n'),
     confidence: Math.min.apply(null, drafts.map(function (d) { return d.confidence || 0; })),
-    issues: ['pages joined without a combined read']
+    issues: [].concat.apply([], drafts.map(function (d) { return d.issues || []; })).concat('pages joined without a combined read')
   };
 }
 // Why a batch recipe needs a person's look, or null when it read cleanly.
-function batchFlag(d, pageCount, incomplete) {
+function batchFlag(d, pageCount, incomplete) { // keeps up to 4 reported issues
   var f = [];
   if (pageCount > 1) f.push('combined from ' + pageCount + ' photos');
   if (incomplete) f.push('may be missing a page');
   if ((d.confidence || 0) < 0.6) f.push('hard to read');
   if (!d.title) f.push('no title found');
-  (d.issues || []).slice(0, 3).forEach(function (s) { if (s) f.push(String(s)); });
+  (d.issues || []).slice(-4).forEach(function (s) { if (s) f.push(String(s)); });
   return f.length ? f.join('; ').slice(0, 300) : null;
 }
 function saveBatchRecipe(d, shot, flag) {
@@ -419,10 +427,11 @@ function saveBatchRecipe(d, shot, flag) {
     meal_type: d.meal_type || [], steps: d.steps || [], notes: d.notes || '', source_type: 'photo', times_cooked: 0, photo_data: shot || null, review_flag: flag };
   return saveRecipeWithLines(rec, (d.ingredients || []).map(function (l) { return { qty: l.qty, unit: l.unit || '', name: l.name, prep: (l.prep || '') + (l.optional ? ' (optional)' : '') }; }));
 }
+// Clears only the flag on the stored record, so a sync that landed meanwhile (a photo
+// path, a deletion from another device) is never overwritten by the copy on screen.
 function clearReviewFlag(id) {
-  var r = State.recipes.find(function (x) { return x.id === id; }); if (!r) return;
-  r.review_flag = null;
-  DB.put('recipes', r).then(loadAll).then(function () { toast('Marked as checked'); refresh(); });
+  DB.update('recipes', id, function (cur) { if (!cur || cur.deleted) return null; cur.review_flag = null; return cur; })
+    .then(loadAll).then(function () { toast('Marked as checked'); refresh(); });
 }
 
 function scanBarcode() {
