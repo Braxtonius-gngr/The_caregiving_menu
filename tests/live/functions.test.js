@@ -39,6 +39,8 @@ async function waitUp(port) { for (let i = 0; i < 120; i++) { try { await fetch(
       parse_recipe_text: [{ mode: 'parse_recipe', text: '2 cups oats\nboil' }, ['title', 'ingredients', 'steps', 'confidence']],
       parse_recipe_photo: [{ mode: 'parse_recipe', image: img }, ['title', 'ingredients']],
       parse_recipe_url: [{ mode: 'parse_recipe', url: 'https://recipes.example/lemon-chicken' }, ['title', 'source_ref']],
+      parse_recipe_batch_page: [{ mode: 'parse_recipe', image: img, batch: true }, ['title', 'starts_mid_recipe', 'ends_incomplete', 'issues']],
+      parse_recipe_pages: [{ mode: 'parse_recipe', images: [img, img], batch: true }, ['title', 'steps', 'ends_incomplete']],
       parse_receipt: [{ mode: 'parse_receipt', image: img }, ['store', 'items']],
       estimate_plate: [{ mode: 'estimate_plate', text: 'two eggs and toast' }, ['items', 'kcal', 'sodium_mg', 'confidence']],
       variations: [{ mode: 'variations', angle: 'lighter', recipe: { title: 'Soup' }, pantry: [] }, ['options']],
@@ -59,6 +61,8 @@ async function waitUp(port) { for (let i = 0; i < 120; i++) { try { await fetch(
     check('Claude call: API key sent server-side only', req.auth === 'Bearer sk-ant-test');
     check('photo sent as a base64 image block', log[1].body.messages[0].content[0].type === 'image' && log[1].body.messages[0].content[0].source.media_type === 'image/jpeg');
     check('recipe URL read from its JSON-LD first', log[2].body.messages[0].content[0].text.includes('JSON-LD recipe data'));
+    const pages = log[4].body.messages[0].content;
+    check('stitched pages sent together, in order, as one recipe', pages.filter(c => c.type === 'image').length === 2 && pages[2].text.includes('consecutive pages of ONE recipe'));
 
     const bc = (await call(8802, { kind: 'barcode', q: '5000112637922' })).body;
     check('barcode lookup maps Open Food Facts (g to mg)', bc.name === 'rolled oats' && bc.nutrition.sodium_mg === 6 && bc.nutrition.potassium_mg === 362, JSON.stringify(bc));

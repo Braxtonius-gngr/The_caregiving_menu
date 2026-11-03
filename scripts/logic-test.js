@@ -104,4 +104,52 @@ t('equivalent GTINs match, other codes match exactly', function () {
   assert.ok(Scanner.sameProduct('ABC-1234', 'ABC-1234'));
   assert.ok(!Scanner.sameProduct('036000291452', null));
 });
+// Arrays from the vm context compare by JSON.
+function pagesOf(groups) { return JSON.parse(JSON.stringify(groups.map(function (x) { return x.pages; }))); }
+t('stitchPages: stand-alone cards stay separate', function () {
+  var g = Logic.stitchPages([{}, {}, {}]);
+  assert.deepStrictEqual(pagesOf(g), [[0], [1], [2]]);
+  assert.ok(g.every(function (x) { return x.complete; }));
+});
+t('stitchPages: a cut-off page joins the next page (or the one before)', function () {
+  var P = function (s, e) { return { starts_mid: s, ends_incomplete: e }; };
+  assert.deepStrictEqual(pagesOf(Logic.stitchPages([P(0, 1), P(1, 0), P(0, 0)])), [[0, 1], [2]]);
+  assert.deepStrictEqual(pagesOf(Logic.stitchPages([P(1, 0), P(0, 1)])), [[1, 0]]);
+  var three = Logic.stitchPages([P(0, 1), P(1, 1), P(1, 0)]);
+  assert.deepStrictEqual(pagesOf(three), [[0, 1, 2]]); assert.ok(three[0].complete);
+});
+t('stitchPages: far-apart pieces join only when unambiguous', function () {
+  var P = function (s, e) { return { starts_mid: s, ends_incomplete: e }; };
+  assert.deepStrictEqual(pagesOf(Logic.stitchPages([P(0, 1), P(0, 0), P(1, 0)])), [[0, 2], [1]]);
+  var amb = Logic.stitchPages([P(0, 1), P(0, 0), P(0, 1), P(0, 0), P(1, 0), P(1, 0)]);
+  assert.strictEqual(amb.length, 6); // two open recipes, two loose pages: leave all for review
+  assert.strictEqual(amb.filter(function (x) { return !x.complete; }).length, 4);
+});
+t('stitchPages: skipped photos keep their place and join nothing', function () {
+  var P = function (s, e) { return { starts_mid: s, ends_incomplete: e }; }, X = { skip: true };
+  // open A, skip, loose B, skip, open C, skip, loose D: two open and two loose, so nothing joins
+  var g = Logic.stitchPages([P(0, 1), X, P(1, 0), X, P(0, 1), X, P(1, 0)]);
+  assert.deepStrictEqual(pagesOf(g), [[0], [2], [4], [6]]);
+  assert.deepStrictEqual(pagesOf(Logic.stitchPages([P(0, 1), X, P(1, 0)])), [[0, 2]]); // one each: still joined
+});
+t('stitchPages: missing first page, rest reversed, still one piece', function () {
+  var P = function (s, e) { return { starts_mid: s, ends_incomplete: e }; };
+  var g = Logic.stitchPages([P(1, 0), P(1, 1)]); // last page, then middle page
+  assert.deepStrictEqual(pagesOf(g), [[1, 0]]); assert.ok(!g[0].complete);
+});
+// Minimal JPEG: SOI, APP1 Exif with IFD0 -> ExifIFD -> DateTimeOriginal (little-endian).
+function exifJpeg(when) {
+  var tiff = [0x49, 0x49, 0x2A, 0x00, 8, 0, 0, 0,
+    1, 0, 0x69, 0x87, 4, 0, 1, 0, 0, 0, 26, 0, 0, 0, 0, 0, 0, 0,
+    1, 0, 0x03, 0x90, 2, 0, 20, 0, 0, 0, 44, 0, 0, 0, 0, 0, 0, 0];
+  for (var k = 0; k < 19; k++) tiff.push(when.charCodeAt(k)); tiff.push(0);
+  var app1 = [0x45, 0x78, 0x69, 0x66, 0, 0].concat(tiff), len = app1.length + 2;
+  return new Uint8Array([0xFF, 0xD8, 0xFF, 0xE1, len >> 8, len & 255].concat(app1, [0xFF, 0xDA, 0, 2])).buffer;
+}
+t('exifTakenAt reads DateTimeOriginal and ignores JPEGs without it', function () {
+  assert.strictEqual(Logic.exifTakenAt(exifJpeg('2026:11:03 14:05:09')), Date.UTC(2026, 10, 3, 14, 5, 9));
+  assert.ok(Logic.exifTakenAt(exifJpeg('2026:11:03 14:05:09')) < Logic.exifTakenAt(exifJpeg('2026:11:03 14:05:30')));
+  assert.strictEqual(Logic.exifTakenAt(new Uint8Array([0xFF, 0xD8, 0xFF, 0xDA, 0, 2]).buffer), null);
+  assert.strictEqual(Logic.exifTakenAt(new Uint8Array([1, 2, 3]).buffer), null);
+});
 console.log(n + ' tests passed');

@@ -68,7 +68,7 @@ function recipeCard(r) {
     (r.photo_data || r.photo_path ? '<img class="photo-thumb" alt="" data-photo="' + r.id + '" data-store="recipes"' + (r.photo_data ? ' src=\"' + esc(r.photo_data) + '\"' : '') + '>' : '') +
     '<div class="grow"><h3>' + esc(r.title) + '</h3>' +
     '<div class="muted">' + (r.cuisine ? esc(r.cuisine) + ' · ' : '') + (info.nut.perServing.kcal ? '~' + info.nut.perServing.kcal + ' kcal/serving · ' : '') + info.cov.have + '/' + info.cov.total + ' on hand' + (miss ? ' · need ' + miss : '') + '</div>' +
-    '<div class="chips" style="margin:4px 0 0">' + profileBadge(r.id) + (r.meal_type || []).map(function (m) { return '<span class="badge">' + esc(m) + '</span>'; }).join('') + '</div>' +
+    '<div class="chips" style="margin:4px 0 0">' + (r.review_flag ? '<span class="badge warn">&#9888; check</span>' : '') + profileBadge(r.id) + (r.meal_type || []).map(function (m) { return '<span class="badge">' + esc(m) + '</span>'; }).join('') + '</div>' +
     '</div><div class="ring" style="--pct:' + info.cov.pct + '" title="' + info.cov.pct + '% of ingredients on hand"><span>' + info.cov.pct + '%</span></div></div>';
 }
 function dvTiles(totals, targets) {
@@ -170,6 +170,7 @@ function filteredRecipes() {
     if (f.meal && (r.meal_type || []).indexOf(f.meal) < 0) return false;
     if (f.cat && !(S.linesByRecipe[r.id] || []).some(function (l) { return (S.ingById[l.ingredient_id] || {}).category === f.cat; })) return false;
     if (f.profileOk && State.activeProfile && info.fits[State.activeProfile].level !== 'ok') return false;
+    if (f.review && !r.review_flag) return false;
     return true;
   }).sort(function (a, b) { return S.recipeInfo[b.id].cov.pct - S.recipeInfo[a.id].cov.pct; });
 }
@@ -185,8 +186,15 @@ function renderRecipes() {
     profileSwitcher() +
     '<div class="chips">' + chips('fit', FACETS.fit) + (State.activeProfile ? '<span class="chip ' + (State.filters.profileOk ? 'on' : '') + '" onclick="State.filters.profileOk=!State.filters.profileOk;refresh()">&#10003; fits profile</span>' : '') + '</div>' +
     '<div class="chips">' + chips('meal', FACETS.meal) + '</div><div class="chips">' + chips('cat', FACETS.cat) + '</div>' +
+    reviewBanner() +
     '<div class="btn-row"><button class="btn" onclick="editRecipe()">+ New recipe</button></div>' +
     '<div id="recipeList">' + (list.length ? list.map(recipeCard).join('') : '<div class="empty">No matches.</div>' + buyHint) + '</div>';
+}
+function reviewBanner() {
+  var n = State.recipes.filter(function (r) { return r.review_flag; }).length;
+  if (!n && !State.filters.review) return '';
+  return '<div class="note">' + (n ? n + ' imported recipe' + (n === 1 ? '' : 's') + ' flagged to check. ' : 'Nothing left to check. ') +
+    '<button class="btn sm' + (State.filters.review ? '' : ' ghost') + '" onclick="State.filters.review=!State.filters.review;refresh()">' + (State.filters.review ? 'Show all' : 'Show flagged') + '</button></div>';
 }
 function refreshList() { var el = document.getElementById('recipeList'); if (el) { var list = filteredRecipes(); el.innerHTML = list.length ? list.map(recipeCard).join('') : '<div class="empty">No matches.</div>'; hydratePhotos(); } }
 
@@ -197,6 +205,7 @@ function renderRecipe(id) {
   var info = S.recipeInfo[id], lines = S.linesByRecipe[id] || [];
   var vars = State.variations.filter(function (v) { return v.recipe_id === id; });
   var fitHtml = '';
+  if (r.review_flag) fitHtml += '<div class="note"><b>Check this import:</b> ' + esc(r.review_flag) + ' <button class="btn sm" onclick="clearReviewFlag(\'' + id + '\')">Looks good</button> <button class="btn sm ghost" onclick="editRecipe(\'' + id + '\')">Fix it</button></div>';
   State.profiles.forEach(function (p) { var f = info.fits[p.id]; if (f.reasons.length) fitHtml += '<div class="note"><b>' + esc(p.person_name) + ':</b> ' + esc(f.reasons.join('; ')) + ' <button class="btn sm ghost" onclick="askSwaps(\'' + id + '\',\'' + p.id + '\')">Suggest swaps</button></div>'; });
   return (r.photo_data || r.photo_path ? '<img class="photo-hero" alt="Photo of ' + esc(r.title) + '" data-photo="' + r.id + '" data-store="recipes"' + (r.photo_data ? ' src=\"' + esc(r.photo_data) + '\"' : '') + '>' : '') +
     '<div class="card"><div class="row between"><h2 style="margin:0">' + esc(r.title) + '</h2><div class="ring" style="--pct:' + info.cov.pct + '"><span>' + info.cov.pct + '%</span></div></div>' +
@@ -241,6 +250,7 @@ function saveRecipeForm(id) {
   rec.meal_type = [].map.call(document.querySelectorAll('.meal-chip.on'), function (c) { return c.dataset.v; });
   rec.steps = v('fSteps').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
   rec.notes = v('fNotes').trim();
+  if (id) rec.review_flag = null; // editing an imported recipe counts as checking it
   if (!id && S.pendingDraft) { rec.source_type = S.pendingDraft.source_type || 'manual'; if (S.pendingDraft.source_ref) rec.source_ref = S.pendingDraft.source_ref; }
   var lineTexts = v('fIng').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
   var file = document.getElementById('fPhoto').files[0];
@@ -280,10 +290,11 @@ function renderScan() {
     '<div class="big-btn" onclick="scanBarcode()"><span class="ico">&#9646;&#9646;&#9646;</span>Barcode<div class="muted">packaged item</div></div>' +
     '<div class="big-btn" onclick="pasteRecipe()"><span class="ico">&#128279;</span>Link / paste<div class="muted">URL or text</div></div>' +
     '</div>' +
-    '<div class="btn-row"><button class="btn ghost" onclick="scanPhoto(\'recipe\', true)">&#128444; Recipe from saved photo</button><button class="btn ghost" onclick="scanPhoto(\'receipt\', true)">&#128444; Receipt from saved photo</button></div>' +
+    '<div class="btn-row"><button class="btn ghost" onclick="scanPhoto(\'recipe\', true)">&#128444; Recipe from saved photo</button><button class="btn ghost" onclick="scanPhoto(\'receipt\', true)">&#128444; Receipt from saved photo</button><button class="btn ghost" onclick="batchImportRecipes()">&#128218; Batch import recipes</button></div>' +
     '<h2>Manual</h2><div class="btn-row"><button class="btn ghost" onclick="editRecipe()">Type a recipe</button><button class="btn ghost" onclick="editPantryItem()">Add pantry item</button><button class="btn ghost" onclick="logFood()">Log a meal</button></div>' +
     '<input id="scanFile" type="file" accept="image/*" capture="environment" class="hidden" onchange="onScanFile(this)">' +
-    '<input id="scanLibrary" type="file" accept="image/*" class="hidden" onchange="onScanFile(this)">';
+    '<input id="scanLibrary" type="file" accept="image/*" class="hidden" onchange="onScanFile(this)">' +
+    '<input id="scanBatch" type="file" accept="image/*" multiple class="hidden" onchange="onBatchFiles(this)">';
 }
 var scanKind = 'recipe';
 // fromLibrary opens the saved-photos picker; otherwise the camera opens directly.
@@ -304,12 +315,141 @@ function scanImage(kind, fileOrBlob) {
     .catch(function (e) { toast('Scan failed: ' + e.message); });
 }
 function downscale(file, max) {
-  return new Promise(function (resolve) {
+  return new Promise(function (resolve, reject) {
     var img = new Image(); var url = URL.createObjectURL(file);
     img.onload = function () { var s = Math.min(1, max / Math.max(img.width, img.height)); var c = document.createElement('canvas'); c.width = img.width * s; c.height = img.height * s; c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', 0.82)); };
+    img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('This photo could not be opened.')); };
     img.src = url;
   });
 }
+/* ---------- Batch recipe import ---------- */
+// Many saved photos at once. Each photo is read on its own; pages that look cut off are
+// matched up (Logic.stitchPages) and re-read together; every recipe is saved straight
+// away, and anything the reader was unsure about gets review_flag for a later look.
+var BATCH_MAX = 20, BATCH_PAGES_MAX = 6; // the brain reads at most 6 photos in one call
+var batchRunning = false; // one import at a time, so progress and summaries never mix
+function batchImportRecipes() {
+  if (!Sync.enabled()) return toast('Configure Supabase first (Settings)');
+  if (batchRunning) return toast('An import is still running. Wait for it to finish first.');
+  document.getElementById('scanBatch').click();
+}
+function onBatchFiles(input) {
+  var files = [].slice.call(input.files || []); input.value = '';
+  if (!files.length) return;
+  if (files.length > BATCH_MAX) { toast('Importing the first ' + BATCH_MAX + ' photos'); files = files.slice(0, BATCH_MAX); }
+  runRecipeBatch(files);
+}
+// The batch panel's element, only while that panel is still the open sheet.
+function batchEl(id) {
+  var sheet = document.getElementById('sheet'), el = document.getElementById(id);
+  return el && sheet && !sheet.classList.contains('hidden') ? el : null;
+}
+// Capture order is the best guess at page order (a page and the next are usually shot
+// back to back). Use each photo's EXIF capture time when every photo has one; file dates
+// can be reset by saving or downloading, so they are only the fallback.
+function orderByCapture(files) {
+  return Promise.all(files.map(function (f) {
+    return f.slice(0, 131072).arrayBuffer().then(Logic.exifTakenAt, function () { return null; });
+  })).then(function (taken) {
+    var exif = taken.every(function (t) { return t != null; });
+    var key = files.map(function (f, i) { return exif ? taken[i] : f.lastModified; });
+    return files.map(function (f, i) { return i; })
+      .sort(function (a, b) { return (key[a] - key[b]) || files[a].name.localeCompare(files[b].name); })
+      .map(function (i) { return files[i]; });
+  });
+}
+function runRecipeBatch(files) {
+  batchRunning = true;
+  var total = files.length;
+  openSheet('<h2 style="margin-top:0">Importing ' + total + ' photo' + (total === 1 ? '' : 's') + '</h2>' +
+    '<p id="batchMsg">Getting the photos in order...</p><progress id="batchBar" max="' + total + '" value="0" style="width:100%"></progress>' +
+    '<p class="muted">Recipes save as they finish. You can close this; the import keeps going while the app is open.</p>');
+  orderByCapture(files).then(function (sorted) { readBatch(sorted); }, function (e) { batchRunning = false; toast('Import stopped: ' + e.message); });
+}
+function readBatch(files) {
+  var total = files.length, known = State.ingredients.map(function (i) { return i.name; });
+  var shots = [], reads = [], done = 0, next = 0;
+  function say(text) { var m = batchEl('batchMsg'), b = batchEl('batchBar'); if (m) m.textContent = text; if (b) b.value = done; }
+  function readOne(i) {
+    return downscale(files[i], 1600).then(function (d) { shots[i] = d; return Sync.brain('parse_recipe', { image: d, batch: true, ingredients: known }); })
+      .then(function (r) { reads[i] = r; }, function (e) { reads[i] = { error: e.message }; })
+      .then(function () { done++; say('Read ' + done + ' of ' + total + '...'); });
+  }
+  function worker() { if (next >= total) return Promise.resolve(); var i = next++; return readOne(i).then(worker); }
+  Promise.all([worker(), worker()]).then(function () {
+    var failed = 0, empty = 0, firstError = '';
+    // Skipped photos keep their place, so pages on either side of one never look adjacent.
+    var pages = reads.map(function (r) {
+      if (r.error) { failed++; firstError = firstError || r.error; return { skip: true }; }
+      if (!r.title && !(r.ingredients || []).length && !(r.steps || []).length) { empty++; return { skip: true }; }
+      return { starts_mid: !!r.starts_mid_recipe, ends_incomplete: !!r.ends_incomplete };
+    });
+    var groups = Logic.stitchPages(pages);
+    var saved = 0, flagged = 0, chain = Promise.resolve();
+    say('Saving ' + groups.length + ' recipe' + (groups.length === 1 ? '' : 's') + '...');
+    groups.forEach(function (g) {
+      var idx = g.pages;
+      chain = chain.then(function () {
+        if (idx.length === 1) return { draft: reads[idx[0]], incomplete: !g.complete };
+        if (idx.length > BATCH_PAGES_MAX) return { draft: joinDrafts(idx.map(function (i) { return reads[i]; })), incomplete: !g.complete };
+        // Several pages: read them together so steps split across a page break join up.
+        return Sync.brain('parse_recipe', { images: idx.map(function (i) { return shots[i]; }), batch: true, ingredients: known })
+          .then(function (d) { return { draft: d, incomplete: d.starts_mid_recipe || d.ends_incomplete }; },
+            function () { return { draft: joinDrafts(idx.map(function (i) { return reads[i]; })), incomplete: !g.complete }; });
+      }).then(function (res) {
+        var flag = batchFlag(res.draft, idx.length, res.incomplete);
+        return saveBatchRecipe(res.draft, shots[idx[0]], flag).then(function () { saved++; if (flag) flagged++; });
+      }).catch(function (e) { failed++; firstError = firstError || ('saving failed: ' + e.message); });
+    });
+    return chain.then(function () {
+      var parts = ['Saved ' + saved + ' recipe' + (saved === 1 ? '' : 's')];
+      if (flagged) parts.push(flagged + ' flagged to check');
+      if (empty) parts.push(empty + ' photo' + (empty === 1 ? '' : 's') + ' had no recipe');
+      if (failed) parts.push(failed + ' failed (' + firstError + ')');
+      done = total; say(parts.join(', ') + '.');
+      return loadAll().then(function () {
+        var m = batchEl('batchMsg');
+        if (m) m.insertAdjacentHTML('afterend', '<div class="btn-row"><button class="btn" onclick="closeSheet();State.filters.review=' + (flagged ? 'true' : 'false') + ';showScreen(\'recipes\')">' + (flagged ? 'Review flagged' : 'See recipes') + '</button><button class="btn ghost" onclick="closeSheet()">Done</button></div>');
+        else toast(parts.join(', '));
+        if (Sync.enabled()) syncNow();
+      });
+    });
+  }).then(function () { batchRunning = false; }, function (e) { batchRunning = false; toast('Import stopped: ' + e.message); });
+}
+// Fallback when the combined re-read fails: stack the single-page reads in order.
+function joinDrafts(drafts) {
+  return {
+    title: (drafts.find(function (d) { return d.title; }) || {}).title || '',
+    servings: drafts[0].servings, cuisine: drafts[0].cuisine, meal_type: drafts[0].meal_type, prep_min: drafts[0].prep_min, cook_min: drafts[0].cook_min,
+    ingredients: [].concat.apply([], drafts.map(function (d) { return d.ingredients || []; })),
+    steps: [].concat.apply([], drafts.map(function (d) { return d.steps || []; })),
+    notes: drafts.map(function (d) { return d.notes; }).filter(Boolean).join('\n'),
+    confidence: Math.min.apply(null, drafts.map(function (d) { return d.confidence || 0; })),
+    issues: [].concat.apply([], drafts.map(function (d) { return d.issues || []; })).concat('pages joined without a combined read')
+  };
+}
+// Why a batch recipe needs a person's look, or null when it read cleanly.
+function batchFlag(d, pageCount, incomplete) { // keeps up to 4 reported issues
+  var f = [];
+  if (pageCount > 1) f.push('combined from ' + pageCount + ' photos');
+  if (incomplete) f.push('may be missing a page');
+  if ((d.confidence || 0) < 0.6) f.push('hard to read');
+  if (!d.title) f.push('no title found');
+  (d.issues || []).slice(-4).forEach(function (s) { if (s) f.push(String(s)); });
+  return f.length ? f.join('; ').slice(0, 300) : null;
+}
+function saveBatchRecipe(d, shot, flag) {
+  var rec = { title: d.title || 'Untitled recipe', servings: d.servings || 4, cuisine: d.cuisine || '', prep_min: d.prep_min || null, cook_min: d.cook_min || null,
+    meal_type: d.meal_type || [], steps: d.steps || [], notes: d.notes || '', source_type: 'photo', times_cooked: 0, photo_data: shot || null, review_flag: flag };
+  return saveRecipeWithLines(rec, (d.ingredients || []).map(function (l) { return { qty: l.qty, unit: l.unit || '', name: l.name, prep: (l.prep || '') + (l.optional ? ' (optional)' : '') }; }));
+}
+// Clears only the flag on the stored record, so a sync that landed meanwhile (a photo
+// path, a deletion from another device) is never overwritten by the copy on screen.
+function clearReviewFlag(id) {
+  DB.update('recipes', id, function (cur) { if (!cur || cur.deleted) return null; cur.review_flag = null; return cur; })
+    .then(loadAll).then(function () { toast('Marked as checked'); refresh(); });
+}
+
 function scanBarcode() {
   scanSession++;
   openSheet('<h2 style="margin-top:0">Scan a barcode</h2>' +
