@@ -206,8 +206,12 @@ var Sync = (function () {
     if (inflight_run) { rerun = true; return inflight_run; }
     inflight_run = runOnce().then(function (r) {
       inflight_run = null;
-      if (rerun) { rerun = false; return run(); }
-      return r;
+      if (!rerun) return r;
+      rerun = false;
+      // Report both passes, so a caller still refreshes for what the first pass pulled.
+      return run().then(function (r2) {
+        return { pushed: r.pushed + r2.pushed, pulled: r.pulled + r2.pulled, photos: r.photos + r2.photos, signedIn: r2.signedIn };
+      });
     }, function (e) { inflight_run = null; rerun = false; throw e; });
     return inflight_run;
   }
