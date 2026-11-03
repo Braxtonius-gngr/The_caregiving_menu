@@ -241,9 +241,19 @@ function scanBarcode() {
   });
 }
 // Local match first (works offline), then the cloud lookup, then Open Food Facts directly.
-function lookupBarcode(code) {
-  var known = State.ingredients.find(function (i) { return i.upc === code; });
-  if (known) return Promise.resolve({ name: known.name, known: true });
+// codes: normalised candidates from Scanner.candidates, best first.
+function lookupBarcode(codes) {
+  var known = State.ingredients.find(function (i) { return i.upc && codes.indexOf(i.upc) > -1; });
+  if (known) return Promise.resolve({ name: known.name, known: true, code: known.upc });
+  var tryCode = function (i) {
+    if (i >= codes.length) return Promise.resolve({ name: null, code: codes[0] });
+    return remoteLookup(codes[i]).catch(function () { return { name: null }; }).then(function (res) {
+      return res && res.name ? Object.assign(res, { code: codes[i] }) : tryCode(i + 1);
+    });
+  };
+  return tryCode(0);
+}
+function remoteLookup(code) {
   var viaCloud = Sync.enabled() ? Sync.lookup('barcode', code) : Promise.reject(new Error('no cloud'));
   return viaCloud.catch(function () {
     return fetch('https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(code) + '.json?fields=product_name,nutriments').then(function (r) { return r.json(); }).then(function (d) {
@@ -254,14 +264,15 @@ function lookupBarcode(code) {
     });
   });
 }
-function onBarcode(code) {
-  if (!code) return;
-  if (!Scanner.validGtin(code)) return toast('That number does not look like a barcode');
+function onBarcode(text, format) {
+  if (!text) return;
+  var codes = Scanner.candidates(text, format);
+  if (!codes.length) return toast('That number does not look like a barcode');
   Scanner.stop();
-  var m = document.getElementById('scanMsg'); if (m) m.textContent = 'Found ' + code + ', looking it up...';
-  lookupBarcode(code).catch(function () { return { name: null }; }).then(function (res) {
+  var m = document.getElementById('scanMsg'); if (m) m.textContent = 'Found ' + codes[0] + ', looking it up...';
+  lookupBarcode(codes).catch(function () { return { name: null, code: codes[0] }; }).then(function (res) {
     if (!res.name) toast('Not in the product database. Name it once and it will be remembered.');
-    reviewPantry([{ name: res.name || '', qty: 1, unit: 'each', nutrition: res.nutrition, upc: code, raw: 'barcode ' + code + (res.known ? ' (seen before)' : '') }], 'barcode');
+    reviewPantry([{ name: res.name || '', qty: 1, unit: 'each', nutrition: res.nutrition, upc: res.code, raw: 'barcode ' + res.code + (res.known ? ' (seen before)' : '') }], 'barcode');
   });
 }
 function pasteRecipe() {
@@ -420,7 +431,8 @@ function saveLog() {
 /* ---------- diary photos ---------- */
 function photoThumb(e) {
   if (!e.photo_data && !e.photo_path) return '';
-  return '<img class="photo-thumb" alt="Meal photo" data-photo="' + e.id + '"' + (e.photo_data ? ' src="' + e.photo_data + '"' : '') + ' onclick="viewPhoto(\'' + e.id + '\')">';
+  // A real button so the full view is reachable by keyboard and announced as a control.
+  return '<button type="button" class="photo-btn" aria-label="View meal photo" onclick="viewPhoto(\'' + e.id + '\')"><img class="photo-thumb" alt="" data-photo="' + e.id + '"' + (e.photo_data ? ' src="' + e.photo_data + '"' : '') + '></button>';
 }
 function photoStatus(e) {
   if (!Sync.enabled() || (!e.photo_data && !e.photo_path)) return '';

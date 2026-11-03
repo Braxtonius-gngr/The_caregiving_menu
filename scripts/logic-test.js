@@ -82,5 +82,19 @@ t('barcode check digits', function () {
   assert.ok(Scanner.validGtin('96385074')); // EAN-8
   assert.ok(!Scanner.validGtin('036000291453')); // one digit off
   assert.ok(!Scanner.validGtin('12'));
+  assert.ok(!Scanner.validGtin('ABC-123'));
+});
+t('UPC-E expands to UPC-A before validation', function () {
+  assert.strictEqual(Scanner.expandUpcE('04252614'), '042100005264');
+  assert.strictEqual(Scanner.expandUpcE('04252615'), null); // wrong check digit
+  assert.strictEqual(JSON.stringify(Scanner.candidates('04252614', 'upc_e')), JSON.stringify(['042100005264']));
+  assert.strictEqual(JSON.stringify(Scanner.candidates('04252614', 'ean_8')), JSON.stringify([])); // not a valid EAN-8
+});
+t('typed 8-digit codes try every valid reading', function () {
+  assert.strictEqual(JSON.stringify(Scanner.candidates('04252614')), JSON.stringify(['042100005264']));
+  assert.strictEqual(JSON.stringify(Scanner.candidates('96385074')), JSON.stringify(['96385074']));
+  assert.strictEqual(JSON.stringify(Scanner.candidates('036000291452', 'upc_a')), JSON.stringify(['036000291452']));
+  assert.strictEqual(JSON.stringify(Scanner.candidates('12345')), JSON.stringify([]));
+  assert.strictEqual(JSON.stringify(Scanner.candidates('ABC-1234', 'code_128')), JSON.stringify(['ABC-1234']));
 });
 console.log(n + ' tests passed');

@@ -31,6 +31,7 @@ self.addEventListener('fetch', function (e) {
   if (e.request.method !== 'GET') return;
   var url = new URL(e.request.url);
   // Pinned, versioned CDN libraries (supabase-js, ZXing) never change: cache-first so they work offline.
+  // Both load with crossorigin=anonymous, so these are CORS responses and res.ok is meaningful.
   if (e.request.url.indexOf(CDN) === 0) {
     e.respondWith(caches.match(e.request).then(function (hit) {
       return hit || fetch(e.request).then(function (res) {

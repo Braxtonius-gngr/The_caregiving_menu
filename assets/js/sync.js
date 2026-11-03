@@ -71,7 +71,8 @@ var Sync = (function () {
           // Keep the local photo copy when the server row still points at the same photo.
           return Promise.all(r.data.map(function (row) {
             return DB.get(store, row.id).then(function (local) {
-              if (local && local.photo_data && local.photo_path === row.photo_path) row.photo_data = local.photo_data;
+              // Postgres sends null for an unset path; a never-uploaded local entry has undefined.
+              if (local && local.photo_data && (local.photo_path || null) === (row.photo_path || null)) row.photo_data = local.photo_data;
               return row;
             });
           })).then(function (rows) { return DB.bulkPut(store, rows); });
@@ -94,8 +95,12 @@ var Sync = (function () {
             return c.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: true });
           }).then(function (r) {
             if (r.error) throw r.error;
-            e.photo_path = path;
-            return DB.put('diary_entries', e).then(function () { return n + 1; });
+            // Re-read: the entry may have been deleted or edited while the upload ran.
+            return DB.get('diary_entries', e.id).then(function (cur) {
+              if (!cur || cur.deleted) return queuePhotoDelete(path).then(function () { return n; });
+              cur.photo_path = path;
+              return DB.put('diary_entries', cur).then(function () { return n + 1; });
+            });
           }).catch(function () { return n; }); // leave it pending; never block the rest of the sync
         });
       });
@@ -106,7 +111,7 @@ var Sync = (function () {
   function run() {
     return session().then(function (s) {
       if (!s) return { pushed: 0, pulled: 0, photos: 0, signedIn: false };
-      return uploadPendingPhotos().then(function (ph) {
+      return uploadPendingPhotos().then(function (ph) { return flushPhotoDeletes().then(function () { return ph; }); }).then(function (ph) {
         return push().then(function (p) { return pull().then(function (q) { return { pushed: p, pulled: q, photos: ph, signedIn: true }; }); });
       });
     });
@@ -162,11 +167,35 @@ var Sync = (function () {
     return inflight[entry.id];
   }
 
-  function removePhoto(path) {
+  // Photo deletions are queued in local meta and retried on every signed-in sync
+  // until Storage confirms them, so deleting offline never leaves an orphan behind.
+  function queuePhotoDelete(path) {
+    return DB.meta('pending_photo_deletes').then(function (list) {
+      list = list || [];
+      if (list.indexOf(path) < 0) list.push(path);
+      return DB.meta('pending_photo_deletes', list);
+    });
+  }
+  function flushPhotoDeletes() {
     var c = getClient();
-    if (!c || !path) return Promise.resolve();
-    return c.storage.from(BUCKET).remove([path]).then(function () {}, function () {});
+    if (!c) return Promise.resolve(0);
+    return DB.meta('pending_photo_deletes').then(function (list) {
+      if (!list || !list.length) return 0;
+      return c.storage.from(BUCKET).remove(list).then(function (r) {
+        if (r.error) return 0;
+        // Re-read so a deletion queued while this request ran is not dropped.
+        return DB.meta('pending_photo_deletes').then(function (now) {
+          return DB.meta('pending_photo_deletes', (now || []).filter(function (p) { return list.indexOf(p) < 0; }));
+        }).then(function () { return list.length; });
+      }, function () { return 0; });
+    });
+  }
+  function removePhoto(path) {
+    if (!enabled() || !path) return Promise.resolve();
+    return queuePhotoDelete(path).then(function () {
+      return session().then(function (s) { return s ? flushPhotoDeletes() : 0; }).catch(function () { return 0; });
+    });
   }
 
-  return { photoSrc: photoSrc, removePhoto: removePhoto, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
+  return { photoSrc: photoSrc, removePhoto: removePhoto, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
 })();

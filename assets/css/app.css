@@ -99,7 +99,9 @@ ol.steps li { margin: 6px 0; }
 .list-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .qty-ctl { display: flex; align-items: center; gap: 6px; }
 .qty-ctl button { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
-.photo-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; background: var(--line); cursor: pointer; flex: none; }
+.photo-btn { flex: none; padding: 0; border: 0; background: none; border-radius: 10px; cursor: pointer; line-height: 0; }
+.photo-btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.photo-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; background: var(--line); display: block; }
 .photo-big { width: 100%; border-radius: var(--radius); display: block; background: var(--line); min-height: 120px; }
 
 .sheet { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 20; display: flex; align-items: flex-end; }
