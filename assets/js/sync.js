@@ -129,12 +129,18 @@ var Sync = (function () {
   // Photo-only update. Never re-push the whole row: that would overwrite a deletion
   // made on another device. Only a row that is still live on the server gets the path.
   function attachPhotoPath(c, store, id, photoData, path) {
-    return c.from(store).update({ photo_path: path }).eq('id', id).eq('deleted', false).select('id').then(function (r) {
+    // Only a live row with no photo yet: if another upload already attached one, it won.
+    return c.from(store).update({ photo_path: path }).eq('id', id).eq('deleted', false).is('photo_path', null).select('id').then(function (r) {
       if (r.error) throw r.error;
       if (r.data && r.data.length) return adoptPath(store, id, photoData, path, true);
-      return c.from(store).select('id').eq('id', id).then(function (q) {
+      return c.from(store).select('id,deleted,photo_path').eq('id', id).then(function (q) {
         if (q.error) throw q.error;
-        if (q.data && q.data.length) {
+        var row = q.data && q.data[0];
+        if (row && !row.deleted && row.photo_path && row.photo_path !== path) {
+          // A competing upload attached first; keep the server's photo and drop only ours.
+          return queuePhotoDelete(path).then(function () { return false; });
+        }
+        if (row) {
           // Deleted elsewhere: mirror the tombstone and drop the photo we just uploaded.
           return DB.update(store, id, function (cur) { if (!cur) return null; cur.deleted = true; cur.photo_data = null; return cur; }, { silent: true })
             .then(function () { return queuePhotoDelete(path); }).then(function () { return false; });
@@ -145,9 +151,22 @@ var Sync = (function () {
     });
   }
 
+  // One sync at a time. A call made while a sync is running joins it, and one more
+  // pass runs afterwards to pick up whatever changed meanwhile.
+  var inflight_run = null, rerun = false;
+  function run() {
+    if (inflight_run) { rerun = true; return inflight_run; }
+    inflight_run = runOnce().then(function (r) {
+      inflight_run = null;
+      if (rerun) { rerun = false; return run(); }
+      return r;
+    }, function (e) { inflight_run = null; rerun = false; throw e; });
+    return inflight_run;
+  }
+
   // Order matters: push local changes, pull remote ones (including deletions made on
   // other devices), and only then attach photos, so an upload never revives a deleted entry.
-  function run() {
+  function runOnce() {
     return session().then(function (s) {
       if (!s) return { pushed: 0, pulled: 0, photos: 0, signedIn: false };
       return push().then(function (p) {
