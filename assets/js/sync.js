@@ -98,8 +98,7 @@ var Sync = (function () {
             // Re-read: the entry may have been deleted or edited while the upload ran.
             return DB.get('diary_entries', e.id).then(function (cur) {
               if (!cur || cur.deleted) return queuePhotoDelete(path).then(function () { return n; });
-              cur.photo_path = path;
-              return DB.put('diary_entries', cur).then(function () { return n + 1; });
+              return attachPhotoPath(c, cur, path).then(function (ok) { return ok ? n + 1 : n; });
             });
           }).catch(function () { return n; }); // leave it pending; never block the rest of the sync
         });
@@ -108,11 +107,37 @@ var Sync = (function () {
     });
   }
 
+  // Photo-only update. Never re-push the whole row: that would overwrite a deletion
+  // made on another device. Only a row that is still live on the server gets the path.
+  function attachPhotoPath(c, cur, path) {
+    return c.from('diary_entries').update({ photo_path: path }).eq('id', cur.id).eq('deleted', false).select('id').then(function (r) {
+      if (r.error) throw r.error;
+      if (r.data && r.data.length) { cur.photo_path = path; return DB.put('diary_entries', cur, { silent: true }).then(function () { return true; }); }
+      return c.from('diary_entries').select('id').eq('id', cur.id).then(function (q) {
+        if (q.error) throw q.error;
+        if (q.data && q.data.length) {
+          // Deleted elsewhere: mirror the tombstone and drop the photo we just uploaded.
+          cur.deleted = true; cur.photo_data = null;
+          return DB.put('diary_entries', cur, { silent: true }).then(function () { return queuePhotoDelete(path); }).then(function () { return false; });
+        }
+        // Not on the server yet (logged mid-sync): it goes up whole with its next push.
+        cur.photo_path = path;
+        return DB.put('diary_entries', cur).then(function () { return true; });
+      });
+    });
+  }
+
+  // Order matters: push local changes, pull remote ones (including deletions made on
+  // other devices), and only then attach photos, so an upload never revives a deleted entry.
   function run() {
     return session().then(function (s) {
       if (!s) return { pushed: 0, pulled: 0, photos: 0, signedIn: false };
-      return uploadPendingPhotos().then(function (ph) { return flushPhotoDeletes().then(function () { return ph; }); }).then(function (ph) {
-        return push().then(function (p) { return pull().then(function (q) { return { pushed: p, pulled: q, photos: ph, signedIn: true }; }); });
+      return push().then(function (p) {
+        return pull().then(function (q) {
+          return uploadPendingPhotos().then(function (ph) {
+            return flushPhotoDeletes().then(function () { return { pushed: p, pulled: q, photos: ph, signedIn: true }; });
+          });
+        });
       });
     });
   }
@@ -169,30 +194,34 @@ var Sync = (function () {
 
   // Photo deletions are queued in local meta and retried on every signed-in sync
   // until Storage confirms them, so deleting offline never leaves an orphan behind.
+  var DELETE_QUEUE = 'pending_photo_deletes';
   function queuePhotoDelete(path) {
-    return DB.meta('pending_photo_deletes').then(function (list) {
+    return DB.metaUpdate(DELETE_QUEUE, function (list) {
       list = list || [];
       if (list.indexOf(path) < 0) list.push(path);
-      return DB.meta('pending_photo_deletes', list);
+      return list;
     });
   }
   function flushPhotoDeletes() {
     var c = getClient();
     if (!c) return Promise.resolve(0);
-    return DB.meta('pending_photo_deletes').then(function (list) {
+    return DB.meta(DELETE_QUEUE).then(function (list) {
       if (!list || !list.length) return 0;
       return c.storage.from(BUCKET).remove(list).then(function (r) {
         if (r.error) return 0;
-        // Re-read so a deletion queued while this request ran is not dropped.
-        return DB.meta('pending_photo_deletes').then(function (now) {
-          return DB.meta('pending_photo_deletes', (now || []).filter(function (p) { return list.indexOf(p) < 0; }));
+        // Atomic: a path queued while the request ran survives the cleanup.
+        return DB.metaUpdate(DELETE_QUEUE, function (now) {
+          return (now || []).filter(function (p) { return list.indexOf(p) < 0; });
         }).then(function () { return list.length; });
       }, function () { return 0; });
     });
   }
+  // Always queue a path, even if the Supabase library failed to load this session;
+  // the network call waits for a signed-in sync.
   function removePhoto(path) {
-    if (!enabled() || !path) return Promise.resolve();
+    if (!path) return Promise.resolve();
     return queuePhotoDelete(path).then(function () {
+      if (!getClient()) return 0;
       return session().then(function (s) { return s ? flushPhotoDeletes() : 0; }).catch(function () { return 0; });
     });
   }

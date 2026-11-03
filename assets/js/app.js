@@ -39,7 +39,10 @@ function ensureIngredient(name, nutrition, upc) {
 }
 
 function addToPantry(ingredientId, qty, unit, location, event, extra) {
-  var existing = (S.pantryByIng[ingredientId] || []).find(function (p) { return (p.unit || '') === (unit || '') && p.location === location; });
+  var here = (S.pantryByIng[ingredientId] || []).filter(function (p) { return p.location === location; });
+  // A purchase with no unit (e.g. from the shopping list) tops up the existing record in its unit.
+  if (!unit && here.length) unit = here[0].unit || '';
+  var existing = here.find(function (p) { return (p.unit || '') === (unit || ''); });
   var rec = existing || { ingredient_id: ingredientId, qty: 0, unit: unit, location: location || 'pantry' };
   rec.qty = (rec.qty || 0) + (qty || 0);
   if (extra) { if (extra.expires_on) rec.expires_on = extra.expires_on; if (extra.par_qty != null) rec.par_qty = extra.par_qty; }

@@ -26,7 +26,8 @@ function rebuildIndexes() {
 
 function toast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(t._h); t._h = setTimeout(function () { t.classList.add('hidden'); }, 2200); }
 function openSheet(html) { document.getElementById('sheetBody').innerHTML = html; document.getElementById('sheet').classList.remove('hidden'); }
-function closeSheet() { if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
+var scanSession = 0; // bumped when the scanner opens or a sheet closes; late lookups compare against it
+function closeSheet() { scanSession++; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
 
 var TITLES = { home: 'Home', recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe' };
 var currentScreen = 'home';
@@ -229,6 +230,7 @@ function downscale(file, max) {
   });
 }
 function scanBarcode() {
+  scanSession++;
   openSheet('<h2 style="margin-top:0">Scan a barcode</h2>' +
     '<div class="scan-view"><video id="scanVideo" playsinline muted></video><div class="scan-guide"></div></div>' +
     '<canvas id="scanCanvas" class="hidden"></canvas>' +
@@ -243,7 +245,7 @@ function scanBarcode() {
 // Local match first (works offline), then the cloud lookup, then Open Food Facts directly.
 // codes: normalised candidates from Scanner.candidates, best first.
 function lookupBarcode(codes) {
-  var known = State.ingredients.find(function (i) { return i.upc && codes.indexOf(i.upc) > -1; });
+  var known = State.ingredients.find(function (i) { return codes.some(function (c) { return Scanner.sameProduct(c, i.upc); }); });
   if (known) return Promise.resolve({ name: known.name, known: true, code: known.upc });
   var tryCode = function (i) {
     if (i >= codes.length) return Promise.resolve({ name: null, code: codes[0] });
@@ -269,8 +271,11 @@ function onBarcode(text, format) {
   var codes = Scanner.candidates(text, format);
   if (!codes.length) return toast('That number does not look like a barcode');
   Scanner.stop();
+  var mine = scanSession;
   var m = document.getElementById('scanMsg'); if (m) m.textContent = 'Found ' + codes[0] + ', looking it up...';
   lookupBarcode(codes).catch(function () { return { name: null, code: codes[0] }; }).then(function (res) {
+    // The user closed the scanner (or opened another form) while this was in flight.
+    if (mine !== scanSession || !document.getElementById('scanMsg')) return;
     if (!res.name) toast('Not in the product database. Name it once and it will be remembered.');
     reviewPantry([{ name: res.name || '', qty: 1, unit: 'each', nutrition: res.nutrition, upc: res.code, raw: 'barcode ' + res.code + (res.known ? ' (seen before)' : '') }], 'barcode');
   });
@@ -331,9 +336,13 @@ function commitPantryReview(scanNext) {
     if (scanNext) { refresh(); scanBarcode(); } else { closeSheet(); showScreen('pantry'); }
   });
 }
+// Where a newly bought item goes: wherever this ingredient is already kept (so the
+// existing record is topped up), else a default by category.
 function guessLocation(ing) {
+  var existing = (S.pantryByIng && S.pantryByIng[ing.id]) || [];
+  if (existing.length) return existing[0].location || 'pantry';
   if (/frozen/.test(ing.name || '') || ing.category === 'frozen') return 'freezer';
-  return ing.category === 'dairy' || ing.category === 'meat' ? 'fridge' : 'pantry';
+  return ing.category === 'dairy' || ing.category === 'meat' || ing.category === 'produce' ? 'fridge' : 'pantry';
 }
 
 /* ---------- Pantry ---------- */
@@ -451,7 +460,12 @@ function viewPhoto(id) {
   if (!e) return;
   var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
   openSheet('<h2 style="margin-top:0">' + esc(r ? r.title : e.free_text || 'Meal') + '</h2><p class="muted">' + e.eaten_at.slice(0, 10) + ' ' + e.eaten_at.slice(11, 16) + '</p><img id="bigPhoto" class="photo-big" alt="Meal photo"><div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
-  Sync.photoSrc(e).then(function (src) { var el = document.getElementById('bigPhoto'); if (el && src) el.src = src; else if (el) el.replaceWith(Object.assign(document.createElement('p'), { className: 'muted', textContent: 'Photo is in the cloud. Sign in or reconnect to see it.' })); });
+  var el = document.getElementById('bigPhoto'); // this sheet's image; a later sheet makes a new one
+  Sync.photoSrc(e).then(function (src) {
+    if (!el.isConnected) return;
+    if (src) el.src = src;
+    else el.replaceWith(Object.assign(document.createElement('p'), { className: 'muted', textContent: 'Photo is in the cloud. Sign in or reconnect to see it.' }));
+  });
 }
 function deleteDiaryEntry(id) {
   var e = State.diary.find(function (x) { return x.id === id; });

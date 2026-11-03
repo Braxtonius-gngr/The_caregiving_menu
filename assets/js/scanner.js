@@ -93,6 +93,14 @@ var Scanner = (function () {
     return validGtin(text) ? [text] : [];
   }
 
+  // UPC-A 036000291452, EAN-13 0036000291452 and GTIN-14 00036000291452 are one product.
+  // Compare numeric GTINs in their 14-digit form; other symbologies match exactly.
+  function gtinKey(code) {
+    code = String(code || '').trim();
+    return /^\d{8}$|^\d{12,14}$/.test(code) ? ('00000000000000' + code).slice(-14) : code;
+  }
+  function sameProduct(a, b) { return !!a && !!b && gtinKey(a) === gtinKey(b); }
+
   function stopTracks(s) { if (s) s.getTracks().forEach(function (t) { t.stop(); }); }
 
   function start(video, canvas, onCode, onError) {
@@ -146,5 +154,5 @@ var Scanner = (function () {
 
   function decoderKind() { return decoder ? decoder.kind : null; }
 
-  return { start: start, stop: stop, validGtin: validGtin, expandUpcE: expandUpcE, candidates: candidates, decoderKind: decoderKind };
+  return { start: start, stop: stop, validGtin: validGtin, expandUpcE: expandUpcE, candidates: candidates, gtinKey: gtinKey, sameProduct: sameProduct, decoderKind: decoderKind };
 })();

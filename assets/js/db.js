@@ -79,9 +79,27 @@ var DB = (function () {
     if (value === undefined) return get('meta', key).then(function (r) { return r ? r.value : null; });
     return tx('meta', 'readwrite', function (os) { os.put({ id: key, value: value }); });
   }
+  // Read-modify-write of one meta value inside a single readwrite transaction,
+  // so two overlapping updates cannot overwrite each other.
+  function metaUpdate(key, fn) {
+    return open().then(function (d) {
+      return new Promise(function (resolve, reject) {
+        var t = d.transaction('meta', 'readwrite');
+        var os = t.objectStore('meta');
+        var out;
+        var req = os.get(key);
+        req.onsuccess = function () {
+          out = fn(req.result ? req.result.value : null);
+          os.put({ id: key, value: out });
+        };
+        t.oncomplete = function () { resolve(out); };
+        t.onerror = function () { reject(t.error); };
+      });
+    });
+  }
   function outbox() { return tx('outbox', 'readonly', function (os) { return os.getAll(); }); }
   function clearOutbox(ids) { return tx('outbox', 'readwrite', function (os) { ids.forEach(function (id) { os.delete(id); }); }); }
   function wipe() { return open().then(function (d) { d.close(); dbp = null; return new Promise(function (res) { var r = indexedDB.deleteDatabase(NAME); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; }); }); }
 
-  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe };
+  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, metaUpdate: metaUpdate, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe };
 })();

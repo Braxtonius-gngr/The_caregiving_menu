@@ -97,4 +97,11 @@ t('typed 8-digit codes try every valid reading', function () {
   assert.strictEqual(JSON.stringify(Scanner.candidates('12345')), JSON.stringify([]));
   assert.strictEqual(JSON.stringify(Scanner.candidates('ABC-1234', 'code_128')), JSON.stringify(['ABC-1234']));
 });
+t('equivalent GTINs match, other codes match exactly', function () {
+  assert.ok(Scanner.sameProduct('036000291452', '0036000291452'));
+  assert.ok(Scanner.sameProduct('0036000291452', '00036000291452'));
+  assert.ok(!Scanner.sameProduct('036000291452', '4006381333931'));
+  assert.ok(Scanner.sameProduct('ABC-1234', 'ABC-1234'));
+  assert.ok(!Scanner.sameProduct('036000291452', null));
+});
 console.log(n + ' tests passed');
