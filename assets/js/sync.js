@@ -248,16 +248,25 @@ var Sync = (function () {
   }
 
   // Calls the /brain Edge Function. mode: parse_recipe | parse_receipt | estimate_plate | variations | diet_swaps | canonicalize
-  function brain(mode, payload) {
+  // Calls an Edge Function and turns failures into messages a person can act on.
+  function invokeFn(name, body) {
     var c = getClient();
-    if (!c) return Promise.reject(new Error('Cloud not configured. Set SUPABASE_URL in assets/js/config.js.'));
-    return c.functions.invoke('brain', { body: Object.assign({ mode: mode }, payload) }).then(function (r) { if (r.error) throw r.error; return r.data; });
+    if (!c) return Promise.reject(new Error('Cloud not configured. Open Settings and connect first.'));
+    return session().then(function (s) {
+      if (!s) throw new Error('Sign in first: Settings, then Cloud sync, then send yourself a sign-in link.');
+      return c.functions.invoke(name, { body: body });
+    }).then(function (r) {
+      if (!r.error) return r.data;
+      var res = r.error.context;
+      if (!res || typeof res.json !== 'function') throw r.error;
+      return res.json().catch(function () { return {}; }).then(function (d) {
+        if (res.status === 401) throw new Error('Your sign-in has expired. Sign in again in Settings.');
+        throw new Error((d && d.error) || ('Cloud error ' + res.status));
+      });
+    });
   }
-  function lookup(kind, q) {
-    var c = getClient();
-    if (!c) return Promise.reject(new Error('Cloud not configured.'));
-    return c.functions.invoke('lookup', { body: { kind: kind, q: q } }).then(function (r) { if (r.error) throw r.error; return r.data; });
-  }
+  function brain(mode, payload) { return invokeFn('brain', Object.assign({ mode: mode }, payload)); }
+  function lookup(kind, q) { return invokeFn('lookup', { kind: kind, q: q }); }
 
   function inviteCode() {
     var c = getClient();
