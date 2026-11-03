@@ -24,6 +24,7 @@ The full design lives in [docs/design.md](docs/design.md).
 | Diary photos | kept on the device | uploaded to a private bucket, visible on every household device, and cached for offline viewing |
 | Paste a recipe as text | basic parser | Claude parses it |
 | Recipe photo, receipt photo, recipe URL | | Claude parses it |
+| Batch import of saved recipe photos: cut-off pages are matched and read together, unsure results are flagged to check | | Claude parses it |
 | Camera barcode scanning, with "Add & scan next" for unpacking groceries | scans offline; looks up new products on Open Food Facts when online | lookup runs through the cloud function |
 | Ingredient nutrition lookup | | USDA FoodData Central |
 | Variations and diet swaps | | Claude |

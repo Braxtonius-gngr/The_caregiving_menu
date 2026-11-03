@@ -104,4 +104,25 @@ t('equivalent GTINs match, other codes match exactly', function () {
   assert.ok(Scanner.sameProduct('ABC-1234', 'ABC-1234'));
   assert.ok(!Scanner.sameProduct('036000291452', null));
 });
+// Arrays from the vm context compare by JSON.
+function pagesOf(groups) { return JSON.parse(JSON.stringify(groups.map(function (x) { return x.pages; }))); }
+t('stitchPages: stand-alone cards stay separate', function () {
+  var g = Logic.stitchPages([{}, {}, {}]);
+  assert.deepStrictEqual(pagesOf(g), [[0], [1], [2]]);
+  assert.ok(g.every(function (x) { return x.complete; }));
+});
+t('stitchPages: a cut-off page joins the next page (or the one before)', function () {
+  var P = function (s, e) { return { starts_mid: s, ends_incomplete: e }; };
+  assert.deepStrictEqual(pagesOf(Logic.stitchPages([P(0, 1), P(1, 0), P(0, 0)])), [[0, 1], [2]]);
+  assert.deepStrictEqual(pagesOf(Logic.stitchPages([P(1, 0), P(0, 1)])), [[1, 0]]);
+  var three = Logic.stitchPages([P(0, 1), P(1, 1), P(1, 0)]);
+  assert.deepStrictEqual(pagesOf(three), [[0, 1, 2]]); assert.ok(three[0].complete);
+});
+t('stitchPages: far-apart pieces join only when unambiguous', function () {
+  var P = function (s, e) { return { starts_mid: s, ends_incomplete: e }; };
+  assert.deepStrictEqual(pagesOf(Logic.stitchPages([P(0, 1), P(0, 0), P(1, 0)])), [[0, 2], [1]]);
+  var amb = Logic.stitchPages([P(0, 1), P(0, 0), P(0, 1), P(0, 0), P(1, 0), P(1, 0)]);
+  assert.strictEqual(amb.length, 6); // two open recipes, two loose pages: leave all for review
+  assert.strictEqual(amb.filter(function (x) { return !x.complete; }).length, 4);
+});
 console.log(n + ' tests passed');

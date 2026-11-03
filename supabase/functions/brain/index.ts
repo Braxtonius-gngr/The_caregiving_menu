@@ -51,6 +51,19 @@ const recipeSchema = {
   },
 };
 
+// Batch import reads each photo on its own first, so it also reports whether the page
+// looks like part of a longer recipe; the app stitches likely pages and re-reads them together.
+const recipePageSchema = {
+  ...recipeSchema,
+  required: [...recipeSchema.required, "starts_mid_recipe", "ends_incomplete", "issues"],
+  properties: {
+    ...recipeSchema.properties,
+    starts_mid_recipe: { type: "boolean", description: "True if the page begins partway through a recipe: no title, or it opens mid ingredient list or mid steps" },
+    ends_incomplete: { type: "boolean", description: "True if the recipe visibly carries on past this page: steps or ingredients cut off, 'continued', a list with no method, ends mid-sentence" },
+    issues: { type: "array", items: { type: "string" }, description: "Specific things a person should check, e.g. an unreadable amount. Empty if none" },
+  },
+};
+
 const receiptSchema = {
   type: "object",
   additionalProperties: false,
@@ -218,10 +231,14 @@ async function handle(mode: Mode, body: Record<string, any>) {
         const source = ld ? "JSON-LD recipe data:\n" + JSON.stringify(ld).slice(0, 40000) : "Page text:\n" + stripHtml(page);
         return { ...(await ask(recipeSchema, [{ type: "text", text: `Extract the recipe from this web page (${body.url}).\n${source}` }], "low")), source_ref: body.url };
       }
-      const content: Anthropic.ContentBlockParam[] = [];
-      if (body.image) content.push(imageBlock(body.image));
-      content.push({ type: "text", text: (body.image ? "This is a photo of a recipe (card, cookbook page, or handwriting). Transcribe it into the schema. Keep handwritten notes in notes." : "Parse this recipe text:\n" + body.text) + (known ? `\nKnown pantry ingredient names to reuse when they match: ${known}` : "") });
-      return await ask(recipeSchema, content, body.image ? "medium" : "low");
+      const images: string[] = Array.isArray(body.images) ? body.images.slice(0, 6) : body.image ? [body.image] : [];
+      const content: Anthropic.ContentBlockParam[] = images.map(imageBlock);
+      const intro = images.length > 1
+        ? `These ${images.length} photos are consecutive pages of ONE recipe, in order. Transcribe it as a single recipe into the schema, joining any step or ingredient split across a page break. Keep handwritten notes in notes.`
+        : images.length ? "This is a photo of a recipe (card, cookbook page, or handwriting). Transcribe it into the schema. Keep handwritten notes in notes." : "Parse this recipe text:\n" + body.text;
+      const pageNote = body.batch ? "\nThis came from a batch of saved photos, so it may be only part of a recipe. Report whether it starts partway through or carries on past what is shown. If there is no recipe at all, return an empty title, ingredients and steps with confidence 0." : "";
+      content.push({ type: "text", text: intro + pageNote + (known ? `\nKnown pantry ingredient names to reuse when they match: ${known}` : "") });
+      return await ask(body.batch ? recipePageSchema : recipeSchema, content, images.length ? "medium" : "low");
     }
     case "parse_receipt":
       return await ask(receiptSchema, [imageBlock(body.image), { type: "text", text: `Read this grocery receipt. Decode abbreviations (GV = Great Value, YEL = yellow). Skip tax, totals, bags and coupons, or mark non-food lines is_food=false. qty is the amount bought in the item's natural unit (3 lb onions => qty 3, unit lb).${known ? "\nKnown names: " + known : ""}` }], "medium");

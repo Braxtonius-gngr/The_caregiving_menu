@@ -133,5 +133,33 @@ var Logic = (function () {
     return pantry.filter(function (p) { return p.expires_on && new Date(p.expires_on).getTime() <= limit; });
   }
 
-  return { DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon };
+  // Batch import: group page reads into recipes. pages[i] = { starts_mid, ends_incomplete }
+  // in the order the photos were picked. A page that ends incomplete is joined to an
+  // unused page that starts mid-recipe: the next photo first, then the one before it.
+  // Leftover pieces are joined anywhere in the batch only when the match is unambiguous
+  // (one open recipe, one loose page). Returns [{ pages: [i...], complete: bool }].
+  function stitchPages(pages) {
+    var used = pages.map(function () { return false; }), groups = [];
+    function isLoose(i) { return i >= 0 && i < pages.length && !used[i] && pages[i].starts_mid; }
+    function extend(g) {
+      var last = g.pages[g.pages.length - 1];
+      while (pages[last].ends_incomplete) {
+        var next = isLoose(last + 1) ? last + 1 : isLoose(last - 1) ? last - 1 : -1;
+        if (next < 0) break;
+        used[next] = true; g.pages.push(next); last = next;
+      }
+    }
+    pages.forEach(function (p, i) {
+      if (used[i] || p.starts_mid) return;
+      used[i] = true; var g = { pages: [i] }; extend(g); groups.push(g);
+    });
+    var open = groups.filter(function (g) { return pages[g.pages[g.pages.length - 1]].ends_incomplete; });
+    var loose = pages.map(function (p, i) { return i; }).filter(function (i) { return !used[i]; });
+    if (open.length === 1 && loose.length === 1) { used[loose[0]] = true; open[0].pages.push(loose[0]); extend(open[0]); }
+    pages.forEach(function (p, i) { if (!used[i]) { used[i] = true; var g = { pages: [i] }; extend(g); groups.push(g); } });
+    groups.forEach(function (g) { g.complete = !pages[g.pages[0]].starts_mid && !pages[g.pages[g.pages.length - 1]].ends_incomplete; });
+    return groups.sort(function (a, b) { return a.pages[0] - b.pages[0]; });
+  }
+
+  return { DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages };
 })();
