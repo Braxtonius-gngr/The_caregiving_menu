@@ -79,7 +79,17 @@ var Sync = (function () {
   function signIn(email) {
     var c = getClient();
     if (!c) return Promise.reject(new Error('Cloud not configured'));
-    return c.auth.signInWithOtp({ email: email, options: { emailRedirectTo: location.href.split('#')[0] } });
+    // The email carries both a link and a code: the code is for a home-screen app (an
+    // iPhone's keeps its own sign-in, apart from Safari, so the emailed link can't reach it).
+    return c.auth.signInWithOtp({ email: email, options: { emailRedirectTo: location.href.split('#')[0] } })
+      .then(function (r) { if (r.error) throw r.error; });
+  }
+  function verifyCode(email, code) {
+    var c = getClient();
+    if (!c) return Promise.reject(new Error('Cloud not configured'));
+    return c.auth.verifyOtp({ email: email, token: code, type: 'email' }).then(function (r) {
+      if (r.error) throw new Error(/expired|invalid/i.test(r.error.message) ? 'That code did not work. Codes expire after an hour and only the newest one works; send a new one.' : r.error.message);
+    });
   }
   function signOut() { var c = getClient(); return c ? c.auth.signOut() : Promise.resolve(); }
 
@@ -391,5 +401,5 @@ var Sync = (function () {
     return queuePhotoDelete('record:' + PHOTO_STORES[store] + '/' + id).then(flushIfSignedIn);
   }
 
-  return { authStorageKey: authStorageKey, config: config, configured: configured, saveConfig: saveConfig, clearConfig: clearConfig, setupLink: setupLink, applySetupLink: applySetupLink, joinPendingInvite: joinPendingInvite, pendingInvite: pendingInvite, photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
+  return { authStorageKey: authStorageKey, config: config, configured: configured, saveConfig: saveConfig, clearConfig: clearConfig, setupLink: setupLink, applySetupLink: applySetupLink, joinPendingInvite: joinPendingInvite, pendingInvite: pendingInvite, photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, verifyCode: verifyCode, signOut: signOut, run: run, brain: brain, lookup: lookup };
 })();

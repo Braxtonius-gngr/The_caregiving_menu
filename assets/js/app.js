@@ -120,8 +120,25 @@ function renderAuthBox() {
   Sync.session().then(function (s) {
     if (s) Sync.inviteCode().then(function (c) { var el = document.getElementById('inviteCode'); if (el) el.textContent = c; }).catch(function () {});
     box.innerHTML = s ? '<p>Signed in as <b>' + esc(s.user.email) + '</b></p><p id="syncError" class="note' + (lastSyncError ? '' : ' hidden') + '">' + (lastSyncError ? 'Last sync failed: ' + esc(lastSyncError) : '') + '</p><p class="muted">Household invite code: <b id="inviteCode">...</b>. Family members sign in, then enter it below to share this kitchen.</p><div class="row"><input id="joinCode" placeholder="Join with a code" class="grow"><button class="btn sm" onclick="Sync.joinHousehold(document.getElementById(\'joinCode\').value.trim()).then(syncNow).then(function(){toast(\'Joined\');renderSettingsAgain()}).catch(function(e){toast(e.message)})">Join</button></div><div class="btn-row"><button class="btn sm" onclick="syncNow()">Sync now</button><button class="btn sm ghost" onclick="copySetupLink()">Copy setup link for another device</button><button class="btn sm ghost" onclick="Sync.signOut().then(function(){renderSettingsAgain()})">Sign out</button></div>'
-      : '<label>Email for a sign-in link</label><input id="authEmail" type="email"><div class="btn-row"><button class="btn sm" onclick="Sync.signIn(document.getElementById(\'authEmail\').value).then(function(){toast(\'Check your email\')}).catch(function(e){toast(e.message)})">Send link</button></div>';
+      : '<label for="authEmail">Your email</label><input id="authEmail" type="email" autocomplete="email" value="' + esc(lastAuthEmail()) + '"><div class="btn-row"><button class="btn sm" onclick="sendSignIn()">Email me a sign-in code</button></div>' +
+        '<label for="authCode">Code from the email</label><div class="row"><input id="authCode" class="grow" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456"><button class="btn sm" onclick="signInWithCode()">Sign in</button></div>' +
+        '<p class="muted">Type the code here, or tap the link in the email if it opens in this same browser.</p>';
   });
+}
+function lastAuthEmail() { try { return localStorage.getItem('tcm_auth_email') || ''; } catch (e) { return ''; } }
+function sendSignIn() {
+  var email = document.getElementById('authEmail').value.trim();
+  if (!/^\S+@\S+\.\S+$/.test(email)) return toast('Enter your email address first');
+  try { localStorage.setItem('tcm_auth_email', email); } catch (e) {}
+  Sync.signIn(email).then(function () { toast('Sent. Check your email (and spam) for the code.'); var c = document.getElementById('authCode'); if (c) c.focus(); })
+    .catch(function (e) { toast('Could not send: ' + e.message); });
+}
+function signInWithCode() {
+  var email = document.getElementById('authEmail').value.trim(), code = document.getElementById('authCode').value.replace(/\D/g, '');
+  if (!email) return toast('Enter your email address first');
+  if (code.length < 6) return toast('Type the code from the email');
+  Sync.verifyCode(email, code).then(function () { toast('Signed in'); return autoSyncStarted ? syncNow() : startAutoSync(); }).then(renderSettingsAgain)
+    .catch(function (e) { toast(e.message); });
 }
 function renderSettingsAgain() { showScreen('settings'); }
 // Background sync: once per page, whenever the cloud is (or becomes) configured.
@@ -129,9 +146,9 @@ var autoSyncStarted = false;
 function startAutoSync() {
   if (autoSyncStarted || !Sync.enabled()) return;
   autoSyncStarted = true;
-  syncNow();
   window.addEventListener('online', syncNow);
   setInterval(syncNow, 5 * 60 * 1000);
+  return syncNow();
 }
 var lastSyncError = null;
 function syncNow() {
