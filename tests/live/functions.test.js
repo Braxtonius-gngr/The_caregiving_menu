@@ -44,6 +44,7 @@ async function waitUp(port) { for (let i = 0; i < 120; i++) { try { await fetch(
       parse_receipt: [{ mode: 'parse_receipt', image: img }, ['store', 'items']],
       pantry_photo: [{ mode: 'pantry_photo', images: [img, img] }, ['store', 'items']],
       estimate_plate: [{ mode: 'estimate_plate', text: 'two eggs and toast' }, ['items', 'kcal', 'sodium_mg', 'confidence']],
+      estimate_plate_compare: [{ mode: 'estimate_plate', images: [img, img], compare: true, text: 'chili' }, ['items', 'kcal', 'confidence']],
       variations: [{ mode: 'variations', angle: 'lighter', recipe: { title: 'Soup' }, pantry: [] }, ['options']],
       diet_swaps: [{ mode: 'diet_swaps', recipe: { title: 'Soup' }, profile: { name: 'Memaw', rules: [], targets: {} } }, ['options']],
       canonicalize: [{ mode: 'canonicalize', inputs: ['GV YEL ONION'] }, ['matches']],

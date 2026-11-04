@@ -249,10 +249,15 @@ async function handle(mode: Mode, body: Record<string, any>) {
       return await ask(receiptSchema, [...images.map(imageBlock), { type: "text", text: `These photos show food someone has on hand (fridge, pantry shelf, counter or shopping bags). List each distinct food item you can identify, once, even if it appears in several photos. qty is your best count or amount in the item's natural unit (3 each apples, 1 gal milk, 1 box cereal). raw is a short description of what you saw. Set store to an empty string and price to null. Mark anything that is not food is_food=false. Lower confidence for items you can only partly see.${known ? "\nKnown names: " + known : ""}` }], "medium");
     }
     case "estimate_plate": {
-      const content: Anthropic.ContentBlockParam[] = [];
-      if (body.image) content.push(imageBlock(body.image));
-      content.push({ type: "text", text: "Estimate what was eaten and total nutrition for the whole plate." + (body.text ? `\nDescription: ${body.text}` : "") });
-      return await ask(plateSchema, content, "low");
+      // compare: photos of the plate before and after the meal (or only after), to estimate
+      // just what was actually eaten rather than what was served.
+      const images: string[] = (Array.isArray(body.images) ? body.images.slice(0, 2) : [body.image]).filter(Boolean);
+      const content: Anthropic.ContentBlockParam[] = images.map(imageBlock);
+      const lead = !body.compare ? "Estimate what was eaten and total nutrition for the whole plate."
+        : images.length > 1 ? "Photo 1 is the plate as served; photo 2 is the same plate after the meal. Estimate only what was actually eaten (what was served minus what is left), and its nutrition."
+        : "The photo shows what was LEFT on the plate after the meal. Use the description for what was served, and estimate only what was actually eaten and its nutrition.";
+      content.push({ type: "text", text: lead + (body.text ? `\nDescription: ${body.text}` : "") });
+      return await ask(plateSchema, content, body.compare ? "medium" : "low");
     }
     case "variations":
       return await ask(optionsSchema, [{ type: "text", text: `Give 3 "${body.angle}" takes on this recipe, as edits to it rather than whole new recipes.\nRecipe: ${JSON.stringify(body.recipe)}\nOn hand: ${(body.pantry ?? []).join(", ")}` }], "medium");

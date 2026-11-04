@@ -112,7 +112,8 @@ var Sync = (function () {
         if (SYNCED.indexOf(it.store) < 0) return;
         var rec = Object.assign({}, it.record, { household_id: hid });
         delete rec.fts; // server-generated column
-        delete rec.photo_data; // local copy only; the photo itself lives in Storage at photo_path
+        delete rec.photo_data; // local copies only; the photos themselves live in Storage at photo_path / after_photo_path
+        delete rec.after_photo_data;
         (byStore[it.store] = byStore[it.store] || []).push(rec);
       });
       return Promise.all(Object.keys(byStore).map(function (store) {
@@ -133,9 +134,11 @@ var Sync = (function () {
           r.data.forEach(function (row) { if (row.updated_at > newest) newest = row.updated_at; });
           n += r.data.length;
           return DB.reconcile(store, r.data, PHOTO_STORES[store] ? function (row, local) {
-            // Keep the local photo copy when the server row still points at the same photo.
+            // Keep each local photo copy when the server row still points at the same photo.
             // Postgres sends null for an unset path; a never-uploaded local entry has undefined.
-            if (local && local.photo_data && !row.deleted && (local.photo_path || null) === (row.photo_path || null)) row.photo_data = local.photo_data;
+            photoSlots(store).forEach(function (sl) {
+              if (local && local[sl.data] && !row.deleted && (local[sl.path] || null) === (row[sl.path] || null)) row[sl.data] = local[sl.data];
+            });
             return row;
           } : null);
         });
@@ -145,6 +148,11 @@ var Sync = (function () {
 
   // Which records carry a photo, and the Storage folder each one uses.
   var PHOTO_STORES = { diary_entries: 'diary', recipes: 'recipes' };
+  // Photo slots per record: the local copy field, the Storage path field and a file-name tag.
+  // A diary entry can also hold an "after the meal" photo of what was left on the plate.
+  var MAIN_SLOT = { data: 'photo_data', path: 'photo_path', tag: '' };
+  var AFTER_SLOT = { data: 'after_photo_data', path: 'after_photo_path', tag: '-after' };
+  function photoSlots(store) { return store === 'diary_entries' ? [MAIN_SLOT, AFTER_SLOT] : [MAIN_SLOT]; }
 
   // Photos taken offline (or before sign-in) carry photo_data but no photo_path.
   // Each upload gets a fresh versioned name, so replacing a photo changes the path
@@ -155,19 +163,22 @@ var Sync = (function () {
     return Promise.all([householdId()].concat(stores.map(function (st) { return DB.all(st); }))).then(function (res) {
       var hid = res[0], chain = Promise.resolve(0);
       stores.forEach(function (store, i) {
-        res[i + 1].filter(function (e) { return e.photo_data && !e.photo_path; }).forEach(function (e) {
-          chain = chain.then(function (n) {
-            var path = hid + '/' + PHOTO_STORES[store] + '/' + e.id + '-' + Date.now().toString(36) + '.jpg';
-            var uploaded = false;
-            return dataUrlToBlob(e.photo_data).then(function (blob) {
-              return c.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: true });
-            }).then(function (r) {
-              if (r.error) throw r.error;
-              uploaded = true;
-              return attachPhotoPath(c, store, e.id, e.photo_data, path);
-            }).then(function (ok) { return ok ? n + 1 : n; }).catch(function () {
-              // The next sync uploads under a new name, so this copy would be orphaned.
-              return (uploaded ? queuePhotoDelete(path) : Promise.resolve()).then(function () { return n; });
+        photoSlots(store).forEach(function (sl) {
+          res[i + 1].filter(function (e) { return e[sl.data] && !e[sl.path]; }).forEach(function (e) {
+            chain = chain.then(function (n) {
+              // File names start with the record id, so deleting the record removes every photo it had.
+              var path = hid + '/' + PHOTO_STORES[store] + '/' + e.id + sl.tag + '-' + Date.now().toString(36) + '.jpg';
+              var uploaded = false;
+              return dataUrlToBlob(e[sl.data]).then(function (blob) {
+                return c.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+              }).then(function (r) {
+                if (r.error) throw r.error;
+                uploaded = true;
+                return attachPhotoPath(c, store, e.id, e[sl.data], path, sl);
+              }).then(function (ok) { return ok ? n + 1 : n; }).catch(function () {
+                // The next sync uploads under a new name, so this copy would be orphaned.
+                return (uploaded ? queuePhotoDelete(path) : Promise.resolve()).then(function () { return n; });
+              });
             });
           });
         });
@@ -178,12 +189,12 @@ var Sync = (function () {
 
   // Set photo_path locally only if the record is still live and still holds the photo
   // we uploaded. Runs atomically, so a deletion or a new photo taken meanwhile wins.
-  function adoptPath(store, id, photoData, path, silent) {
+  function adoptPath(store, id, photoData, path, silent, sl) {
     // mergePending: if an edit to this record is still waiting to upload, that queued copy
     // gets the path too, so pushing it later cannot clear the photo on the server.
     return DB.update(store, id, function (cur) {
-      if (!cur || cur.deleted || cur.photo_data !== photoData || cur.photo_path) return null;
-      cur.photo_path = path; return cur;
+      if (!cur || cur.deleted || cur[sl.data] !== photoData || cur[sl.path]) return null;
+      cur[sl.path] = path; return cur;
     }, { silent: silent, mergePending: true }).then(function (rec) {
       if (rec) return true;
       return queuePhotoDelete(path).then(function () { return false; }); // superseded: drop this upload
@@ -192,25 +203,26 @@ var Sync = (function () {
 
   // Photo-only update. Never re-push the whole row: that would overwrite a deletion
   // made on another device. Only a row that is still live on the server gets the path.
-  function attachPhotoPath(c, store, id, photoData, path) {
-    // Only a live row with no photo yet: if another upload already attached one, it won.
-    return c.from(store).update({ photo_path: path }).eq('id', id).eq('deleted', false).is('photo_path', null).select('id').then(function (r) {
+  function attachPhotoPath(c, store, id, photoData, path, sl) {
+    var set = {}; set[sl.path] = path;
+    // Only a live row with no photo in this slot yet: if another upload already attached one, it won.
+    return c.from(store).update(set).eq('id', id).eq('deleted', false).is(sl.path, null).select('id').then(function (r) {
       if (r.error) throw r.error;
-      if (r.data && r.data.length) return adoptPath(store, id, photoData, path, true);
-      return c.from(store).select('id,deleted,photo_path').eq('id', id).then(function (q) {
+      if (r.data && r.data.length) return adoptPath(store, id, photoData, path, true, sl);
+      return c.from(store).select('id,deleted,' + sl.path).eq('id', id).then(function (q) {
         if (q.error) throw q.error;
         var row = q.data && q.data[0];
-        if (row && !row.deleted && row.photo_path && row.photo_path !== path) {
+        if (row && !row.deleted && row[sl.path] && row[sl.path] !== path) {
           // A competing upload attached first; keep the server's photo and drop only ours.
           return queuePhotoDelete(path).then(function () { return false; });
         }
         if (row) {
           // Deleted elsewhere: mirror the tombstone and drop the photo we just uploaded.
-          return DB.update(store, id, function (cur) { if (!cur) return null; cur.deleted = true; cur.photo_data = null; return cur; }, { silent: true })
+          return DB.update(store, id, function (cur) { if (!cur) return null; cur.deleted = true; cur.photo_data = null; cur.after_photo_data = null; return cur; }, { silent: true })
             .then(function () { return queuePhotoDelete(path); }).then(function () { return false; });
         }
         // Not on the server yet (created mid-sync): it goes up whole with its next push.
-        return adoptPath(store, id, photoData, path, false);
+        return adoptPath(store, id, photoData, path, false, sl);
       });
     });
   }
@@ -289,23 +301,25 @@ var Sync = (function () {
   // Returns a displayable src for a record's photo: the local copy if we have one,
   // otherwise downloads it from Storage once and keeps it locally for offline viewing.
   var inflight = {};
-  function photoSrc(rec, store) {
+  // after: true for a diary entry's "after the meal" photo.
+  function photoSrc(rec, store, after) {
     store = store || 'diary_entries';
-    if (rec.photo_data) return Promise.resolve(rec.photo_data);
-    if (!rec.photo_path) return Promise.resolve(null);
+    var sl = after ? AFTER_SLOT : MAIN_SLOT;
+    if (rec[sl.data]) return Promise.resolve(rec[sl.data]);
+    if (!rec[sl.path]) return Promise.resolve(null);
     var c = getClient();
     if (!c) return Promise.resolve(null);
-    var key = store + ':' + rec.id + ':' + rec.photo_path;
+    var key = store + ':' + rec.id + ':' + rec[sl.path];
     if (inflight[key]) return inflight[key];
-    inflight[key] = c.storage.from(BUCKET).download(rec.photo_path).then(function (r) {
+    inflight[key] = c.storage.from(BUCKET).download(rec[sl.path]).then(function (r) {
       if (r.error) throw r.error;
       return blobToDataUrl(r.data);
     }).then(function (dataUrl) {
       // Cache it only if the record is still live and still points at this photo.
       return DB.update(store, rec.id, function (cur) {
-        if (!cur || cur.deleted || cur.photo_path !== rec.photo_path) return null;
-        cur.photo_data = dataUrl; return cur;
-      }, { silent: true }).then(function (saved) { if (saved) rec.photo_data = dataUrl; return dataUrl; });
+        if (!cur || cur.deleted || cur[sl.path] !== rec[sl.path]) return null;
+        cur[sl.data] = dataUrl; return cur;
+      }, { silent: true }).then(function (saved) { if (saved) rec[sl.data] = dataUrl; return dataUrl; });
     }).catch(function () { return null; }).then(function (src) { delete inflight[key]; return src; });
     return inflight[key];
   }
