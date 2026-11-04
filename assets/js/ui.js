@@ -666,7 +666,7 @@ function renderDiary() {
     (entries.length ? entries.map(function (e) {
       var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
       var who = State.profiles.find(function (p) { return p.id === e.for_profile_id; });
-      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" aria-label="Open this entry" onkeydown="if(event.key===\'Enter\')this.click()" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + (!(e.kcal > 0) && e.estimate_source !== 'manual' && Sync.enabled() ? ' <button class="btn sm" onclick="reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
+      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" aria-label="Open this entry" onkeydown="if(event.key===\'Enter\'&&event.target===this)this.click()" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + (!(e.kcal > 0) && e.estimate_source !== 'manual' && Sync.enabled() ? ' <button class="btn sm" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
     }).join('') : '<div class="empty">Nothing logged.</div>') +
     (prof ? '<h2>Notes for ' + esc(prof.person_name) + '\'s next appointment</h2><div class="card"><textarea id="profNotes" rows="4" placeholder="Questions to ask, patterns you noticed...">' + esc(prof.notes || '') + '</textarea><div class="btn-row"><button class="btn sm" onclick="saveProfileNotes(\'' + prof.id + '\')">Save notes</button><button class="btn sm ghost" onclick="weeklyDigest(\'' + prof.id + '\')">Weekly digest</button></div></div>' : '');
 }
@@ -853,13 +853,18 @@ function viewPhoto(id) {
 }
 /* ---------- diary entry: view and edit ---------- */
 var NUT_LABELS = { kcal: 'kcal', protein_g: 'protein g', carbs_g: 'carbs g', fat_g: 'fat g', fiber_g: 'fiber g', sodium_mg: 'sodium mg', sugar_g: 'sugar g', potassium_mg: 'potassium mg' };
+var editSeq = 0;
+// One open "Meal details" sheet. Every async result (photo pick, cloud photo, estimate)
+// checks it still belongs to this session and is the latest of its kind before landing.
+function editLive(sess) { var sheet = document.getElementById('sheet'); return S.editSession === sess && sheet && !sheet.classList.contains('hidden') && !!document.getElementById('eN-kcal'); }
+function nutShown(v, mult) { return v != null ? String(Math.round(v * mult * 10) / 10) : ''; }
 // Everything about one logged meal, editable. Nutrition is shown and edited as totals for
 // the meal (stored value x servings eaten), which is what the diary list shows.
 function editDiaryEntry(id) {
   var e = State.diary.find(function (x) { return x.id === id; });
   if (!e) return;
-  S.editPhoto = undefined; // undefined = unchanged, null = remove, data URL = replacement
-  var mult = e.portion_mult || 1, d = new Date(e.eaten_at);
+  var mult = e.portion_mult || 1;
+  var sess = S.editSession = { id: id, seq: ++editSeq, photo: undefined, photoReq: 0, pending: null, estReq: 0, estimate: null, before: {} };
   var ports = ['0.5', '1', '1.5', '2', '3'];
   if (ports.indexOf(String(mult)) < 0) ports.push(String(mult));
   var hasPhoto = !!(e.photo_data || e.photo_path);
@@ -867,76 +872,103 @@ function editDiaryEntry(id) {
     '<img id="eBigPhoto" class="photo-big' + (hasPhoto ? '' : ' hidden') + '" alt="Meal photo">' +
     '<div class="btn-row"><button type="button" class="btn ghost sm" onclick="document.getElementById(\'ePhotoCam\').click()">&#128247; ' + (hasPhoto ? 'Retake' : 'Take photo') + '</button><button type="button" class="btn ghost sm" onclick="document.getElementById(\'ePhotoLib\').click()">&#128444; ' + (hasPhoto ? 'Replace' : 'Choose photo') + '</button>' + (hasPhoto ? '<button type="button" class="btn ghost sm" onclick="removeEditPhoto()">Remove photo</button>' : '') + '</div>' +
     '<input id="ePhotoCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="pickEditPhoto(this)"><input id="ePhotoLib" type="file" accept="image/*" class="hidden" onchange="pickEditPhoto(this)">' +
-    '<label>Who ate it</label><select id="eWho"><option value="">Me</option>' + State.profiles.map(function (p) { return '<option value="' + p.id + '"' + (e.for_profile_id === p.id ? ' selected' : '') + '>' + esc(p.person_name) + '</option>'; }).join('') + '</select>' +
-    '<label>When</label><input id="eWhen" type="datetime-local" value="' + localDay(e.eaten_at) + 'T' + localTime(e.eaten_at) + '">' +
-    '<label>Recipe</label><select id="eRecipe"><option value="">—</option>' + State.recipes.map(function (r) { return '<option value="' + r.id + '"' + (e.recipe_id === r.id ? ' selected' : '') + '>' + esc(r.title) + '</option>'; }).join('') + '</select>' +
-    '<label>Description</label><input id="eText" value="' + esc(e.free_text || '') + '">' +
-    '<label>Servings eaten</label><select id="ePort">' + ports.map(function (v) { return '<option value="' + v + '"' + (String(mult) === v ? ' selected' : '') + '>' + v + '</option>'; }).join('') + '</select>' +
+    '<label for="eWho">Who ate it</label><select id="eWho"><option value="">Me</option>' + State.profiles.map(function (p) { return '<option value="' + p.id + '"' + (e.for_profile_id === p.id ? ' selected' : '') + '>' + esc(p.person_name) + '</option>'; }).join('') + '</select>' +
+    '<label for="eWhen">When</label><input id="eWhen" type="datetime-local" value="' + localDay(e.eaten_at) + 'T' + localTime(e.eaten_at) + '">' +
+    '<label for="eRecipe">Recipe</label><select id="eRecipe"><option value="">—</option>' + State.recipes.map(function (r) { return '<option value="' + r.id + '"' + (e.recipe_id === r.id ? ' selected' : '') + '>' + esc(r.title) + '</option>'; }).join('') + '</select>' +
+    '<label for="eText">Description</label><input id="eText" value="' + esc(e.free_text || '') + '">' +
+    '<label for="ePort">Servings eaten</label><select id="ePort">' + ports.map(function (v) { return '<option value="' + v + '"' + (String(mult) === v ? ' selected' : '') + '>' + v + '</option>'; }).join('') + '</select>' +
     '<h3>Nutrition for this meal <span class="muted" id="eSource">(' + esc(e.estimate_source || 'not set') + (e.confidence != null ? ', ' + Math.round(e.confidence * 100) + '% confident' : '') + ')</span></h3>' +
-    '<div class="grid-2">' + Logic.NUTRIENTS.map(function (k) { return '<div><label>' + NUT_LABELS[k] + '</label><input id="eN-' + k + '" type="number" step="any" value="' + (e[k] != null ? Math.round(e[k] * mult * 10) / 10 : '') + '"></div>'; }).join('') + '</div>' +
-    (Sync.enabled() ? '<div class="btn-row"><button class="btn ghost" onclick="estimateIntoForm(\'' + id + '\')">Estimate again</button></div><p class="muted">Fills the numbers from the recipe, description and photo. Nothing is saved until you tap Save.</p>' : '') +
-    '<div class="btn-row"><button class="btn" onclick="saveDiaryEdit(\'' + id + '\')">Save</button><button class="btn ghost" onclick="closeSheet()">Close</button><button class="btn danger" onclick="closeSheet();deleteDiaryEntry(\'' + id + '\')">Delete</button></div>');
-  S.editEstimate = null; // the numbers from 'Estimate again', to tell an estimate from hand edits
-  if (hasPhoto) Sync.photoSrc(e).then(function (src) { var el = document.getElementById('eBigPhoto'); if (el && src && S.editPhoto === undefined) el.src = src; });
+    '<div class="grid-2">' + Logic.NUTRIENTS.map(function (k) { return '<div><label for="eN-' + k + '">' + NUT_LABELS[k] + '</label><input id="eN-' + k + '" type="number" step="any" value="' + nutShown(e[k], mult) + '"></div>'; }).join('') + '</div>' +
+    (Sync.enabled() ? '<div class="btn-row"><button class="btn ghost" onclick="estimateIntoForm()">Estimate again</button></div><p class="muted">Fills the numbers from the recipe, description and photo. Nothing is saved until you tap Save.</p>' : '') +
+    '<div class="btn-row"><button class="btn" onclick="saveDiaryEdit()">Save</button><button class="btn ghost" onclick="closeSheet()">Close</button><button class="btn danger" onclick="closeSheet();deleteDiaryEntry(\'' + id + '\')">Delete</button></div>');
+  // What the form showed when it opened: Save writes only what differs from this.
+  ['eWho', 'eWhen', 'eRecipe', 'eText', 'ePort'].concat(Logic.NUTRIENTS.map(function (k) { return 'eN-' + k; })).forEach(function (fid) { sess.before[fid] = document.getElementById(fid).value; });
+  if (hasPhoto) {
+    var img = document.getElementById('eBigPhoto'); // this sheet's image; a later sheet makes a new one
+    Sync.photoSrc(e).then(function (src) { if (src && img.isConnected && editLive(sess) && sess.photo === undefined) img.src = src; });
+  }
 }
 function pickEditPhoto(input) {
-  var f = input.files[0]; input.value = '';
-  if (!f) return;
-  downscale(f, 1280).then(function (d) { S.editPhoto = d; var el = document.getElementById('eBigPhoto'); if (el) { el.src = d; el.classList.remove('hidden'); } }, function () { toast('That photo could not be opened.'); });
+  var sess = S.editSession, f = input.files[0]; input.value = '';
+  if (!f || !sess) return;
+  var req = ++sess.photoReq;
+  sess.pending = downscale(f, 1280).then(function (d) {
+    if (!editLive(sess) || req !== sess.photoReq) return; // superseded by another pick, a removal or another sheet
+    sess.photo = d; var el = document.getElementById('eBigPhoto'); el.src = d; el.classList.remove('hidden');
+  }, function () { if (editLive(sess) && req === sess.photoReq) toast('That photo could not be opened.'); });
 }
-function removeEditPhoto() { S.editPhoto = null; var el = document.getElementById('eBigPhoto'); if (el) el.classList.add('hidden'); }
+function removeEditPhoto() {
+  var sess = S.editSession; if (!sess) return;
+  sess.photoReq++; sess.photo = null; sess.pending = null;
+  document.getElementById('eBigPhoto').classList.add('hidden');
+}
 // The entry as the form currently describes it (nutrition left as stored).
 function diaryFormDraft(e) {
   var v = function (i) { return document.getElementById(i).value; };
   var when = new Date(v('eWhen'));
   return Object.assign({}, e, { for_profile_id: v('eWho') || null, eaten_at: isNaN(when) ? e.eaten_at : when.toISOString(), recipe_id: v('eRecipe') || null, free_text: v('eText').trim(), portion_mult: +v('ePort') || 1 });
 }
-function estimateIntoForm(id) {
-  var e = State.diary.find(function (x) { return x.id === id; });
+function estimateIntoForm() {
+  var sess = S.editSession;
+  var e = sess && State.diary.find(function (x) { return x.id === sess.id; });
   if (!e) return;
-  var draft = diaryFormDraft(e);
+  var req = ++sess.estReq, draft = diaryFormDraft(e);
   toast('Estimating calories...');
-  var photo = S.editPhoto === undefined ? Sync.photoSrc(e) : Promise.resolve(S.editPhoto);
-  photo.then(function (src) { draft.photo_data = src || null; return estimateEntry(draft, { text: draft.free_text }); }).then(function (est) {
-    if (!document.getElementById('eN-kcal')) return;
+  Promise.resolve(sess.pending).then(function () {
+    if (sess.photo !== undefined) return sess.photo; // a new photo, or null after Remove photo
+    return Sync.photoSrc(e).then(function (src) {
+      if (e.photo_path && !src) throw new Error('the photo could not be loaded. Check the connection and try again');
+      return src;
+    });
+  }).then(function (src) { draft.photo_data = src || null; return estimateEntry(draft, { text: draft.free_text }); }).then(function (est) {
+    if (!editLive(sess) || req !== sess.estReq) return; // the sheet closed or a newer estimate was asked for
     var mult = est.portion_mult || 1;
     document.getElementById('ePort').value = String(mult);
-    S.editEstimate = { confidence: est.confidence, values: {} };
-    Logic.NUTRIENTS.forEach(function (k) { var val = est[k] != null ? String(Math.round(est[k] * mult * 10) / 10) : ''; document.getElementById('eN-' + k).value = val; S.editEstimate.values[k] = val; });
+    sess.estimate = { confidence: est.confidence, mult: mult, raw: {}, shown: {} };
+    Logic.NUTRIENTS.forEach(function (k) { sess.estimate.raw[k] = est[k] != null ? est[k] : null; sess.estimate.shown[k] = nutShown(est[k], mult); document.getElementById('eN-' + k).value = sess.estimate.shown[k]; });
     document.getElementById('eSource').textContent = '(new estimate' + (est.confidence != null ? ', ' + Math.round(est.confidence * 100) + '% confident' : '') + '; tap Save to keep it)';
     toast('Estimate ready. Tap Save to keep it.');
-  }).catch(function (err) { toast('Could not estimate: ' + err.message); });
+  }).catch(function (err) { if (editLive(sess) && req === sess.estReq) toast('Could not estimate: ' + err.message); });
 }
-function saveDiaryEdit(id) {
-  var e = State.diary.find(function (x) { return x.id === id; });
+// Writes only what changed in this form, onto the latest stored record, so an edit synced
+// from another device to a field left alone here is kept, and untouched numbers keep their
+// exact stored value (the form shows them rounded).
+function saveDiaryEdit() {
+  var sess = S.editSession;
+  var e = sess && State.diary.find(function (x) { return x.id === sess.id; });
   if (!e) return;
-  var draft = diaryFormDraft(e), mult = draft.portion_mult;
-  var typed = {}, changed = false, asEstimated = !!S.editEstimate;
-  Logic.NUTRIENTS.forEach(function (k) {
-    var raw = document.getElementById('eN-' + k).value;
-    typed[k] = raw === '' ? null : +raw / mult; // stored per serving; the diary multiplies by servings
-    var before = e[k] != null ? String(Math.round(e[k] * (e.portion_mult || 1) * 10) / 10) : '';
-    if (before !== raw) changed = true;
-    if (S.editEstimate && S.editEstimate.values[k] !== raw) asEstimated = false;
+  Promise.resolve(sess.pending).then(function () {
+    if (!editLive(sess)) return;
+    var v = function (i) { return document.getElementById(i).value; };
+    var draft = diaryFormDraft(e), mult = draft.portion_mult, est = sess.estimate;
+    var fields = { eWho: 'for_profile_id', eWhen: 'eaten_at', eRecipe: 'recipe_id', eText: 'free_text' };
+    var set = {}, nut = {}, typedAny = false;
+    Object.keys(fields).forEach(function (fid) { if (v(fid) !== sess.before[fid]) set[fields[fid]] = draft[fields[fid]]; });
+    if (v('ePort') !== sess.before.ePort) set.portion_mult = mult;
+    Logic.NUTRIENTS.forEach(function (k) {
+      var raw = v('eN-' + k);
+      if (est && raw === est.shown[k]) { nut[k] = est.raw[k]; return; } // kept from the new estimate, unrounded
+      if (raw !== (est ? est.shown[k] : sess.before['eN-' + k])) { nut[k] = raw === '' ? null : +raw / mult; typedAny = true; }
+    });
+    var source = typedAny ? 'manual' : (est ? 'estimate' : null);
+    var photo = sess.photo;
+    return DB.update('diary_entries', sess.id, function (cur) {
+      if (!cur || cur.deleted) return null;
+      Object.keys(set).forEach(function (k) { cur[k] = set[k]; });
+      if (est) cur.portion_mult = mult;
+      Object.keys(nut).forEach(function (k) { cur[k] = nut[k]; });
+      if (source) { cur.estimate_source = source; cur.confidence = source === 'estimate' ? est.confidence : null; }
+      if (photo !== undefined) {
+        if (cur.photo_path) Sync.removePhoto(cur.photo_path);
+        cur.photo_path = null; cur.photo_data = photo;
+      }
+      return cur;
+    }).then(function (saved) {
+      closeSheet(); toast(saved ? 'Saved' : 'This entry was deleted elsewhere');
+      if (saved) State.day = localDay(saved.eaten_at);
+      return loadAll().then(function () { refresh(); if (photo && Sync.enabled()) syncNow().then(loadAll).then(function () { if (currentScreen === 'diary') refresh(); }); });
+    });
   });
-  // Untouched estimate -> 'estimate'; any hand edit -> 'manual'; nothing changed -> as before.
-  var source = asEstimated ? 'estimate' : (changed ? 'manual' : e.estimate_source);
-  var confidence = asEstimated ? S.editEstimate.confidence : e.confidence;
-  var photo = S.editPhoto;
-  DB.update('diary_entries', id, function (cur) {
-    if (!cur || cur.deleted) return null;
-    ['for_profile_id', 'eaten_at', 'recipe_id', 'free_text', 'portion_mult'].forEach(function (k) { cur[k] = draft[k]; });
-    Logic.NUTRIENTS.forEach(function (k) { cur[k] = typed[k]; });
-    cur.estimate_source = source; cur.confidence = source === 'manual' ? null : confidence;
-    if (photo !== undefined) {
-      if (cur.photo_path) Sync.removePhoto(cur.photo_path);
-      cur.photo_path = null; cur.photo_data = photo;
-    }
-    return cur;
-  }).then(function (saved) {
-    closeSheet(); toast(saved ? 'Saved' : 'This entry was deleted elsewhere');
-    State.day = localDay(draft.eaten_at); return loadAll();
-  }).then(function () { refresh(); if (photo && Sync.enabled()) syncNow().then(loadAll).then(function () { if (currentScreen === 'diary') refresh(); }); });
 }
 function deleteDiaryEntry(id) {
   var e = State.diary.find(function (x) { return x.id === id; });
