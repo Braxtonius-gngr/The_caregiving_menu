@@ -750,7 +750,9 @@ function estimateEntry(e, extra) {
     return e;
   });
 }
-// Fill in calories for an entry that was logged without any (e.g. a scanned recipe with no nutrition data).
+// Fill in calories for an entry that was logged without any (e.g. a scanned recipe with no
+// nutrition data). It only fills nutrients that are still empty: anything already there was
+// typed by hand, and keeps the same total for the meal even if the servings multiplier changes.
 // quiet: no messages (used in the background right after a one-tap log).
 function reEstimateEntry(id, quiet) {
   var e = State.diary.find(function (x) { return x.id === id; });
@@ -761,7 +763,9 @@ function reEstimateEntry(id, quiet) {
   return Sync.photoSrc(copy).then(function (src) { copy.photo_data = src || null; return estimateEntry(copy, { text: e.free_text }); }).then(function (est) {
     return DB.update('diary_entries', id, function (cur) {
       if (!cur || cur.deleted) return null;
-      Logic.NUTRIENTS.concat(['estimate_source', 'confidence', 'portion_mult']).forEach(function (k) { if (est[k] !== undefined) cur[k] = est[k]; });
+      var oldMult = cur.portion_mult || 1, newMult = est.portion_mult || oldMult;
+      Logic.NUTRIENTS.forEach(function (k) { cur[k] = cur[k] > 0 ? cur[k] * oldMult / newMult : (est[k] != null ? est[k] : cur[k]); });
+      cur.portion_mult = newMult; cur.estimate_source = est.estimate_source; cur.confidence = est.confidence;
       return cur;
     });
   }).then(loadAll).then(function () { if (!quiet) toast('Estimated'); refresh(); }).catch(function (err) { if (!quiet) toast('Could not estimate: ' + err.message); });
