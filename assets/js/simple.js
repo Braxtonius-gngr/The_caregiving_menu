@@ -79,6 +79,8 @@ function simpleAte(rid) {
       Promise.all([DB.remove('diary_entries', e.id)].concat(usage.map(function (u) { return DB.remove('usage_log', u.id); })))
         .then(loadAll).then(function () { refresh(); toast('Removed'); });
     });
+    // A recipe without full nutrition data logs 0 kcal; estimate it quietly in the background.
+    if (!recipeNutritionComplete(rid)) reEstimateEntry(e.id, true);
   });
 }
 
