@@ -86,7 +86,7 @@ function cookedThis(id) {
     if (p && l.qty != null) { p.qty = Units.subtract(p.qty, p.unit, l.qty, l.unit); writes.push(DB.put('pantry_items', p)); }
     writes.push(DB.put('usage_log', { ingredient_id: l.ingredient_id, qty: l.qty || 1, unit: l.unit, event: 'cooked', at: now }));
   });
-  r.times_cooked = (r.times_cooked || 0) + 1; r.last_cooked_on = now.slice(0, 10);
+  r.times_cooked = (r.times_cooked || 0) + 1; r.last_cooked_on = localDay(now);
   writes.push(DB.put('recipes', r));
   Promise.all(writes).then(loadAll).then(function () {
     refresh();
@@ -198,7 +198,7 @@ function loadSample() {
     });
     return c;
   }).then(function () {
-    var soon = new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10);
+    var soon = localDay(new Date(Date.now() + 2 * 864e5).toISOString());
     return Promise.all(pantry.map(function (p) {
       var ing = byName[p[0]]; if (!ing || (S.pantryByIng[ing.id] || []).length) return null;
       return DB.put('pantry_items', { ingredient_id: ing.id, qty: p[1], unit: p[2], location: p[3], par_qty: p[4] != null ? p[4] : null, expires_on: p[0] === 'milk' || p[0] === 'celery' ? soon : null });
@@ -257,14 +257,11 @@ function askSharedPhoto(blob) {
   openSheet('<h2 style="margin-top:0">What is this photo?</h2><img class="photo-hero" alt="" src="' + URL.createObjectURL(blob) + '">' +
     '<div class="btn-row"><button class="btn" onclick="logFoodWithSharedPhoto()">A meal for the diary</button>' +
     '<button class="btn ghost" ' + (cloud ? '' : 'disabled ') + 'onclick="scanImage(\'recipe\', S.sharedPhoto)">A recipe</button>' +
-    '<button class="btn ghost" ' + (cloud ? '' : 'disabled ') + 'onclick="scanImage(\'receipt\', S.sharedPhoto)">A receipt</button></div>' +
+    '<button class="btn ghost" ' + (cloud ? '' : 'disabled ') + 'onclick="scanImage(\'receipt\', S.sharedPhoto)">A receipt</button>' +
+    '<button class="btn ghost" ' + (cloud ? '' : 'disabled ') + 'onclick="readGroceryPhotos([S.sharedPhoto])">Groceries for the pantry</button></div>' +
     (cloud ? '' : '<p class="muted">Reading recipes and receipts needs the cloud set up. The diary works offline.</p>'));
 }
-function logFoodWithSharedPhoto() {
-  logFood();
-  var note = document.createElement('p'); note.className = 'muted'; note.textContent = 'The shared photo is attached.';
-  document.getElementById('lPhoto').after(note);
-}
+function logFoodWithSharedPhoto() { logFood(); } // logFood shows S.sharedPhoto as the preview
 
 var _origShowScreen = showScreen;
 showScreen = function (name, arg) { if (State.simple && simpleProfile()) name = 'simple'; S.lastArg = arg; _origShowScreen(name, arg); if (name === 'settings') renderAuthBox(); hydratePhotos(); };

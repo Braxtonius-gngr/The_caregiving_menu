@@ -29,7 +29,7 @@ function renderSimple() {
   document.getElementById('screenTitle').textContent = p.person_name;
   var day = todayISO(), hour = new Date().getHours();
   var greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-  var eaten = State.diary.filter(function (e) { return e.for_profile_id === p.id && e.eaten_at.slice(0, 10) === day; }).sort(function (a, b) { return a.eaten_at < b.eaten_at ? -1 : 1; });
+  var eaten = State.diary.filter(function (e) { return e.for_profile_id === p.id && localDay(e.eaten_at) === day; }).sort(function (a, b) { return a.eaten_at < b.eaten_at ? -1 : 1; });
   var totals = Logic.dayTotals(eaten);
   var bars = simpleNutrients(p).map(function (k) {
     var tgt = (p.daily_targets || {})[k] || Logic.DV[k], val = Math.round(totals[k] || 0), pct = Math.round(100 * val / tgt);
@@ -60,7 +60,7 @@ function renderSimple() {
     '<button class="btn ghost simple-btn simple-wide" onclick="simpleOther()">I ate something else</button>' +
     '<h2>Today I ate</h2>' + (eaten.length ? '<div class="card">' + eaten.map(function (e) {
       var r = e.recipe_id && State.recipes.find(function (x) { return x.id === e.recipe_id; });
-      return '<div class="list-item">' + photoThumb(e) + '<div class="grow"><b>' + esc(r ? r.title : e.free_text || 'Meal') + '</b><div class="muted">' + e.eaten_at.slice(11, 16) + '</div></div>' +
+      return '<div class="list-item">' + photoThumb(e) + '<div class="grow"><b>' + esc(r ? r.title : e.free_text || 'Meal') + '</b><div class="muted">' + localTime(e.eaten_at) + '</div></div>' +
         '<button class="btn ghost sm" aria-label="Remove this entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">Remove</button></div>';
     }).join('') + '</div>' : '<div class="empty">Nothing yet today.</div>') +
     '<p class="simple-footer"><button class="linkish" onclick="exitSimple()">Exit simple view</button></p></div>';

@@ -5,7 +5,12 @@ var S = {}; // derived indexes, rebuilt by rebuildIndexes()
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
 function fmtQty(q, u) { if (q == null) return ''; var n = Math.round(q * 100) / 100; return (isFinite(n) ? n : '') + (u ? ' ' + esc(u) : ''); }
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+// Dates and times on screen are the device's local time; timestamps are stored in UTC.
+function pad2(n) { return (n < 10 ? '0' : '') + n; }
+function localDay(iso) { var d = iso ? new Date(iso) : new Date(); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+function localTime(iso) { var d = new Date(iso); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
+function todayISO() { return localDay(); }
+function shiftDay(day, n) { var d = new Date(day + 'T12:00:00'); d.setDate(d.getDate() + n); return localDay(d.toISOString()); }
 
 function rebuildIndexes() {
   S.ingById = {}; State.ingredients.forEach(function (i) { S.ingById[i.id] = i; });
@@ -95,7 +100,7 @@ function renderHome() {
   var expIds = {}; expiring.forEach(function (p) { expIds[p.ingredient_id] = true; });
   var useUp = State.recipes.filter(function (r) { return (S.linesByRecipe[r.id] || []).some(function (l) { return expIds[l.ingredient_id]; }); });
   var restock = Logic.restockSuggestions(State.pantry, S.usageByIng, S.ingById);
-  var todays = State.diary.filter(function (e) { return e.eaten_at.slice(0, 10) === todayISO() && (!State.activeProfile || e.for_profile_id === State.activeProfile); });
+  var todays = State.diary.filter(function (e) { return localDay(e.eaten_at) === todayISO() && (!State.activeProfile || e.for_profile_id === State.activeProfile); });
   var prof = State.profiles.find(function (p) { return p.id === State.activeProfile; });
   var html = profileSwitcher();
   html += '<h2>Today so far</h2>' + dvTiles(Logic.dayTotals(todays), prof && prof.daily_targets);
@@ -287,6 +292,8 @@ function renderScan() {
     '<div class="grid-big">' +
     '<div class="big-btn" onclick="scanPhoto(\'recipe\')"><span class="ico">&#128247;</span>Recipe photo<div class="muted">card, cookbook, handwriting</div></div>' +
     '<div class="big-btn" onclick="scanPhoto(\'receipt\')"><span class="ico">&#129534;</span>Receipt<div class="muted">adds to pantry</div></div>' +
+    '<div class="big-btn" onclick="scanGroceries(false)"><span class="ico">&#129387;</span>Groceries photo<div class="muted">fridge, shelf, bags: adds to pantry</div></div>' +
+    '<div class="big-btn" onclick="scanGroceries(true)"><span class="ico">&#128444;</span>Groceries from saved photos<div class="muted">up to 6 at once</div></div>' +
     '<div class="big-btn" onclick="scanBarcode()"><span class="ico">&#9646;&#9646;&#9646;</span>Barcode<div class="muted">packaged item</div></div>' +
     '<div class="big-btn" onclick="pasteRecipe()"><span class="ico">&#128279;</span>Link / paste<div class="muted">URL or text</div></div>' +
     '</div>' +
@@ -294,7 +301,7 @@ function renderScan() {
     '<h2>Manual</h2><div class="btn-row"><button class="btn ghost" onclick="editRecipe()">Type a recipe</button><button class="btn ghost" onclick="editPantryItem()">Add pantry item</button><button class="btn ghost" onclick="logFood()">Log a meal</button></div>' +
     '<input id="scanFile" type="file" accept="image/*" capture="environment" class="hidden" onchange="onScanFile(this)">' +
     '<input id="scanLibrary" type="file" accept="image/*" class="hidden" onchange="onScanFile(this)">' +
-    '<input id="scanBatch" type="file" accept="image/*" multiple class="hidden" onchange="onBatchFiles(this)">';
+    '<input id="scanBatch" type="file" accept="image/*" multiple class="hidden" onchange="onBatchFiles(this)">' + groceryInputs();
 }
 var scanKind = 'recipe';
 // fromLibrary opens the saved-photos picker; otherwise the camera opens directly.
@@ -322,6 +329,33 @@ function downscale(file, max) {
     img.src = url;
   });
 }
+/* ---------- Pantry from photos ---------- */
+// Photos of food on hand (live or saved, up to 6) -> the cloud lists the items -> the usual pantry review.
+function groceryInputs() {
+  return '<input id="groceryCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="onGroceryFiles(this)">' +
+    '<input id="groceryLib" type="file" accept="image/*" multiple class="hidden" onchange="onGroceryFiles(this)">';
+}
+function scanGroceries(fromLibrary) {
+  if (!Sync.enabled()) return toast('Configure Supabase first (Settings)');
+  document.getElementById(fromLibrary ? 'groceryLib' : 'groceryCam').click();
+}
+function onGroceryFiles(input) {
+  var files = [].slice.call(input.files || []); input.value = '';
+  if (!files.length) return;
+  if (files.length > 6) { toast('Using the first 6 photos'); files = files.slice(0, 6); }
+  readGroceryPhotos(files);
+}
+function readGroceryPhotos(files) {
+  closeSheet(); toast('Looking at ' + (files.length === 1 ? 'the photo' : files.length + ' photos') + '...');
+  Promise.all(files.map(function (f) { return downscale(f, 1600); })).then(function (images) {
+    return Sync.brain('pantry_photo', { images: images, ingredients: State.ingredients.map(function (i) { return i.name; }) });
+  }).then(function (res) {
+    var items = (res.items || []).filter(function (i) { return i.is_food !== false; });
+    if (!items.length) return toast('No food items found in that photo.');
+    reviewPantry(items, 'photo');
+  }).catch(function (e) { toast('Could not read the photo: ' + e.message); });
+}
+
 /* ---------- Batch recipe import ---------- */
 // Many saved photos at once. Each photo is read on its own; pages that look cut off are
 // matched up (Logic.stitchPages) and re-read together; every recipe is saved straight
@@ -584,7 +618,7 @@ function renderPantry() {
   var byLoc = {}; items.forEach(function (p) { (byLoc[p.location || 'pantry'] = byLoc[p.location || 'pantry'] || []).push(p); });
   var expiring = Logic.expiringSoon(State.pantry, 4);
   return '<div class="search"><input placeholder="Search pantry" value="' + esc(State.pq || '') + '" oninput="State.pq=this.value;refresh()"></div>' +
-    '<div class="btn-row"><button class="btn" onclick="editPantryItem()">+ Add item</button><button class="btn ghost" onclick="showScreen(\'scan\')">Scan receipt</button></div>' +
+    '<div class="btn-row"><button class="btn" onclick="editPantryItem()">+ Add item</button><button class="btn ghost" onclick="scanGroceries(false)">&#128247; Photo of groceries</button><button class="btn ghost" onclick="scanGroceries(true)">&#128444; From saved photos</button><button class="btn ghost" onclick="showScreen(\'scan\')">Scan receipt</button></div>' + groceryInputs() +
     (expiring.length ? '<div class="note">Expiring soon: ' + expiring.map(function (p) { return esc(S.ingById[p.ingredient_id].name); }).join(', ') + '</div>' : '') +
     (items.length ? ['fridge', 'freezer', 'pantry', 'counter'].filter(function (l) { return byLoc[l]; }).map(function (loc) {
       return '<h2>' + loc + ' (' + byLoc[loc].length + ')</h2><div class="card">' + byLoc[loc].sort(function (a, b) { return S.ingById[a.ingredient_id].name.localeCompare(S.ingById[b.ingredient_id].name); }).map(function (p) {
@@ -623,48 +657,95 @@ function savePantryForm(id) {
 /* ---------- Diary ---------- */
 function renderDiary() {
   var day = State.day || todayISO();
-  var entries = State.diary.filter(function (e) { return e.eaten_at.slice(0, 10) === day && (!State.activeProfile || e.for_profile_id === State.activeProfile); }).sort(function (a, b) { return a.eaten_at < b.eaten_at ? -1 : 1; });
+  var entries = State.diary.filter(function (e) { return localDay(e.eaten_at) === day && (!State.activeProfile || e.for_profile_id === State.activeProfile); }).sort(function (a, b) { return a.eaten_at < b.eaten_at ? -1 : 1; });
   var prof = State.profiles.find(function (p) { return p.id === State.activeProfile; });
-  var shift = function (n) { var d = new Date(day); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+  var shift = function (n) { return shiftDay(day, n); };
   return '<div class="row between"><button class="btn ghost sm" onclick="State.day=\'' + shift(-1) + '\';refresh()">&larr;</button><b>' + (day === todayISO() ? 'Today' : day) + '</b><button class="btn ghost sm" onclick="State.day=\'' + shift(1) + '\';refresh()">&rarr;</button></div>' +
     profileSwitcher() + dvTiles(Logic.dayTotals(entries), prof && prof.daily_targets) +
     '<div class="btn-row"><button class="btn" onclick="logFood()">+ Log a meal</button></div>' +
     (entries.length ? entries.map(function (e) {
       var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
       var who = State.profiles.find(function (p) { return p.id === e.for_profile_id; });
-      return '<div class="card row">' + photoThumb(e) + '<div class="grow"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(e.eaten_at.slice(11, 16)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
+      return '<div class="card row">' + photoThumb(e) + '<div class="grow"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
     }).join('') : '<div class="empty">Nothing logged.</div>') +
     (prof ? '<h2>Notes for ' + esc(prof.person_name) + '\'s next appointment</h2><div class="card"><textarea id="profNotes" rows="4" placeholder="Questions to ask, patterns you noticed...">' + esc(prof.notes || '') + '</textarea><div class="btn-row"><button class="btn sm" onclick="saveProfileNotes(\'' + prof.id + '\')">Save notes</button><button class="btn sm ghost" onclick="weeklyDigest(\'' + prof.id + '\')">Weekly digest</button></div></div>' : '');
 }
+// Log a meal for whoever is eating it. The caregiver usually logs for someone else, so
+// "who" defaults to the person on screen, then to whoever was logged for last.
 function logFood() {
-  openSheet('<h2 style="margin-top:0">Log a meal</h2>' +
-    '<label>Recipe (or leave blank and describe below)</label><select id="lRecipe"><option value="">—</option>' + State.recipes.map(function (r) { return '<option value="' + r.id + '">' + esc(r.title) + '</option>'; }).join('') + '</select>' +
-    '<label>Or describe it</label><input id="lText" placeholder="two eggs and toast">' +
-    '<div class="row"><div class="grow"><label>Portion</label><select id="lPort"><option value="0.5">½</option><option value="1" selected>1</option><option value="1.5">1½</option><option value="2">2</option></select></div><div class="grow"><label>Who</label><select id="lWho"><option value="">me</option>' + State.profiles.map(function (p) { return '<option value="' + p.id + '" ' + (State.activeProfile === p.id ? 'selected' : '') + '>' + esc(p.person_name) + '</option>'; }).join('') + '</select></div></div>' +
-    '<label>Photo (optional)</label><input id="lPhoto" type="file" accept="image/*">' +
-    '<div class="row"><div class="grow"><label>kcal (if known)</label><input id="lKcal" type="number"></div><div class="grow"><label>sodium mg</label><input id="lNa" type="number"></div></div>' +
-    '<div class="btn-row"><button class="btn" onclick="saveLog()">Log</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
+  DB.meta('last_eater').then(function (last) {
+    var who = State.activeProfile || (State.profiles.some(function (p) { return p.id === last; }) ? last : '');
+    var pad = function (d) { return localDay(d.toISOString()) + 'T' + localTime(d.toISOString()); };
+    openSheet('<h2 style="margin-top:0">Log a meal</h2>' +
+      '<label>Who is eating?</label><select id="lWho" onchange="if(this.value===\'__new\')addEaterInline(this)"><option value="">Me</option>' + State.profiles.map(function (p) { return '<option value="' + p.id + '" ' + (who === p.id ? 'selected' : '') + '>' + esc(p.person_name) + '</option>'; }).join('') + '<option value="__new">+ Someone new...</option></select>' +
+      '<label>When</label><input id="lWhen" type="datetime-local" value="' + pad(new Date()) + '">' +
+      '<label>Photo</label><div class="btn-row" style="margin-top:0"><button type="button" class="btn ghost sm" onclick="document.getElementById(\'lPhotoCam\').click()">&#128247; Take photo</button><button type="button" class="btn ghost sm" onclick="document.getElementById(\'lPhoto\').click()">&#128444; Choose photo</button></div>' +
+      '<input id="lPhotoCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="previewLogPhoto(this)"><input id="lPhoto" type="file" accept="image/*" class="hidden" onchange="previewLogPhoto(this)">' +
+      '<img id="lPhotoPrev" class="photo-thumb hidden" alt="Meal photo preview">' +
+      '<label>Recipe (if it was one of yours)</label><select id="lRecipe"><option value="">—</option>' + State.recipes.map(function (r) { return '<option value="' + r.id + '">' + esc(r.title) + '</option>'; }).join('') + '</select>' +
+      '<label>Or describe it</label><input id="lText" placeholder="chili with garlic bread">' +
+      '<label>What was in it, with amounts (optional, sharpens the estimate)</label><textarea id="lIng" rows="3" placeholder="1 cup chili&#10;1 slice garlic bread"></textarea>' +
+      '<div class="row"><div class="grow"><label>Servings eaten</label><select id="lPort"><option value="0.5">½</option><option value="1" selected>1</option><option value="1.5">1½</option><option value="2">2</option></select></div><div class="grow"><label>Portion size (optional)</label><input id="lSize" placeholder="1 cup, half a plate"></div></div>' +
+      '<details><summary class="muted">Know the numbers?</summary><div class="row"><div class="grow"><label>kcal</label><input id="lKcal" type="number"></div><div class="grow"><label>sodium mg</label><input id="lNa" type="number"></div></div></details>' +
+      '<p class="muted">With no recipe or numbers, calories are estimated from the ingredients, portion and photo.</p>' +
+      '<div class="btn-row"><button class="btn" onclick="saveLog()">Log</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
+    if (S.sharedPhoto) showLogPreview(S.sharedPhoto);
+  });
 }
-function logFromRecipe(id) { logFood(); document.getElementById('lRecipe').value = id; }
+function previewLogPhoto(input) { if (input.files[0]) showLogPreview(input.files[0]); }
+function showLogPreview(file) { var img = document.getElementById('lPhotoPrev'); if (img) { img.src = URL.createObjectURL(file); img.classList.remove('hidden'); } }
+// Add a person to log meals for without leaving the log screen.
+function addEaterInline(sel) {
+  var name = (prompt('Who is eating? (name)') || '').trim();
+  if (!name) { sel.value = ''; return; }
+  DB.put('diet_profiles', { person_name: name, notes: '', daily_targets: {} }).then(function (p) {
+    State.profiles.push(p);
+    var opt = document.createElement('option'); opt.value = p.id; opt.textContent = name;
+    sel.insertBefore(opt, sel.lastElementChild); sel.value = p.id;
+    toast(name + ' added. Set their diet in Settings when you are ready.');
+  });
+}
+function logFromRecipe(id) { logFood(); var wait = setInterval(function () { var el = document.getElementById('lRecipe'); if (el) { clearInterval(wait); el.value = id; } }, 30); setTimeout(function () { clearInterval(wait); }, 2000); }
+// Totals for typed ingredient lines when every line matches a pantry ingredient with
+// nutrition data; null when any line is unknown (the cloud estimate handles those).
+function estimateFromLines(texts) {
+  var lines = texts.map(Units.parseLine), ok = true;
+  var mapped = lines.map(function (l) { var ing = Logic.ingredientMatch(l.name || '', State.ingredients); if (!ing || ing.kcal_100g == null || l.qty == null) ok = false; return { qty: l.qty, unit: l.unit, name: l.name, ingredient_id: ing && ing.id }; });
+  if (!ok || !mapped.length) return null;
+  return Logic.recipeNutrition({ servings: 1 }, mapped, S.ingById).perServing;
+}
 function saveLog() {
-  var v = function (i) { return document.getElementById(i).value; };
-  var rid = v('lRecipe'), text = v('lText').trim(), port = +v('lPort'), who = v('lWho') || null;
-  var e = { eaten_at: new Date().toISOString(), recipe_id: rid || null, free_text: text, portion_mult: port, for_profile_id: who, estimate_source: 'manual' };
+  var v = function (i) { var el = document.getElementById(i); return el ? el.value : ''; };
+  var rid = v('lRecipe'), text = v('lText').trim(), port = +v('lPort') || 1, who = v('lWho') === '__new' ? '' : v('lWho');
+  var ingLines = v('lIng').split('\n').map(function (x) { return x.trim(); }).filter(Boolean), size = v('lSize').trim();
+  var when = v('lWhen') ? new Date(v('lWhen')) : new Date();
+  if (isNaN(when)) when = new Date();
+  var r = rid ? State.recipes.find(function (x) { return x.id === rid; }) : null;
+  var e = { eaten_at: when.toISOString(), recipe_id: rid || null, free_text: text || (ingLines.length ? ingLines.join(', ') : (r ? '' : 'Meal')), portion_mult: port, for_profile_id: who || null, estimate_source: 'manual' };
   if (rid) { var per = S.recipeInfo[rid].nut.perServing; Logic.NUTRIENTS.forEach(function (k) { e[k] = per[k]; }); e.estimate_source = 'recipe'; }
-  if (v('lKcal')) { e.kcal = +v('lKcal'); e.estimate_source = 'manual'; }
+  var manual = !!v('lKcal');
+  if (manual) e.kcal = +v('lKcal');
   if (v('lNa')) e.sodium_mg = +v('lNa');
-  var file = document.getElementById('lPhoto').files[0] || S.sharedPhoto;
+  var file = (document.getElementById('lPhotoCam').files[0]) || (document.getElementById('lPhoto').files[0]) || S.sharedPhoto;
   S.sharedPhoto = null;
-  var p = file ? downscale(file, 1280).then(function (d) { e.photo_data = d; }) : Promise.resolve();
+  DB.meta('last_eater', who || '');
+  var p = file ? downscale(file, 1280).then(function (d) { e.photo_data = d; }, function () { toast('That photo could not be opened; logging without it.'); }) : Promise.resolve();
   p.then(function () {
-    if (!rid && text && Sync.enabled() && !v('lKcal')) {
-      return Sync.brain('estimate_plate', { text: text, image: e.photo_data || null }).then(function (res) { Logic.NUTRIENTS.forEach(function (k) { if (res[k] != null) e[k] = res[k]; }); e.estimate_source = 'estimate'; e.confidence = res.confidence; }).catch(function () {});
-    }
+    if (rid || manual) return;
+    var local = ingLines.length && !size ? estimateFromLines(ingLines) : null;
+    if (local) { Logic.NUTRIENTS.forEach(function (k) { e[k] = local[k]; }); e.estimate_source = 'ingredients'; return; }
+    if (!Sync.enabled() || !(text || ingLines.length || e.photo_data)) return;
+    var desc = [text, ingLines.length ? 'Ingredients and amounts: ' + ingLines.join('; ') : '', size ? 'Portion size: ' + size : ''].filter(Boolean).join('\n');
+    toast('Estimating calories...');
+    return Sync.brain('estimate_plate', { text: desc, image: e.photo_data || null }).then(function (res) {
+      Logic.NUTRIENTS.forEach(function (k) { if (res[k] != null) e[k] = res[k]; }); e.estimate_source = 'estimate'; e.confidence = res.confidence;
+      if (!text && !ingLines.length && res.items && res.items.length) e.free_text = res.items.map(function (it) { return it.name; }).join(', ');
+    }).catch(function (err) { toast('Logged without an estimate: ' + err.message); });
   }).then(function () {
     var writes = [DB.put('diary_entries', e)];
     if (rid) (S.linesByRecipe[rid] || []).forEach(function (l) { writes.push(DB.put('usage_log', { ingredient_id: l.ingredient_id, qty: 1, unit: l.unit, event: 'logged', at: e.eaten_at })); });
     return Promise.all(writes);
-  }).then(function () { closeSheet(); toast('Logged'); return loadAll(); }).then(function () {
+  }).then(function () { closeSheet(); toast('Logged'); State.day = localDay(e.eaten_at); return loadAll(); }).then(function () {
     showScreen('diary');
     if (e.photo_data && Sync.enabled()) syncNow().then(function () { return loadAll(); }).then(function () { if (currentScreen === 'diary') refresh(); });
   });
@@ -695,7 +776,7 @@ function viewPhoto(id) {
   var e = State.diary.find(function (x) { return x.id === id; });
   if (!e) return;
   var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
-  openSheet('<h2 style="margin-top:0">' + esc(r ? r.title : e.free_text || 'Meal') + '</h2><p class="muted">' + e.eaten_at.slice(0, 10) + ' ' + e.eaten_at.slice(11, 16) + '</p><img id="bigPhoto" class="photo-big" alt="Meal photo"><div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
+  openSheet('<h2 style="margin-top:0">' + esc(r ? r.title : e.free_text || 'Meal') + '</h2><p class="muted">' + localDay(e.eaten_at) + ' ' + localTime(e.eaten_at) + '</p><img id="bigPhoto" class="photo-big" alt="Meal photo"><div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
   var el = document.getElementById('bigPhoto'); // this sheet's image; a later sheet makes a new one
   Sync.photoSrc(e).then(function (src) {
     if (!el.isConnected) return;
@@ -716,7 +797,7 @@ function digestData(pid, span) {
   var prof = State.profiles.find(function (x) { return x.id === pid; });
   var entries = State.diary.filter(function (e) { return e.for_profile_id === pid && new Date(e.eaten_at).getTime() >= since; });
   var t = Logic.dayTotals(entries);
-  var days = Math.max(1, new Set(entries.map(function (e) { return e.eaten_at.slice(0, 10); })).size);
+  var days = Math.max(1, new Set(entries.map(function (e) { return localDay(e.eaten_at); })).size);
   var avg = {}; Logic.NUTRIENTS.forEach(function (k) { avg[k] = Math.round(t[k] / days); });
   var counts = {};
   entries.forEach(function (e) { var r = e.recipe_id && State.recipes.find(function (x) { return x.id === e.recipe_id; }); var name = r ? r.title : (e.free_text || 'unnamed'); counts[name] = (counts[name] || 0) + 1; });
