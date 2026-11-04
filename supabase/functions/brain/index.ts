@@ -254,8 +254,9 @@ async function handle(mode: Mode, body: Record<string, any>) {
       const images: string[] = (Array.isArray(body.images) ? body.images.slice(0, 2) : [body.image]).filter(Boolean);
       const content: Anthropic.ContentBlockParam[] = images.map(imageBlock);
       const lead = !body.compare ? "Estimate what was eaten and total nutrition for the whole plate."
-        : images.length > 1 ? "Photo 1 is the plate as served; photo 2 is the same plate after the meal. Estimate only what was actually eaten (what was served minus what is left), and its nutrition."
-        : "The photo shows what was LEFT on the plate after the meal. Use the description for what was served, and estimate only what was actually eaten and its nutrition.";
+        : images.length > 1 ? "Photo 1 is the plate as served; photo 2 is the same plate after the meal. Estimate only what was actually eaten (what was served minus what is left), and its nutrition. Apply any note about what was eaten or added."
+        : body.after_only ? "The photo shows what was LEFT on the plate after the meal. Use the description for what was served, and estimate only what was actually eaten and its nutrition. Apply any note about what was eaten or added."
+        : `${images.length ? "The photo shows the plate as served. " : ""}Use the description of what was served and the caregiver's note on what was actually eaten (and anything added, such as salt) to estimate only what was eaten and its nutrition.`;
       content.push({ type: "text", text: lead + (body.text ? `\nDescription: ${body.text}` : "") });
       return await ask(plateSchema, content, body.compare ? "medium" : "low");
     }
