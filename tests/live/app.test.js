@@ -45,7 +45,9 @@ async function device(browser, app, u, opts = {}) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const key = 'tcm-auth:' + new URL(env.API_URL).host; // Sync.authStorageKey
   if (u) await ctx.addInitScript(([k, s]) => { localStorage.setItem(k, s); }, [key, JSON.stringify(u.session)]);
-  if (!opts.unconfigured) await ctx.route('**/assets/js/config.js', r => r.fulfill({ contentType: 'application/javascript', body: `var TCM_CONFIG = { SUPABASE_URL: '${env.API_URL}', SUPABASE_ANON_KEY: '${env.ANON_KEY}', APP_VERSION: 'live-test' };` }));
+  // An unconfigured device gets explicitly empty settings (the deployed config.js has defaults).
+  const cfg = opts.unconfigured ? { u: '', k: '' } : { u: env.API_URL, k: env.ANON_KEY };
+  await ctx.route('**/assets/js/config.js', r => r.fulfill({ contentType: 'application/javascript', body: `var TCM_CONFIG = { SUPABASE_URL: '${cfg.u}', SUPABASE_ANON_KEY: '${cfg.k}', APP_VERSION: 'live-test' };` }));
   // Serve supabase-js locally so the test does not depend on the CDN.
   await ctx.route('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js', r => r.fulfill({ contentType: 'application/javascript', headers: { 'access-control-allow-origin': '*' }, body: fs.readFileSync(UMD) }));
   const p = await ctx.newPage();

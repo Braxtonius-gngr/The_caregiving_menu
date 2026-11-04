@@ -6,13 +6,15 @@ var Sync = (function () {
 
   // Where the cloud lives: details saved on this device (Settings or a setup link) win,
   // then the values baked into config.js. The anon key is public by design; RLS guards data.
-  var LS_CONFIG = 'tcm_cloud', LS_INVITE = 'tcm_pending_invite';
+  var LS_CONFIG = 'tcm_cloud', LS_INVITE = 'tcm_pending_invite', LS_OFF = 'tcm_cloud_off';
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
   function config() {
     var saved = null;
     try { saved = JSON.parse(lsGet(LS_CONFIG) || 'null'); } catch (e) {}
     if (saved && saved.url && saved.key) return { url: saved.url, key: saved.key, source: 'device' };
+    // "Disconnect this device" must stick even though config.js has built-in defaults.
+    if (lsGet(LS_OFF)) return { url: '', key: '', source: 'off' };
     return { url: TCM_CONFIG.SUPABASE_URL, key: TCM_CONFIG.SUPABASE_ANON_KEY, source: 'file' };
   }
   // Sign-in is stored per exact host, so a session can never be sent to a different
@@ -25,9 +27,9 @@ var Sync = (function () {
     url = String(url || '').trim().replace(/\/+$/, ''); key = String(key || '').trim();
     if (!validUrl(url)) throw new Error('That does not look like a Supabase URL (https://...supabase.co).');
     if (key.length < 20) throw new Error('Paste the full anon (public) key.');
-    lsSet(LS_CONFIG, JSON.stringify({ url: url, key: key })); client = null;
+    lsSet(LS_CONFIG, JSON.stringify({ url: url, key: key })); lsSet(LS_OFF, null); client = null;
   }
-  function clearConfig() { lsSet(LS_CONFIG, null); lsSet(LS_INVITE, null); client = null; }
+  function clearConfig() { lsSet(LS_CONFIG, null); lsSet(LS_INVITE, null); lsSet(LS_OFF, '1'); client = null; }
 
   // Setup links carry the cloud details and, optionally, a household invite code:
   //   https://host/app/#connect=<base64url JSON {u, k, i}>

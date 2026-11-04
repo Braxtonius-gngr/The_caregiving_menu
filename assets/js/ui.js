@@ -1308,7 +1308,7 @@ function addQuestionsToNotes() {
 /* ---------- Settings ---------- */
 function renderSettings() {
   var cloud = Sync.enabled();
-  return '<h2>Cloud sync</h2><div class="card">' + (cloud ? '<div id="authBox">Checking...</div>' + (Sync.config().source === 'device' ? '<p><button class="linkish" onclick="disconnectCloud()">Disconnect this device from the cloud</button></p>' : '')
+  return '<h2>Cloud sync</h2><div class="card">' + (cloud ? '<div id="authBox">Checking...</div>' + (Sync.config().source !== 'off' ? '<p><button class="linkish" onclick="disconnectCloud()">Disconnect this device from the cloud</button></p>' : '')
     : Sync.configured() ? '<p class="muted">Cloud details are set, but the sync library did not load. Check the connection and reload.</p>'
     : '<p class="muted">Everything stays on this device until you connect your Supabase project. If someone sent you a setup link, just open it on this device instead.</p>' +
       '<label>Project URL</label><input id="cfgUrl" placeholder="https://abcd1234.supabase.co" autocomplete="off">' +
