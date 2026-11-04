@@ -18,6 +18,8 @@ The full design lives in [docs/design.md](docs/design.md).
 | Restock suggestions from par levels and recent usage | yes | |
 | Diet profiles, rules, starter packs, ✓ ⚠ ✕ badges | yes | |
 | Food diary with daily-value bars: log for whoever is eating (add people on the spot), set when they ate, take or pick a photo | yes | synced |
+| Drinks as their own entries (amount poured, how much was drunk) with a daily fluids total per person; water counts as 0 kcal | yes | other drinks estimated by Claude |
+| "Ate part" notes ("ate all but half the toast, added 2 salt packets") recompute what was eaten, with or without an after photo | note kept on the device | Claude applies it |
 | Calorie estimate from typed ingredients and amounts (when they are all in the pantry with nutrition) | yes | otherwise Claude estimates from ingredients, portion size and photo |
 | Appointment summary for a person over 7, 14 or 30 days, to share or copy | plain summary | Claude drafts a brief with questions to ask |
 | Simple view: a large-text screen for one person, locked on their device | yes | |

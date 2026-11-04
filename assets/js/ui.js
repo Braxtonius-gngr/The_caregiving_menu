@@ -662,11 +662,12 @@ function renderDiary() {
   var shift = function (n) { return shiftDay(day, n); };
   return '<div class="row between"><button class="btn ghost sm" onclick="State.day=\'' + shift(-1) + '\';refresh()">&larr;</button><b>' + (day === todayISO() ? 'Today' : day) + '</b><button class="btn ghost sm" onclick="State.day=\'' + shift(1) + '\';refresh()">&rarr;</button></div>' +
     profileSwitcher() + dvTiles(Logic.dayTotals(entries), prof && prof.daily_targets) +
-    '<div class="btn-row"><button class="btn" onclick="logFood()">+ Log a meal</button></div>' + afterInputs() +
+    fluidsLine(entries) +
+    '<div class="btn-row"><button class="btn" onclick="logFood()">+ Log a meal</button><button class="btn ghost" onclick="logDrink()">&#129380; Log a drink</button></div>' + afterInputs() +
     (entries.length ? entries.map(function (e) {
       var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
       var who = State.profiles.find(function (p) { return p.id === e.for_profile_id; });
-      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===this){event.preventDefault();this.click();}" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + plateNote(e) + (!(e.kcal > 0) && e.estimate_source !== 'manual' && Sync.enabled() ? ' <button class="btn sm" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + plateButtons(e) + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
+      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===this){event.preventDefault();this.click();}" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + (e.entry_kind === 'drink' ? '&#129380; ' : '') + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + plateNote(e) + (!(e.kcal > 0) && e.estimate_source !== 'manual' && e.estimate_source !== 'water' && Sync.enabled() ? ' <button class="btn sm" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + plateButtons(e) + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
     }).join('') : '<div class="empty">Nothing logged.</div>') +
     (prof ? '<h2>Notes for ' + esc(prof.person_name) + '\'s next appointment</h2><div class="card"><textarea id="profNotes" rows="4" placeholder="Questions to ask, patterns you noticed...">' + esc(prof.notes || '') + '</textarea><div class="btn-row"><button class="btn sm" onclick="saveProfileNotes(\'' + prof.id + '\')">Save notes</button><button class="btn sm ghost" onclick="weeklyDigest(\'' + prof.id + '\')">Weekly digest</button></div></div>' : '');
 }
@@ -732,9 +733,13 @@ function recipeNutritionComplete(rid) {
 // is estimated and the servings-eaten multiplier still applies.
 function estimateEntry(e, extra) {
   extra = extra || {};
-  var after = e.plate_status === 'leftovers' && !!e.after_photo_data;
+  // Leftovers: compare what was served (photo, recipe, description) with what was left
+  // (an after photo and/or a note such as "ate all but half the toast").
+  var after = e.plate_status === 'leftovers' && !!(e.after_photo_data || e.eaten_note);
+  var drink = e.entry_kind === 'drink';
   var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
   var parts = [];
+  if (drink) parts.push('This is a DRINK' + (e.volume_ml ? ', about ' + Math.round(e.volume_ml / 29.57) + ' oz (' + Math.round(e.volume_ml) + ' ml)' : '') + '. Estimate nutrition for the whole drink as poured.');
   if (r) {
     var lines = (S.linesByRecipe[r.id] || []).map(function (l) { return (fmtQty(l.qty, l.unit) + ' ' + ((S.ingById[l.ingredient_id] || {}).name || '')).trim(); });
     parts.push('Recipe: ' + r.title + (r.servings ? ' (makes ' + r.servings + ' servings)' : '') + (lines.length ? '. Ingredients for the whole recipe: ' + lines.join('; ') : ''));
@@ -743,13 +748,20 @@ function estimateEntry(e, extra) {
   if (extra.text) parts.push(extra.text);
   if (extra.ingLines && extra.ingLines.length) parts.push('Ingredients and amounts eaten: ' + extra.ingLines.join('; '));
   if (extra.size) parts.push('Portion size: ' + extra.size);
-  // With an "after" photo of the leftovers, the cloud compares it with the plate as served.
-  var body = after ? { text: parts.join('\n'), images: e.photo_data ? [e.photo_data, e.after_photo_data] : [e.after_photo_data], compare: true }
+  if (after) {
+    // How much was served, so the same note on one or two servings gives different totals.
+    if (r && !e.photo_data) parts.push('Served: ' + (e.served_mult || e.portion_mult || 1) + ' serving(s) of this recipe.');
+    if (e.served_kcal > 0) parts.push('What was served totals about ' + Math.round(e.served_kcal) + ' kcal.');
+  }
+  if (after && e.eaten_note) parts.push('What was actually eaten, per the caregiver: ' + e.eaten_note);
+  // With leftovers, the cloud compares what was served with what was left.
+  var images = after ? [e.photo_data, e.after_photo_data].filter(Boolean) : null;
+  var body = after ? { text: parts.join('\n'), images: images, compare: true, after_only: !e.photo_data && !!e.after_photo_data }
     : { text: parts.join('\n'), image: e.photo_data || null };
   return Sync.brain('estimate_plate', body).then(function (res) {
     Logic.NUTRIENTS.forEach(function (k) { if (res[k] != null) e[k] = res[k]; });
     e.estimate_source = 'estimate'; e.confidence = res.confidence;
-    if ((r && e.photo_data) || after) e.portion_mult = 1; // the photos already show the amount eaten
+    if (!drink && ((r && e.photo_data) || after)) e.portion_mult = 1; // the photos or note already give the amount eaten
     if (!r && !extra.text && !(extra.ingLines || []).length && res.items && res.items.length) e.free_text = res.items.map(function (it) { return it.name; }).join(', ');
     return e;
   });
@@ -868,12 +880,13 @@ function nutShown(v, mult) { return v != null ? String(Math.round(v * mult * 10)
 // Everything about one logged meal, editable. Nutrition is shown and edited as totals for
 // the meal; each field also keeps its per-serving value (sess.base), so changing servings
 // rescales the totals on screen and Save stores what the form shows.
-function editDiaryEntry(id) {
+function editDiaryEntry(id, focusNote) {
   var e = State.diary.find(function (x) { return x.id === id; });
   if (!e) return;
   var mult = e.portion_mult || 1;
   var sess = S.editSession = { id: id, seq: ++editSeq, photo: undefined, photoReq: 0, pending: null, estReq: 0, fromEstimate: false, confidence: null, before: {}, base: {}, shown: {}, edited: {} };
-  var ports = ['0.5', '1', '1.5', '2', '3'];
+  var drink = e.entry_kind === 'drink';
+  var ports = drink ? ['0.25', '0.5', '0.75', '1'] : ['0.5', '1', '1.5', '2', '3'];
   if (ports.indexOf(String(mult)) < 0) ports.push(String(mult));
   var hasPhoto = !!(e.photo_data || e.photo_path);
   openSheet('<h2 style="margin-top:0">Meal details</h2>' +
@@ -885,15 +898,17 @@ function editDiaryEntry(id) {
     '<label for="eWhen">When</label><input id="eWhen" type="datetime-local" value="' + localDay(e.eaten_at) + 'T' + localTime(e.eaten_at) + '">' +
     '<label for="eRecipe">Recipe</label><select id="eRecipe"><option value="">—</option>' + State.recipes.map(function (r) { return '<option value="' + r.id + '"' + (e.recipe_id === r.id ? ' selected' : '') + '>' + esc(r.title) + '</option>'; }).join('') + '</select>' +
     '<label for="eText">Description</label><input id="eText" value="' + esc(e.free_text || '') + '">' +
-    '<label for="ePort">Servings eaten</label><select id="ePort" onchange="onEditServings()">' + ports.map(function (v) { return '<option value="' + v + '"' + (String(mult) === v ? ' selected' : '') + '>' + v + '</option>'; }).join('') + '</select>' +
+    (drink ? '<label for="eOz">Amount poured (oz)</label><input id="eOz" type="number" step="any" min="0" value="' + (e.volume_ml ? Math.round(e.volume_ml / OZ_ML * 10) / 10 : '') + '">' : '') +
+    '<label for="ePort">' + (drink ? 'How much was drunk' : 'Servings eaten') + '</label><select id="ePort" onchange="onEditServings()">' + ports.map(function (v) { return '<option value="' + v + '"' + (String(mult) === v ? ' selected' : '') + '>' + v + '</option>'; }).join('') + '</select>' +
     afterSection(e) +
     '<h3>Nutrition for this meal <span class="muted" id="eSource">(' + esc(e.estimate_source || 'not set') + (e.confidence != null ? ', ' + Math.round(e.confidence * 100) + '% confident' : '') + ')</span></h3>' +
     '<div class="grid-2">' + Logic.NUTRIENTS.map(function (k) { return '<div><label for="eN-' + k + '">' + NUT_LABELS[k] + '</label><input id="eN-' + k + '" type="number" step="any" value="' + nutShown(e[k], mult) + '" oninput="markNutEdited(\'' + k + '\')"></div>'; }).join('') + '</div>' +
     (Sync.enabled() ? '<div class="btn-row"><button type="button" class="btn ghost" onclick="estimateIntoForm()">Estimate again</button></div><p class="muted">Fills the numbers from the recipe, description and photo. Nothing is saved until you tap Save.</p>' : '') +
     '</fieldset>' +
     '<div class="btn-row"><button class="btn" id="eSave" onclick="saveDiaryEdit()">Save</button><button class="btn ghost" onclick="closeSheet()">Close</button><button class="btn danger" onclick="closeSheet();deleteDiaryEntry(\'' + id + '\')">Delete</button></div>');
-  ['eWho', 'eWhen', 'eRecipe', 'eText', 'ePort'].forEach(function (fid) { sess.before[fid] = document.getElementById(fid).value; });
+  ['eWho', 'eWhen', 'eRecipe', 'eText', 'ePort', 'eOz', 'eNote'].forEach(function (fid) { var el = document.getElementById(fid); if (el) sess.before[fid] = el.value; });
   Logic.NUTRIENTS.forEach(function (k) { sess.base[k] = e[k] != null ? e[k] : null; sess.shown[k] = nutShown(e[k], mult); });
+  if (focusNote) setTimeout(function () { var n = document.getElementById('eNote'); if (n) { n.scrollIntoView({ block: 'center' }); n.focus(); } }, 50);
   if (e.after_photo_data || e.after_photo_path) {
     var aimg = document.getElementById('eAfterPhoto');
     Sync.photoSrc(e, 'diary_entries', true).then(function (src) { if (src && aimg.isConnected && editLive(sess)) aimg.src = src; });
@@ -936,6 +951,8 @@ function diaryFormDraft(e) {
   var v = function (i) { return document.getElementById(i).value; };
   var when = new Date(v('eWhen'));
   var d = Object.assign({}, e, { for_profile_id: v('eWho') || null, eaten_at: isNaN(when) ? e.eaten_at : when.toISOString(), recipe_id: v('eRecipe') || null, free_text: v('eText').trim(), portion_mult: +v('ePort') || 1 });
+  var oz = document.getElementById('eOz');
+  if (oz) d.volume_ml = +oz.value > 0 ? Math.round(+oz.value * OZ_ML) : null; // the amount on screen, not the stored one
   Logic.NUTRIENTS.forEach(function (k) { d[k] = null; });
   return d;
 }
@@ -956,7 +973,7 @@ function estimateIntoForm() {
     });
   }).then(function (src) {
     draft.photo_data = src || null;
-    if (e.plate_status !== 'leftovers') return;
+    if (e.plate_status !== 'leftovers' || !(e.after_photo_data || e.after_photo_path)) return;
     return Sync.photoSrc(e, 'diary_entries', true).then(function (after) {
       if (!after) throw new Error('the after photo could not be loaded. Check the connection and try again');
       draft.after_photo_data = after;
@@ -990,6 +1007,8 @@ function saveDiaryEdit() {
     var set = {}, keep = {}, typed = {}, typedAny = false;
     Object.keys(fields).forEach(function (fid) { if (v(fid) !== sess.before[fid]) set[fields[fid]] = draft[fields[fid]]; });
     if (v('ePort') !== sess.before.ePort || sess.fromEstimate) set.portion_mult = draft.portion_mult;
+    var oz = document.getElementById('eOz');
+    if (oz && oz.value !== sess.before.eOz) set.volume_ml = +oz.value > 0 ? Math.round(+oz.value * OZ_ML) : null;
     Logic.NUTRIENTS.forEach(function (k) {
       var raw = v('eN-' + k);
       if (!sess.edited[k]) { if (sess.fromEstimate) keep[k] = sess.base[k]; return; } // not typed in: per-serving value, unrounded
@@ -1007,7 +1026,7 @@ function saveDiaryEdit() {
       if (photo !== undefined) {
         if (cur.photo_path) Sync.removePhoto(cur.photo_path);
         cur.photo_path = null; cur.photo_data = photo;
-        cur.served_kcal = null; // a different meal photo: the old "served" baseline no longer applies
+        cur.served_kcal = null; cur.served_mult = null; // a different meal photo: the old "served" baseline no longer applies
       }
       return cur;
     }).then(function (saved) {
@@ -1018,6 +1037,46 @@ function saveDiaryEdit() {
     }, function (err) { if (editLive(sess)) lockEditFields(false); toast('Could not save: ' + err.message); });
   });
 }
+/* ---------- drinks ---------- */
+// Drinks are their own diary entries (entry_kind 'drink') with the amount poured (volume_ml);
+// "how much was drunk" is the servings multiplier, so nutrition and fluids scale with it.
+var OZ_ML = 29.5735;
+function fluidLabel(ml) { return Math.round(ml / OZ_ML) + ' oz'; }
+function fluidsLine(entries) {
+  var drinks = entries.filter(function (e) { return e.entry_kind === 'drink' && e.volume_ml; });
+  if (!drinks.length) return '';
+  var ml = drinks.reduce(function (t, e) { return t + e.volume_ml * (e.portion_mult || 1); }, 0);
+  return '<div class="note">&#128167; Fluids: ' + fluidLabel(ml) + ' (' + Math.round(ml) + ' ml) from ' + drinks.length + ' drink' + (drinks.length === 1 ? '' : 's') + '</div>';
+}
+var ZERO_CAL_DRINK = /^(plain |still |sparkling |tap |bottled )?(water|ice water|sparkling water|seltzer|club soda)$/i;
+function logDrink() {
+  return DB.meta('last_eater').then(function (last) {
+    var who = State.activeProfile || (State.profiles.some(function (p) { return p.id === last; }) ? last : '');
+    var now = new Date().toISOString();
+    openSheet('<h2 style="margin-top:0">Log a drink</h2>' +
+      '<label for="dWho">Who is drinking?</label><select id="dWho"><option value="">Me</option>' + State.profiles.map(function (p) { return '<option value="' + p.id + '" ' + (who === p.id ? 'selected' : '') + '>' + esc(p.person_name) + '</option>'; }).join('') + '</select>' +
+      '<label for="dWhen">When</label><input id="dWhen" type="datetime-local" value="' + localDay(now) + 'T' + localTime(now) + '">' +
+      '<label for="dWhat">What</label><input id="dWhat" list="drinkList" placeholder="coffee with 2 creamers"><datalist id="drinkList">' + ['water', 'coffee', 'tea', 'milk', 'orange juice', 'apple juice', 'soda', 'diet soda', 'nutrition shake', 'broth'].map(function (d) { return '<option value="' + d + '">'; }).join('') + '</datalist>' +
+      '<div class="row"><div class="grow"><label for="dOz">Amount poured (oz)</label><input id="dOz" type="number" step="any" min="0" value="8"></div>' +
+      '<div class="grow"><label for="dFrac">How much was drunk</label><select id="dFrac"><option value="1">All</option><option value="0.75">&frac34;</option><option value="0.5">Half</option><option value="0.25">A little</option></select></div></div>' +
+      '<div class="chips">' + [[4, '4 oz'], [8, 'cup (8 oz)'], [12, 'can (12 oz)'], [16, '16 oz'], [20, 'bottle (20 oz)']].map(function (o) { return '<span class="chip" onclick="document.getElementById(\'dOz\').value=' + o[0] + '">' + o[1] + '</span>'; }).join('') + '</div>' +
+      '<div class="btn-row"><button class="btn" onclick="saveDrink()">Log drink</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
+  });
+}
+function saveDrink() {
+  var v = function (i) { return document.getElementById(i).value; };
+  var what = v('dWhat').trim(); if (!what) return toast('What was the drink?');
+  var oz = +v('dOz'), when = new Date(v('dWhen'));
+  var e = { entry_kind: 'drink', eaten_at: (isNaN(when) ? new Date() : when).toISOString(), free_text: what, volume_ml: oz > 0 ? Math.round(oz * OZ_ML) : null,
+    portion_mult: +v('dFrac') || 1, for_profile_id: v('dWho') || null, recipe_id: null, estimate_source: 'estimate' };
+  DB.meta('last_eater', e.for_profile_id || '');
+  var water = ZERO_CAL_DRINK.test(what);
+  if (water) { Logic.NUTRIENTS.forEach(function (k) { e[k] = 0; }); e.estimate_source = 'water'; e.confidence = 1; }
+  var est = water || !Sync.enabled() ? Promise.resolve() : estimateEntry(e, { text: what }).catch(function (err) { toast('Logged without an estimate: ' + err.message); });
+  closeSheet(); if (!water && Sync.enabled()) toast('Estimating...');
+  est.then(function () { return DB.put('diary_entries', e); }).then(function () { State.day = localDay(e.eaten_at); return loadAll(); }).then(function () { toast('Drink logged'); showScreen('diary'); });
+}
+
 /* ---------- before / after the meal ---------- */
 // A meal photographed when served can get a second photo of what was left. Comparing the
 // two gives what was actually eaten; "Finished plate" says everything was eaten.
@@ -1026,32 +1085,38 @@ function afterInputs() {
     '<input id="afterLib" type="file" accept="image/*" class="hidden" onchange="onAfterPhoto(this)">';
 }
 function plateNote(e) {
+  if (e.entry_kind === 'drink') return (e.volume_ml ? ' · ' + fluidLabel(e.volume_ml * (e.portion_mult || 1)) + ' drunk' : '');
   if (e.plate_status === 'finished') return ' · &#10003; plate finished';
   if (e.plate_status !== 'leftovers') return '';
-  return e.served_kcal > 0 ? ' · ate ~' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' of ~' + Math.round(e.served_kcal) + ' kcal served' : ' · leftovers photographed';
+  return e.served_kcal > 0 ? ' · ate ~' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' of ~' + Math.round(e.served_kcal) + ' kcal served' : ' · ate part';
 }
 function plateButtons(e) {
-  if (e.plate_status || !(e.photo_data || e.photo_path)) return '';
-  return ' <button class="btn sm ghost" onclick="event.stopPropagation();pickAfterPhoto(\'' + e.id + '\')">&#128247; After photo</button>' +
+  if (e.entry_kind === 'drink' || e.plate_status) return '';
+  return ((e.photo_data || e.photo_path) ? ' <button class="btn sm ghost" onclick="event.stopPropagation();pickAfterPhoto(\'' + e.id + '\')">&#128247; After photo</button>' : '') +
+    ' <button class="btn sm ghost" onclick="event.stopPropagation();editDiaryEntry(\'' + e.id + '\', true)">&#9998; Ate part</button>' +
     ' <button class="btn sm ghost" onclick="event.stopPropagation();markPlateFinished(\'' + e.id + '\')">&#10003; Finished plate</button>';
 }
 function afterSection(e) {
+  if (e.entry_kind === 'drink') return '';
   var has = !!(e.after_photo_data || e.after_photo_path);
   return '<h3>After the meal</h3>' +
     (has ? '<img id="eAfterPhoto" class="photo-big" alt="Plate after the meal">' : '') +
-    '<p class="muted">' + (e.plate_status === 'finished' ? 'Plate finished: everything was eaten.' : e.plate_status === 'leftovers' ? 'Leftovers photographed.' + (e.served_kcal > 0 ? ' Served ~' + Math.round(e.served_kcal) + ' kcal; ate ~' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal.' : '') : 'Take a photo of what was left to count only what was eaten.') + '</p>' +
+    '<p class="muted">' + (e.plate_status === 'finished' ? 'Plate finished: everything was eaten.' : e.plate_status === 'leftovers' ? 'Ate part of it.' + (e.served_kcal > 0 ? ' Served ~' + Math.round(e.served_kcal) + ' kcal; ate ~' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal.' : '') : 'Take a photo of what was left, or describe it below, to count only what was eaten.') + '</p>' +
+    '<label for="eNote">What was actually eaten (or added)</label><textarea id="eNote" rows="2" placeholder="ate all but half the toast, half the eggs, added 2 salt packets">' + esc(e.eaten_note || '') + '</textarea>' +
+    '<div class="btn-row"><button type="button" class="btn sm" onclick="saveEatenNote(\'' + e.id + '\')">Update what was eaten</button></div>' +
     '<div class="btn-row"><button type="button" class="btn ghost sm" onclick="pickAfterPhoto(\'' + e.id + '\')">&#128247; ' + (has ? 'Retake' : 'Take') + ' after photo</button><button type="button" class="btn ghost sm" onclick="pickAfterPhoto(\'' + e.id + '\', true)">&#128444; Choose after photo</button>' +
     (e.plate_status !== 'finished' ? '<button type="button" class="btn ghost sm" onclick="markPlateFinished(\'' + e.id + '\')">&#10003; Finished plate</button>' : '') +
     (e.plate_status ? '<button type="button" class="btn ghost sm" onclick="clearPlateStatus(\'' + e.id + '\')">Clear</button>' : '') + '</div>';
 }
 // Meal details has unsaved changes (they'd be lost if an after-photo action closed it).
-function editDirty() {
+// skipNote: the note button commits the note itself, so only the other fields count.
+function editDirty(skipNote) {
   var sess = S.editSession;
   if (!sess || !editLive(sess)) return false;
-  var changed = ['eWho', 'eWhen', 'eRecipe', 'eText', 'ePort'].some(function (fid) { return document.getElementById(fid).value !== sess.before[fid]; });
+  var changed = ['eWho', 'eWhen', 'eRecipe', 'eText', 'ePort', 'eOz'].concat(skipNote ? [] : ['eNote']).some(function (fid) { var el = document.getElementById(fid); return el && el.value !== sess.before[fid]; });
   return changed || Object.keys(sess.edited).length > 0 || sess.photo !== undefined || sess.fromEstimate;
 }
-function afterGuard() { if (!editDirty()) return true; toast('Save or close your changes first, then add the after photo.'); return false; }
+function afterGuard(skipNote) { if (!editDirty(skipNote)) return true; toast(skipNote ? 'Save or close your other changes first, then update what was eaten.' : 'Save your changes first (tap "Update what was eaten" for the note), then add the after photo.'); return false; }
 function pickAfterPhoto(id, fromLibrary) {
   if (!afterGuard()) return;
   S.afterFor = id;
@@ -1070,6 +1135,7 @@ function onAfterPhoto(input) {
       // What was served, kept for "ate ~X of ~Y": the meal's numbers before any comparison.
       // Set once; Clear and retakes keep it (it resets only when the meal photo changes).
       if (cur.served_kcal == null && cur.kcal > 0) cur.served_kcal = cur.kcal * (cur.portion_mult || 1);
+      if (cur.served_mult == null) cur.served_mult = cur.portion_mult || 1;
       cur.plate_status = 'leftovers';
       return cur;
     });
@@ -1083,26 +1149,46 @@ function onAfterPhoto(input) {
 function estimateEaten(id) {
   var e = State.diary.find(function (x) { return x.id === id; });
   if (!e) return Promise.resolve();
-  if (e.estimate_source === 'manual') { toast('After photo saved. Your typed numbers were kept; open the entry and tap Estimate again to recompute.'); return Promise.resolve(); }
-  if (!Sync.enabled()) { toast('After photo saved. Estimating what was eaten needs the cloud; open the entry later and tap Estimate again.'); return Promise.resolve(); }
-  toast('Comparing before and after...');
+  if (e.estimate_source === 'manual') { toast('Saved. Your typed numbers were kept; open the entry and tap Estimate again to recompute.'); return Promise.resolve(); }
+  if (!Sync.enabled()) { toast('Saved. Estimating what was eaten needs the cloud; open the entry later and tap Estimate again.'); return Promise.resolve(); }
+  toast('Working out what was eaten...');
   var copy = Object.assign({}, e);
   Logic.NUTRIENTS.forEach(function (k) { copy[k] = null; }); // unknowns stay blank, never the served numbers
-  return Promise.all([Sync.photoSrc(e), Sync.photoSrc(e, 'diary_entries', true)]).then(function (src) {
+  var hasAfter = !!(e.after_photo_data || e.after_photo_path);
+  return Promise.all([Sync.photoSrc(e), hasAfter ? Sync.photoSrc(e, 'diary_entries', true) : null]).then(function (src) {
     if ((e.photo_data || e.photo_path) && !src[0]) throw new Error('the meal photo could not be loaded. Check the connection and try again');
-    if (!src[1]) throw new Error('the after photo could not be loaded');
-    copy.photo_data = src[0]; copy.after_photo_data = src[1];
+    if (hasAfter && !src[1]) throw new Error('the after photo could not be loaded');
+    copy.photo_data = src[0]; copy.after_photo_data = src[1] || null;
     return estimateEntry(copy, { text: e.free_text });
   }).then(function (est) {
     return DB.update('diary_entries', id, function (cur) {
       // Only if the after photo is still the one compared: a retake starts its own comparison.
-      if (!cur || cur.deleted || cur.plate_status !== 'leftovers' || cur.estimate_source === 'manual' || cur.after_photo_data !== copy.after_photo_data || (cur.photo_data || null) !== (copy.photo_data || null)) return null;
+      if (!cur || cur.deleted || cur.plate_status !== 'leftovers' || cur.estimate_source === 'manual' || (cur.after_photo_data || null) !== (copy.after_photo_data || null) || (cur.photo_data || null) !== (copy.photo_data || null) || (cur.eaten_note || '') !== (copy.eaten_note || '')) return null;
       Logic.NUTRIENTS.forEach(function (k) { cur[k] = est[k]; });
       cur.portion_mult = est.portion_mult || 1; cur.estimate_source = 'estimate'; cur.confidence = est.confidence;
       return cur;
     });
-  }).then(function (saved) { return loadAll().then(function () { refresh(); toast(saved ? 'Updated to what was actually eaten' : 'After photo saved'); }); })
-    .catch(function (err) { toast('After photo saved, but the comparison failed: ' + err.message); });
+  }).then(function (saved) { return loadAll().then(function () { refresh(); toast(saved ? 'Updated to what was actually eaten' : 'Saved'); }); })
+    .catch(function (err) { toast('Saved, but working out what was eaten failed: ' + err.message); });
+}
+// "Ate all but half the toast": a note on what was actually eaten (with or without an
+// after photo) makes the entry 'leftovers' and recomputes it as eaten, like an after photo.
+function saveEatenNote(id) {
+  if (!afterGuard(true)) return;
+  var el = document.getElementById('eNote'), note = el ? el.value.trim() : '';
+  if (!note) return toast('Describe what was eaten first');
+  closeSheet();
+  DB.update('diary_entries', id, function (cur) {
+    if (!cur || cur.deleted) return null;
+    cur.eaten_note = note.slice(0, 500);
+    if (cur.served_kcal == null && cur.kcal > 0) cur.served_kcal = cur.kcal * (cur.portion_mult || 1);
+    if (cur.served_mult == null) cur.served_mult = cur.portion_mult || 1;
+    cur.plate_status = 'leftovers';
+    return cur;
+  }).then(function (saved) {
+    if (!saved) return toast('This entry was deleted');
+    return loadAll().then(function () { refresh(); return estimateEaten(id); }).then(function () { if (Sync.enabled()) syncNow(); });
+  });
 }
 function markPlateFinished(id) {
   if (!afterGuard()) return;
@@ -1110,7 +1196,7 @@ function markPlateFinished(id) {
   DB.update('diary_entries', id, function (cur) {
     if (!cur || cur.deleted) return null;
     if (cur.after_photo_path) Sync.removePhoto(cur.after_photo_path);
-    cur.after_photo_path = null; cur.after_photo_data = null; cur.plate_status = 'finished';
+    cur.after_photo_path = null; cur.after_photo_data = null; cur.eaten_note = null; cur.plate_status = 'finished';
     return cur;
   }).then(loadAll).then(function () { refresh(); toast('Marked as finished'); });
 }
@@ -1121,7 +1207,7 @@ function clearPlateStatus(id) {
   DB.update('diary_entries', id, function (cur) {
     if (!cur || cur.deleted) return null;
     if (cur.after_photo_path) Sync.removePhoto(cur.after_photo_path);
-    cur.after_photo_path = null; cur.after_photo_data = null; cur.plate_status = null;
+    cur.after_photo_path = null; cur.after_photo_data = null; cur.eaten_note = null; cur.plate_status = null;
     return cur;
   }).then(loadAll).then(function () { refresh(); toast('Cleared'); });
 }
@@ -1338,7 +1424,7 @@ var PHOTO_BACKUP_KEYS = ['recipes', 'diary']; // only these tables have photo_pa
 // so nothing in it can reach the page as markup.
 var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 var IMAGE_RE = /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+\/]+=*$/;
-var NUM_FIELDS = ['qty', 'par_qty', 'servings', 'prep_min', 'cook_min', 'rating', 'times_cooked', 'kcal_per_serving', 'kcal_100g', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sodium_mg', 'sugar_g', 'potassium_mg', 'density', 'kcal', 'portion_mult', 'confidence', 'max_per_serving', 'pos', 'served_kcal'];
+var NUM_FIELDS = ['qty', 'par_qty', 'servings', 'prep_min', 'cook_min', 'rating', 'times_cooked', 'kcal_per_serving', 'kcal_100g', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sodium_mg', 'sugar_g', 'potassium_mg', 'density', 'kcal', 'portion_mult', 'confidence', 'max_per_serving', 'pos', 'served_kcal', 'volume_ml', 'served_mult'];
 var DATE_FIELDS = ['expires_on', 'opened_on', 'last_cooked_on'];
 var TIME_FIELDS = ['eaten_at', 'at'];
 function sanitizeBackupRecord(rec) {
@@ -1354,6 +1440,7 @@ function sanitizeBackupRecord(rec) {
     if (k === 'photo_data' || k === 'after_photo_data') { if (IMAGE_RE.test(v)) out[k] = v; return; }
     if (k === 'photo_path' || k === 'after_photo_path') { out[k] = /^[0-9a-f-]{36}\/(diary|recipes)\/[A-Za-z0-9._-]+$/.test(v) ? v : null; return; }
     if (k === 'plate_status') { out[k] = v === 'finished' || v === 'leftovers' ? v : null; return; }
+    if (k === 'entry_kind') { out[k] = v === 'drink' ? 'drink' : 'meal'; return; }
     if (k === 'severity') { out[k] = v === 'hard' ? 'hard' : 'soft'; return; }
     if (k === 'daily_targets') { // only known nutrients, only finite numbers
       out[k] = {};
