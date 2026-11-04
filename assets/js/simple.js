@@ -68,9 +68,10 @@ function renderSimple() {
 
 // One tap: log a serving for this person, with a short window to undo.
 function simpleAte(rid) {
-  var p = simpleProfile(), per = S.recipeInfo[rid].nut.perServing;
+  var p = simpleProfile(), per = S.recipeInfo[rid].nut.perServing, complete = recipeNutritionComplete(rid);
   var e = { eaten_at: new Date().toISOString(), recipe_id: rid, free_text: '', portion_mult: 1, for_profile_id: p.id, estimate_source: 'recipe' };
-  Logic.NUTRIENTS.forEach(function (k) { e[k] = per[k]; });
+  // Partial recipe numbers would look like a real total and hide the Estimate button.
+  if (complete) Logic.NUTRIENTS.forEach(function (k) { e[k] = per[k]; });
   var usage = (S.linesByRecipe[rid] || []).map(function (l) { return { ingredient_id: l.ingredient_id, qty: 1, unit: l.unit, event: 'logged', at: e.eaten_at }; });
   Promise.all([DB.put('diary_entries', e)].concat(usage.map(function (u) { return DB.put('usage_log', u); }))).then(loadAll).then(function () {
     refresh();
@@ -79,6 +80,8 @@ function simpleAte(rid) {
       Promise.all([DB.remove('diary_entries', e.id)].concat(usage.map(function (u) { return DB.remove('usage_log', u.id); })))
         .then(loadAll).then(function () { refresh(); toast('Removed'); });
     });
+    // A recipe without full nutrition data logs 0 kcal; estimate it quietly in the background.
+    if (!complete) reEstimateEntry(e.id, true);
   });
 }
 

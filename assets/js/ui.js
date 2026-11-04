@@ -666,7 +666,7 @@ function renderDiary() {
     (entries.length ? entries.map(function (e) {
       var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
       var who = State.profiles.find(function (p) { return p.id === e.for_profile_id; });
-      return '<div class="card row">' + photoThumb(e) + '<div class="grow"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
+      return '<div class="card row">' + photoThumb(e) + '<div class="grow"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + (!(e.kcal > 0) && e.estimate_source !== 'manual' && Sync.enabled() ? ' <button class="btn sm" onclick="reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
     }).join('') : '<div class="empty">Nothing logged.</div>') +
     (prof ? '<h2>Notes for ' + esc(prof.person_name) + '\'s next appointment</h2><div class="card"><textarea id="profNotes" rows="4" placeholder="Questions to ask, patterns you noticed...">' + esc(prof.notes || '') + '</textarea><div class="btn-row"><button class="btn sm" onclick="saveProfileNotes(\'' + prof.id + '\')">Save notes</button><button class="btn sm ghost" onclick="weeklyDigest(\'' + prof.id + '\')">Weekly digest</button></div></div>' : '');
 }
@@ -722,6 +722,58 @@ function estimateFromLines(texts) {
   if (!ok || !mapped.length) return null;
   return Logic.recipeNutrition({ servings: 1 }, mapped, S.ingById).perServing;
 }
+function recipeNutritionComplete(rid) {
+  var nut = S.recipeInfo[rid] && S.recipeInfo[rid].nut;
+  return !!nut && nut.totalLines > 0 && nut.knownLines === nut.totalLines && nut.perServing.kcal > 0;
+}
+// Ask the cloud for a meal's nutrition from everything known about it: the recipe and its
+// ingredients, a description, typed ingredients, a portion size and the photo. With a
+// photo, the plate in it is what was eaten (portion 1); without one, one recipe serving
+// is estimated and the servings-eaten multiplier still applies.
+function estimateEntry(e, extra) {
+  extra = extra || {};
+  var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
+  var parts = [];
+  if (r) {
+    var lines = (S.linesByRecipe[r.id] || []).map(function (l) { return (fmtQty(l.qty, l.unit) + ' ' + ((S.ingById[l.ingredient_id] || {}).name || '')).trim(); });
+    parts.push('Recipe: ' + r.title + (r.servings ? ' (makes ' + r.servings + ' servings)' : '') + (lines.length ? '. Ingredients for the whole recipe: ' + lines.join('; ') : ''));
+    parts.push(e.photo_data ? 'The photo shows the plate that was actually eaten; estimate that plate.' : 'Estimate ONE serving of this recipe.');
+  }
+  if (extra.text) parts.push(extra.text);
+  if (extra.ingLines && extra.ingLines.length) parts.push('Ingredients and amounts eaten: ' + extra.ingLines.join('; '));
+  if (extra.size) parts.push('Portion size: ' + extra.size);
+  return Sync.brain('estimate_plate', { text: parts.join('\n'), image: e.photo_data || null }).then(function (res) {
+    Logic.NUTRIENTS.forEach(function (k) { if (res[k] != null) e[k] = res[k]; });
+    e.estimate_source = 'estimate'; e.confidence = res.confidence;
+    if (r && e.photo_data) e.portion_mult = 1; // the photo already shows the amount eaten
+    if (!r && !extra.text && !(extra.ingLines || []).length && res.items && res.items.length) e.free_text = res.items.map(function (it) { return it.name; }).join(', ');
+    return e;
+  });
+}
+// Fill in calories for an entry that was logged without any (e.g. a scanned recipe with no
+// nutrition data). It only fills nutrients that are still empty: anything already there was
+// typed by hand, and keeps the same total for the meal even if the servings multiplier changes.
+// quiet: no messages (used in the background right after a one-tap log).
+function reEstimateEntry(id, quiet) {
+  var e = State.diary.find(function (x) { return x.id === id; });
+  if (!e) return Promise.resolve();
+  if (!Sync.enabled()) return quiet ? Promise.resolve() : toast('Estimating needs the cloud (Settings)');
+  if (!quiet) toast('Estimating calories...');
+  var copy = Object.assign({}, e);
+  return Sync.photoSrc(copy).then(function (src) {
+    // Without the photo the plate can't be judged; stop rather than guess a recipe serving.
+    if (e.photo_path && !src) throw new Error('the photo could not be loaded. Check the connection and try again');
+    copy.photo_data = src || null; return estimateEntry(copy, { text: e.free_text });
+  }).then(function (est) {
+    return DB.update('diary_entries', id, function (cur) {
+      if (!cur || cur.deleted) return null;
+      var oldMult = cur.portion_mult || 1, newMult = est.portion_mult || oldMult;
+      Logic.NUTRIENTS.forEach(function (k) { cur[k] = cur[k] > 0 ? cur[k] * oldMult / newMult : (est[k] != null ? est[k] : cur[k]); });
+      cur.portion_mult = newMult; cur.estimate_source = est.estimate_source; cur.confidence = est.confidence;
+      return cur;
+    });
+  }).then(loadAll).then(function () { if (!quiet) toast('Estimated'); refresh(); }).catch(function (err) { if (!quiet) toast('Could not estimate: ' + err.message); });
+}
 function saveLog() {
   var v = function (i) { var el = document.getElementById(i); return el ? el.value : ''; };
   var rid = v('lRecipe'), text = v('lText').trim(), port = +v('lPort') || 1, who = v('lWho') === '__new' ? '' : v('lWho');
@@ -729,10 +781,14 @@ function saveLog() {
   var when = v('lWhen') ? new Date(v('lWhen')) : new Date();
   if (isNaN(when)) when = new Date();
   var r = rid ? State.recipes.find(function (x) { return x.id === rid; }) : null;
-  var e = { eaten_at: when.toISOString(), recipe_id: rid || null, free_text: text || (ingLines.length ? ingLines.join(', ') : (r ? '' : 'Meal')), portion_mult: port, for_profile_id: who || null, estimate_source: 'manual' };
-  if (rid) { var per = S.recipeInfo[rid].nut.perServing; Logic.NUTRIENTS.forEach(function (k) { e[k] = per[k]; }); e.estimate_source = 'recipe'; }
+  // A recipe meal stays 'recipe' until estimated, so it can still be estimated later (offline now).
+  var e = { eaten_at: when.toISOString(), recipe_id: rid || null, free_text: text || (ingLines.length ? ingLines.join(', ') : (r ? '' : 'Meal')), portion_mult: port, for_profile_id: who || null, estimate_source: rid ? 'recipe' : 'manual' };
+  // A recipe's own numbers are used only when every ingredient has nutrition data;
+  // scanned recipes usually have none, so those meals are estimated instead.
+  var recipeKnown = !!rid && recipeNutritionComplete(rid);
+  if (recipeKnown) { var per = S.recipeInfo[rid].nut.perServing; Logic.NUTRIENTS.forEach(function (k) { e[k] = per[k]; }); e.estimate_source = 'recipe'; }
   var manual = !!v('lKcal');
-  if (manual) e.kcal = +v('lKcal');
+  if (manual) { e.kcal = +v('lKcal'); e.estimate_source = 'manual'; }
   if (v('lNa')) e.sodium_mg = +v('lNa');
   // The simple view's sheet has only some of these fields, so each one is optional.
   var fileOf = function (id) { var el = document.getElementById(id); return el && el.files ? el.files[0] : null; };
@@ -741,16 +797,17 @@ function saveLog() {
   DB.meta('last_eater', who || '');
   var p = file ? downscale(file, 1280).then(function (d) { e.photo_data = d; }, function () { warnings.push('the photo could not be opened, so it was left out'); }) : Promise.resolve();
   p.then(function () {
-    if (rid || manual) return;
-    var local = ingLines.length && !size ? estimateFromLines(ingLines) : null;
+    if (manual || recipeKnown) return;
+    var local = !rid && ingLines.length && !size ? estimateFromLines(ingLines) : null;
     if (local) { Logic.NUTRIENTS.forEach(function (k) { e[k] = local[k]; }); e.estimate_source = 'ingredients'; return; }
-    if (!Sync.enabled() || !(text || ingLines.length || e.photo_data)) return;
-    var desc = [text, ingLines.length ? 'Ingredients and amounts: ' + ingLines.join('; ') : '', size ? 'Portion size: ' + size : ''].filter(Boolean).join('\n');
+    if (!Sync.enabled() || !(rid || text || ingLines.length || e.photo_data)) return;
     toast('Estimating calories...');
-    return Sync.brain('estimate_plate', { text: desc, image: e.photo_data || null }).then(function (res) {
-      Logic.NUTRIENTS.forEach(function (k) { if (res[k] != null) e[k] = res[k]; }); e.estimate_source = 'estimate'; e.confidence = res.confidence;
-      if (!text && !ingLines.length && res.items && res.items.length) e.free_text = res.items.map(function (it) { return it.name; }).join(', ');
-    }).catch(function (err) { warnings.push('no calorie estimate (' + err.message + ')'); });
+    // Sodium typed by hand is kept, as the same total for the meal, even if the estimate
+    // changes the servings multiplier (a photo of the plate counts as one serving).
+    var naTotal = v('lNa') ? +v('lNa') * port : null;
+    return estimateEntry(e, { text: text, ingLines: ingLines, size: size })
+      .then(function () { if (naTotal != null) e.sodium_mg = naTotal / (e.portion_mult || 1); })
+      .catch(function (err) { warnings.push('no calorie estimate (' + err.message + ')'); });
   }).then(function () {
     var writes = [DB.put('diary_entries', e)];
     if (rid) (S.linesByRecipe[rid] || []).forEach(function (l) { writes.push(DB.put('usage_log', { ingredient_id: l.ingredient_id, qty: 1, unit: l.unit, event: 'logged', at: e.eaten_at })); });
