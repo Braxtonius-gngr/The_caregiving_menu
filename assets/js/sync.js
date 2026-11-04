@@ -114,6 +114,9 @@ var Sync = (function () {
         delete rec.fts; // server-generated column
         delete rec.photo_data; // local copies only; the photos themselves live in Storage at photo_path / after_photo_path
         delete rec.after_photo_data;
+        // A batch upsert sends every column any row has, as NULL where a row lacks it, so
+        // older meal records (no entry_kind) would break the NOT NULL column for the whole batch.
+        if (it.store === 'diary_entries' && rec.entry_kind !== 'drink') rec.entry_kind = 'meal';
         (byStore[it.store] = byStore[it.store] || []).push(rec);
       });
       return Promise.all(Object.keys(byStore).map(function (store) {

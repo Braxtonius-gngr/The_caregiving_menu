@@ -748,6 +748,11 @@ function estimateEntry(e, extra) {
   if (extra.text) parts.push(extra.text);
   if (extra.ingLines && extra.ingLines.length) parts.push('Ingredients and amounts eaten: ' + extra.ingLines.join('; '));
   if (extra.size) parts.push('Portion size: ' + extra.size);
+  if (after) {
+    // How much was served, so the same note on one or two servings gives different totals.
+    if (r && !e.photo_data) parts.push('Served: ' + (e.served_mult || e.portion_mult || 1) + ' serving(s) of this recipe.');
+    if (e.served_kcal > 0) parts.push('What was served totals about ' + Math.round(e.served_kcal) + ' kcal.');
+  }
   if (after && e.eaten_note) parts.push('What was actually eaten, per the caregiver: ' + e.eaten_note);
   // With leftovers, the cloud compares what was served with what was left.
   var images = after ? [e.photo_data, e.after_photo_data].filter(Boolean) : null;
@@ -901,7 +906,7 @@ function editDiaryEntry(id, focusNote) {
     (Sync.enabled() ? '<div class="btn-row"><button type="button" class="btn ghost" onclick="estimateIntoForm()">Estimate again</button></div><p class="muted">Fills the numbers from the recipe, description and photo. Nothing is saved until you tap Save.</p>' : '') +
     '</fieldset>' +
     '<div class="btn-row"><button class="btn" id="eSave" onclick="saveDiaryEdit()">Save</button><button class="btn ghost" onclick="closeSheet()">Close</button><button class="btn danger" onclick="closeSheet();deleteDiaryEntry(\'' + id + '\')">Delete</button></div>');
-  ['eWho', 'eWhen', 'eRecipe', 'eText', 'ePort', 'eOz'].forEach(function (fid) { var el = document.getElementById(fid); if (el) sess.before[fid] = el.value; });
+  ['eWho', 'eWhen', 'eRecipe', 'eText', 'ePort', 'eOz', 'eNote'].forEach(function (fid) { var el = document.getElementById(fid); if (el) sess.before[fid] = el.value; });
   Logic.NUTRIENTS.forEach(function (k) { sess.base[k] = e[k] != null ? e[k] : null; sess.shown[k] = nutShown(e[k], mult); });
   if (focusNote) setTimeout(function () { var n = document.getElementById('eNote'); if (n) { n.scrollIntoView({ block: 'center' }); n.focus(); } }, 50);
   if (e.after_photo_data || e.after_photo_path) {
@@ -946,6 +951,8 @@ function diaryFormDraft(e) {
   var v = function (i) { return document.getElementById(i).value; };
   var when = new Date(v('eWhen'));
   var d = Object.assign({}, e, { for_profile_id: v('eWho') || null, eaten_at: isNaN(when) ? e.eaten_at : when.toISOString(), recipe_id: v('eRecipe') || null, free_text: v('eText').trim(), portion_mult: +v('ePort') || 1 });
+  var oz = document.getElementById('eOz');
+  if (oz) d.volume_ml = +oz.value > 0 ? Math.round(+oz.value * OZ_ML) : null; // the amount on screen, not the stored one
   Logic.NUTRIENTS.forEach(function (k) { d[k] = null; });
   return d;
 }
@@ -1019,7 +1026,7 @@ function saveDiaryEdit() {
       if (photo !== undefined) {
         if (cur.photo_path) Sync.removePhoto(cur.photo_path);
         cur.photo_path = null; cur.photo_data = photo;
-        cur.served_kcal = null; // a different meal photo: the old "served" baseline no longer applies
+        cur.served_kcal = null; cur.served_mult = null; // a different meal photo: the old "served" baseline no longer applies
       }
       return cur;
     }).then(function (saved) {
@@ -1102,13 +1109,14 @@ function afterSection(e) {
     (e.plate_status ? '<button type="button" class="btn ghost sm" onclick="clearPlateStatus(\'' + e.id + '\')">Clear</button>' : '') + '</div>';
 }
 // Meal details has unsaved changes (they'd be lost if an after-photo action closed it).
-function editDirty() {
+// skipNote: the note button commits the note itself, so only the other fields count.
+function editDirty(skipNote) {
   var sess = S.editSession;
   if (!sess || !editLive(sess)) return false;
-  var changed = ['eWho', 'eWhen', 'eRecipe', 'eText', 'ePort', 'eOz'].some(function (fid) { var el = document.getElementById(fid); return el && el.value !== sess.before[fid]; });
+  var changed = ['eWho', 'eWhen', 'eRecipe', 'eText', 'ePort', 'eOz'].concat(skipNote ? [] : ['eNote']).some(function (fid) { var el = document.getElementById(fid); return el && el.value !== sess.before[fid]; });
   return changed || Object.keys(sess.edited).length > 0 || sess.photo !== undefined || sess.fromEstimate;
 }
-function afterGuard() { if (!editDirty()) return true; toast('Save or close your changes first, then add the after photo.'); return false; }
+function afterGuard(skipNote) { if (!editDirty(skipNote)) return true; toast(skipNote ? 'Save or close your other changes first, then update what was eaten.' : 'Save your changes first (tap "Update what was eaten" for the note), then add the after photo.'); return false; }
 function pickAfterPhoto(id, fromLibrary) {
   if (!afterGuard()) return;
   S.afterFor = id;
@@ -1127,6 +1135,7 @@ function onAfterPhoto(input) {
       // What was served, kept for "ate ~X of ~Y": the meal's numbers before any comparison.
       // Set once; Clear and retakes keep it (it resets only when the meal photo changes).
       if (cur.served_kcal == null && cur.kcal > 0) cur.served_kcal = cur.kcal * (cur.portion_mult || 1);
+      if (cur.served_mult == null) cur.served_mult = cur.portion_mult || 1;
       cur.plate_status = 'leftovers';
       return cur;
     });
@@ -1165,7 +1174,7 @@ function estimateEaten(id) {
 // "Ate all but half the toast": a note on what was actually eaten (with or without an
 // after photo) makes the entry 'leftovers' and recomputes it as eaten, like an after photo.
 function saveEatenNote(id) {
-  if (!afterGuard()) return;
+  if (!afterGuard(true)) return;
   var el = document.getElementById('eNote'), note = el ? el.value.trim() : '';
   if (!note) return toast('Describe what was eaten first');
   closeSheet();
@@ -1173,6 +1182,7 @@ function saveEatenNote(id) {
     if (!cur || cur.deleted) return null;
     cur.eaten_note = note.slice(0, 500);
     if (cur.served_kcal == null && cur.kcal > 0) cur.served_kcal = cur.kcal * (cur.portion_mult || 1);
+    if (cur.served_mult == null) cur.served_mult = cur.portion_mult || 1;
     cur.plate_status = 'leftovers';
     return cur;
   }).then(function (saved) {
@@ -1414,7 +1424,7 @@ var PHOTO_BACKUP_KEYS = ['recipes', 'diary']; // only these tables have photo_pa
 // so nothing in it can reach the page as markup.
 var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 var IMAGE_RE = /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+\/]+=*$/;
-var NUM_FIELDS = ['qty', 'par_qty', 'servings', 'prep_min', 'cook_min', 'rating', 'times_cooked', 'kcal_per_serving', 'kcal_100g', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sodium_mg', 'sugar_g', 'potassium_mg', 'density', 'kcal', 'portion_mult', 'confidence', 'max_per_serving', 'pos', 'served_kcal', 'volume_ml'];
+var NUM_FIELDS = ['qty', 'par_qty', 'servings', 'prep_min', 'cook_min', 'rating', 'times_cooked', 'kcal_per_serving', 'kcal_100g', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sodium_mg', 'sugar_g', 'potassium_mg', 'density', 'kcal', 'portion_mult', 'confidence', 'max_per_serving', 'pos', 'served_kcal', 'volume_ml', 'served_mult'];
 var DATE_FIELDS = ['expires_on', 'opened_on', 'last_cooked_on'];
 var TIME_FIELDS = ['eaten_at', 'at'];
 function sanitizeBackupRecord(rec) {
