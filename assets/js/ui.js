@@ -666,7 +666,7 @@ function renderDiary() {
     (entries.length ? entries.map(function (e) {
       var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
       var who = State.profiles.find(function (p) { return p.id === e.for_profile_id; });
-      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'&&event.target===this)this.click()" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + (!(e.kcal > 0) && e.estimate_source !== 'manual' && Sync.enabled() ? ' <button class="btn sm" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
+      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===this){event.preventDefault();this.click();}" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + (!(e.kcal > 0) && e.estimate_source !== 'manual' && Sync.enabled() ? ' <button class="btn sm" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
     }).join('') : '<div class="empty">Nothing logged.</div>') +
     (prof ? '<h2>Notes for ' + esc(prof.person_name) + '\'s next appointment</h2><div class="card"><textarea id="profNotes" rows="4" placeholder="Questions to ask, patterns you noticed...">' + esc(prof.notes || '') + '</textarea><div class="btn-row"><button class="btn sm" onclick="saveProfileNotes(\'' + prof.id + '\')">Save notes</button><button class="btn sm ghost" onclick="weeklyDigest(\'' + prof.id + '\')">Weekly digest</button></div></div>' : '');
 }
@@ -865,7 +865,7 @@ function editDiaryEntry(id) {
   var e = State.diary.find(function (x) { return x.id === id; });
   if (!e) return;
   var mult = e.portion_mult || 1;
-  var sess = S.editSession = { id: id, seq: ++editSeq, photo: undefined, photoReq: 0, pending: null, estReq: 0, fromEstimate: false, confidence: null, before: {}, base: {}, shown: {} };
+  var sess = S.editSession = { id: id, seq: ++editSeq, photo: undefined, photoReq: 0, pending: null, estReq: 0, fromEstimate: false, confidence: null, before: {}, base: {}, shown: {}, edited: {} };
   var ports = ['0.5', '1', '1.5', '2', '3'];
   if (ports.indexOf(String(mult)) < 0) ports.push(String(mult));
   var hasPhoto = !!(e.photo_data || e.photo_path);
@@ -880,7 +880,7 @@ function editDiaryEntry(id) {
     '<label for="eText">Description</label><input id="eText" value="' + esc(e.free_text || '') + '">' +
     '<label for="ePort">Servings eaten</label><select id="ePort" onchange="onEditServings()">' + ports.map(function (v) { return '<option value="' + v + '"' + (String(mult) === v ? ' selected' : '') + '>' + v + '</option>'; }).join('') + '</select>' +
     '<h3>Nutrition for this meal <span class="muted" id="eSource">(' + esc(e.estimate_source || 'not set') + (e.confidence != null ? ', ' + Math.round(e.confidence * 100) + '% confident' : '') + ')</span></h3>' +
-    '<div class="grid-2">' + Logic.NUTRIENTS.map(function (k) { return '<div><label for="eN-' + k + '">' + NUT_LABELS[k] + '</label><input id="eN-' + k + '" type="number" step="any" value="' + nutShown(e[k], mult) + '"></div>'; }).join('') + '</div>' +
+    '<div class="grid-2">' + Logic.NUTRIENTS.map(function (k) { return '<div><label for="eN-' + k + '">' + NUT_LABELS[k] + '</label><input id="eN-' + k + '" type="number" step="any" value="' + nutShown(e[k], mult) + '" oninput="markNutEdited(\'' + k + '\')"></div>'; }).join('') + '</div>' +
     (Sync.enabled() ? '<div class="btn-row"><button type="button" class="btn ghost" onclick="estimateIntoForm()">Estimate again</button></div><p class="muted">Fills the numbers from the recipe, description and photo. Nothing is saved until you tap Save.</p>' : '') +
     '</fieldset>' +
     '<div class="btn-row"><button class="btn" id="eSave" onclick="saveDiaryEdit()">Save</button><button class="btn ghost" onclick="closeSheet()">Close</button><button class="btn danger" onclick="closeSheet();deleteDiaryEntry(\'' + id + '\')">Delete</button></div>');
@@ -891,13 +891,15 @@ function editDiaryEntry(id) {
     Sync.photoSrc(e).then(function (src) { if (src && img.isConnected && editLive(sess) && sess.photo === undefined) img.src = src; });
   }
 }
+// A number typed by hand is the meal total the person meant; remember that per field.
+function markNutEdited(k) { var sess = S.editSession; if (sess && editLive(sess)) sess.edited[k] = true; }
 // Servings changed: totals you haven't typed over follow the new servings.
 function onEditServings() {
   var sess = S.editSession; if (!sess || !editLive(sess)) return;
   var mult = +document.getElementById('ePort').value || 1;
   Logic.NUTRIENTS.forEach(function (k) {
     var el = document.getElementById('eN-' + k);
-    if (el.value !== sess.shown[k]) return; // typed by hand: it's the meal total the person meant
+    if (sess.edited[k]) return; // typed by hand: it's the meal total the person meant
     sess.shown[k] = nutShown(sess.base[k], mult); el.value = sess.shown[k];
   });
 }
@@ -944,7 +946,7 @@ function estimateIntoForm() {
     if (!editLive(sess) || req !== sess.estReq) return; // the sheet closed or a newer estimate was asked for
     var mult = est.portion_mult || 1;
     document.getElementById('ePort').value = String(mult);
-    sess.fromEstimate = true; sess.confidence = est.confidence;
+    sess.fromEstimate = true; sess.confidence = est.confidence; sess.edited = {};
     Logic.NUTRIENTS.forEach(function (k) { sess.base[k] = est[k] != null ? est[k] : null; sess.shown[k] = nutShown(sess.base[k], mult); document.getElementById('eN-' + k).value = sess.shown[k]; });
     document.getElementById('eSource').textContent = '(new estimate' + (est.confidence != null ? ', ' + Math.round(est.confidence * 100) + '% confident' : '') + '; tap Save to keep it)';
     toast('Estimate ready. Tap Save to keep it.');
@@ -958,7 +960,10 @@ function saveDiaryEdit() {
   var sess = S.editSession;
   var e = sess && State.diary.find(function (x) { return x.id === sess.id; });
   if (!e) return;
-  Promise.resolve(sess.pending).then(function () {
+  lockEditFields(true); // no new picks or edits while saving
+  // Wait for the latest photo being prepared (a newer pick replaces sess.pending).
+  var settle = function () { var p = sess.pending; return Promise.resolve(p).then(function () { if (sess.pending !== p) return settle(); }); };
+  settle().then(function () {
     if (!editLive(sess)) return;
     var v = function (i) { return document.getElementById(i).value; };
     var draft = diaryFormDraft(e);
@@ -968,7 +973,7 @@ function saveDiaryEdit() {
     if (v('ePort') !== sess.before.ePort || sess.fromEstimate) set.portion_mult = draft.portion_mult;
     Logic.NUTRIENTS.forEach(function (k) {
       var raw = v('eN-' + k);
-      if (raw === sess.shown[k]) { if (sess.fromEstimate) keep[k] = sess.base[k]; return; } // as shown: per-serving value, unrounded
+      if (!sess.edited[k]) { if (sess.fromEstimate) keep[k] = sess.base[k]; return; } // not typed in: per-serving value, unrounded
       typed[k] = raw === '' ? null : +raw; typedAny = true; // a meal total typed by hand
     });
     var source = typedAny ? 'manual' : (sess.fromEstimate ? 'estimate' : null);
@@ -986,10 +991,11 @@ function saveDiaryEdit() {
       }
       return cur;
     }).then(function (saved) {
-      closeSheet(); toast(saved ? 'Saved' : 'This entry was deleted elsewhere');
-      if (saved) State.day = localDay(saved.eaten_at);
+      // Only this sheet is closed; if another entry was opened meanwhile, it stays open.
+      if (editLive(sess)) { closeSheet(); if (saved) State.day = localDay(saved.eaten_at); }
+      toast(saved ? 'Saved' : 'This entry was deleted elsewhere');
       return loadAll().then(function () { refresh(); if (photo && Sync.enabled()) syncNow().then(loadAll).then(function () { if (currentScreen === 'diary') refresh(); }); });
-    });
+    }, function (err) { if (editLive(sess)) lockEditFields(false); toast('Could not save: ' + err.message); });
   });
 }
 function deleteDiaryEntry(id) {
