@@ -23,6 +23,7 @@ The full design lives in [docs/design.md](docs/design.md).
 | Simple view: a large-text screen for one person, locked on their device | yes | |
 | Share to the app from other Android apps: links, text, or a photo of a recipe, receipt or meal | links prefill; meal photos log to the diary | links and recipe/receipt photos are read by Claude |
 | Diary photos | kept on the device | uploaded to a private bucket, visible on every household device, and cached for offline viewing |
+| Before/after meal photos: add a photo of the leftovers (or tap Finished plate) and the entry is updated to what was actually eaten, with "ate ~X of ~Y kcal served" | photos and status kept on the device | both photos sync; Claude compares them |
 | Paste a recipe as text | basic parser | Claude parses it |
 | Recipe photo, receipt photo, recipe URL | | Claude parses it |
 | Groceries photo (fridge, shelf, bags; live or up to 6 saved) adds items to the pantry after review | | Claude lists the items |
