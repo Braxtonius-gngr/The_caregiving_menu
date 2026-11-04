@@ -767,8 +767,14 @@ function reEstimateEntry(id, quiet) {
   return Sync.photoSrc(copy).then(function (src) {
     // Without the photo the plate can't be judged; stop rather than guess a recipe serving.
     if (e.photo_path && !src) throw new Error('the photo could not be loaded. Check the connection and try again');
-    copy.photo_data = src || null; return estimateEntry(copy, { text: e.free_text });
-  }).then(function (est) {
+    copy.photo_data = src || null;
+    // A plate with leftovers is estimated from both photos, so only what was eaten counts.
+    if (e.plate_status !== 'leftovers') return;
+    return Sync.photoSrc(copy, 'diary_entries', true).then(function (after) {
+      if (!after) throw new Error('the after photo could not be loaded. Check the connection and try again');
+      copy.after_photo_data = after;
+    });
+  }).then(function () { return estimateEntry(copy, { text: e.free_text }); }).then(function (est) {
     return DB.update('diary_entries', id, function (cur) {
       if (!cur || cur.deleted) return null;
       var oldMult = cur.portion_mult || 1, newMult = est.portion_mult || oldMult;
@@ -1004,6 +1010,7 @@ function saveDiaryEdit() {
       if (photo !== undefined) {
         if (cur.photo_path) Sync.removePhoto(cur.photo_path);
         cur.photo_path = null; cur.photo_data = photo;
+        cur.served_kcal = null; // a different meal photo: the old "served" baseline no longer applies
       }
       return cur;
     }).then(function (saved) {
@@ -1054,8 +1061,9 @@ function onAfterPhoto(input) {
       if (!cur || cur.deleted) return null;
       if (cur.after_photo_path) Sync.removePhoto(cur.after_photo_path);
       cur.after_photo_path = null; cur.after_photo_data = d;
-      // What was served, kept for "ate ~X of ~Y": the meal's numbers before the comparison.
-      if (cur.plate_status !== 'leftovers' && cur.kcal > 0) cur.served_kcal = cur.kcal * (cur.portion_mult || 1);
+      // What was served, kept for "ate ~X of ~Y": the meal's numbers before any comparison.
+      // Set once; Clear and retakes keep it (it resets only when the meal photo changes).
+      if (cur.served_kcal == null && cur.kcal > 0) cur.served_kcal = cur.kcal * (cur.portion_mult || 1);
       cur.plate_status = 'leftovers';
       return cur;
     });
@@ -1081,7 +1089,8 @@ function estimateEaten(id) {
     return estimateEntry(copy, { text: e.free_text });
   }).then(function (est) {
     return DB.update('diary_entries', id, function (cur) {
-      if (!cur || cur.deleted || cur.plate_status !== 'leftovers' || cur.estimate_source === 'manual') return null;
+      // Only if the after photo is still the one compared: a retake starts its own comparison.
+      if (!cur || cur.deleted || cur.plate_status !== 'leftovers' || cur.estimate_source === 'manual' || cur.after_photo_data !== copy.after_photo_data) return null;
       Logic.NUTRIENTS.forEach(function (k) { cur[k] = est[k]; });
       cur.portion_mult = est.portion_mult || 1; cur.estimate_source = 'estimate'; cur.confidence = est.confidence;
       return cur;
