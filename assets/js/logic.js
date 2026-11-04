@@ -3,6 +3,13 @@ var Logic = (function () {
   var DV = { kcal: 2000, protein_g: 50, carbs_g: 275, fat_g: 78, fiber_g: 28, sodium_mg: 2300, sugar_g: 50, potassium_mg: 4700 };
   var NUTRIENTS = ['kcal', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sodium_mg', 'sugar_g', 'potassium_mg'];
 
+  // Only an exact name or alias: safe to compute nutrition from without asking.
+  function exactIngredient(name, ingredients) {
+    var n = Units.normalizeName(name);
+    if (!n) return null;
+    return ingredients.find(function (ing) { return Units.normalizeName(ing.name) === n || (ing.aliases || []).some(function (a) { return Units.normalizeName(a) === n; }); }) || null;
+  }
+
   function ingredientMatch(name, ingredients) {
     var n = Units.normalizeName(name);
     if (!n) return null;
@@ -193,5 +200,5 @@ var Logic = (function () {
     return m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : null;
   }
 
-  return { DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt };
+  return { DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();

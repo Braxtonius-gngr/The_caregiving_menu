@@ -168,7 +168,7 @@ Return only what the schema asks for. Use generic, lowercase, singular ingredien
 Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
 Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
 
-type Mode = "parse_recipe" | "parse_receipt" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary";
+type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary";
 
 function imageBlock(dataUrl: string): Anthropic.ImageBlockParam {
   const m = dataUrl.match(/^data:(image\/[a-z+]+);base64,(.*)$/);
@@ -242,6 +242,12 @@ async function handle(mode: Mode, body: Record<string, any>) {
     }
     case "parse_receipt":
       return await ask(receiptSchema, [imageBlock(body.image), { type: "text", text: `Read this grocery receipt. Decode abbreviations (GV = Great Value, YEL = yellow). Skip tax, totals, bags and coupons, or mark non-food lines is_food=false. qty is the amount bought in the item's natural unit (3 lb onions => qty 3, unit lb).${known ? "\nKnown names: " + known : ""}` }], "medium");
+    case "pantry_photo": {
+      // Photos of food on hand (fridge, shelf, counter, shopping bags), up to 6 at once.
+      const images: string[] = (Array.isArray(body.images) ? body.images : [body.image]).filter(Boolean);
+      if (!images.length || images.length > 6) throw new Error("send 1 to 6 photos");
+      return await ask(receiptSchema, [...images.map(imageBlock), { type: "text", text: `These photos show food someone has on hand (fridge, pantry shelf, counter or shopping bags). List each distinct food item you can identify, once, even if it appears in several photos. qty is your best count or amount in the item's natural unit (3 each apples, 1 gal milk, 1 box cereal). raw is a short description of what you saw. Set store to an empty string and price to null. Mark anything that is not food is_food=false. Lower confidence for items you can only partly see.${known ? "\nKnown names: " + known : ""}` }], "medium");
+    }
     case "estimate_plate": {
       const content: Anthropic.ContentBlockParam[] = [];
       if (body.image) content.push(imageBlock(body.image));

@@ -17,13 +17,15 @@ The full design lives in [docs/design.md](docs/design.md).
 | Shopping list in your store's aisle order (set in Settings), shareable to texts or notes; checking an item adds it to the pantry | yes | |
 | Restock suggestions from par levels and recent usage | yes | |
 | Diet profiles, rules, starter packs, ✓ ⚠ ✕ badges | yes | |
-| Food diary with daily-value bars | yes | synced |
+| Food diary with daily-value bars: log for whoever is eating (add people on the spot), set when they ate, take or pick a photo | yes | synced |
+| Calorie estimate from typed ingredients and amounts (when they are all in the pantry with nutrition) | yes | otherwise Claude estimates from ingredients, portion size and photo |
 | Appointment summary for a person over 7, 14 or 30 days, to share or copy | plain summary | Claude drafts a brief with questions to ask |
 | Simple view: a large-text screen for one person, locked on their device | yes | |
 | Share to the app from other Android apps: links, text, or a photo of a recipe, receipt or meal | links prefill; meal photos log to the diary | links and recipe/receipt photos are read by Claude |
 | Diary photos | kept on the device | uploaded to a private bucket, visible on every household device, and cached for offline viewing |
 | Paste a recipe as text | basic parser | Claude parses it |
 | Recipe photo, receipt photo, recipe URL | | Claude parses it |
+| Groceries photo (fridge, shelf, bags; live or up to 6 saved) adds items to the pantry after review | | Claude lists the items |
 | Batch import of saved recipe photos: cut-off pages are matched and read together, unsure results are flagged to check | | Claude parses it |
 | Camera barcode scanning, with "Add & scan next" for unpacking groceries | scans offline; looks up new products on Open Food Facts when online | lookup runs through the cloud function |
 | Ingredient nutrition lookup | | USDA FoodData Central |
