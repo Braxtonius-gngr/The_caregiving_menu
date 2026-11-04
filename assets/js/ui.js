@@ -758,7 +758,7 @@ function reEstimateEntry(id, quiet) {
   if (!Sync.enabled()) return quiet ? Promise.resolve() : toast('Estimating needs the cloud (Settings)');
   if (!quiet) toast('Estimating calories...');
   var copy = Object.assign({}, e);
-  return Sync.photoSrc(copy).then(function (src) { copy.photo_data = src || null; return estimateEntry(copy, { text: e.recipe_id ? '' : e.free_text }); }).then(function (est) {
+  return Sync.photoSrc(copy).then(function (src) { copy.photo_data = src || null; return estimateEntry(copy, { text: e.free_text }); }).then(function (est) {
     return DB.update('diary_entries', id, function (cur) {
       if (!cur || cur.deleted) return null;
       Logic.NUTRIENTS.concat(['estimate_source', 'confidence', 'portion_mult']).forEach(function (k) { if (est[k] !== undefined) cur[k] = est[k]; });
@@ -773,13 +773,14 @@ function saveLog() {
   var when = v('lWhen') ? new Date(v('lWhen')) : new Date();
   if (isNaN(when)) when = new Date();
   var r = rid ? State.recipes.find(function (x) { return x.id === rid; }) : null;
-  var e = { eaten_at: when.toISOString(), recipe_id: rid || null, free_text: text || (ingLines.length ? ingLines.join(', ') : (r ? '' : 'Meal')), portion_mult: port, for_profile_id: who || null, estimate_source: 'manual' };
+  // A recipe meal stays 'recipe' until estimated, so it can still be estimated later (offline now).
+  var e = { eaten_at: when.toISOString(), recipe_id: rid || null, free_text: text || (ingLines.length ? ingLines.join(', ') : (r ? '' : 'Meal')), portion_mult: port, for_profile_id: who || null, estimate_source: rid ? 'recipe' : 'manual' };
   // A recipe's own numbers are used only when every ingredient has nutrition data;
   // scanned recipes usually have none, so those meals are estimated instead.
   var recipeKnown = !!rid && recipeNutritionComplete(rid);
   if (recipeKnown) { var per = S.recipeInfo[rid].nut.perServing; Logic.NUTRIENTS.forEach(function (k) { e[k] = per[k]; }); e.estimate_source = 'recipe'; }
   var manual = !!v('lKcal');
-  if (manual) e.kcal = +v('lKcal');
+  if (manual) { e.kcal = +v('lKcal'); e.estimate_source = 'manual'; }
   if (v('lNa')) e.sodium_mg = +v('lNa');
   // The simple view's sheet has only some of these fields, so each one is optional.
   var fileOf = function (id) { var el = document.getElementById(id); return el && el.files ? el.files[0] : null; };
@@ -793,7 +794,11 @@ function saveLog() {
     if (local) { Logic.NUTRIENTS.forEach(function (k) { e[k] = local[k]; }); e.estimate_source = 'ingredients'; return; }
     if (!Sync.enabled() || !(rid || text || ingLines.length || e.photo_data)) return;
     toast('Estimating calories...');
+    // Sodium typed by hand is kept, as the same total for the meal, even if the estimate
+    // changes the servings multiplier (a photo of the plate counts as one serving).
+    var naTotal = v('lNa') ? +v('lNa') * port : null;
     return estimateEntry(e, { text: text, ingLines: ingLines, size: size })
+      .then(function () { if (naTotal != null) e.sodium_mg = naTotal / (e.portion_mult || 1); })
       .catch(function (err) { warnings.push('no calorie estimate (' + err.message + ')'); });
   }).then(function () {
     var writes = [DB.put('diary_entries', e)];
