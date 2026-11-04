@@ -673,7 +673,7 @@ function renderDiary() {
 // Log a meal for whoever is eating it. The caregiver usually logs for someone else, so
 // "who" defaults to the person on screen, then to whoever was logged for last.
 function logFood() {
-  DB.meta('last_eater').then(function (last) {
+  return DB.meta('last_eater').then(function (last) {
     var who = State.activeProfile || (State.profiles.some(function (p) { return p.id === last; }) ? last : '');
     var pad = function (d) { return localDay(d.toISOString()) + 'T' + localTime(d.toISOString()); };
     openSheet('<h2 style="margin-top:0">Log a meal</h2>' +
@@ -692,7 +692,14 @@ function logFood() {
     if (S.sharedPhoto) showLogPreview(S.sharedPhoto);
   });
 }
-function previewLogPhoto(input) { if (input.files[0]) showLogPreview(input.files[0]); }
+// The newest pick wins: clear the other photo input so the one shown is the one saved.
+function previewLogPhoto(input) {
+  if (!input.files[0]) return;
+  var other = document.getElementById(input.id === 'lPhotoCam' ? 'lPhoto' : 'lPhotoCam');
+  if (other) other.value = '';
+  S.sharedPhoto = null;
+  showLogPreview(input.files[0]);
+}
 function showLogPreview(file) { var img = document.getElementById('lPhotoPrev'); if (img) { img.src = URL.createObjectURL(file); img.classList.remove('hidden'); } }
 // Add a person to log meals for without leaving the log screen.
 function addEaterInline(sel) {
@@ -705,12 +712,13 @@ function addEaterInline(sel) {
     toast(name + ' added. Set their diet in Settings when you are ready.');
   });
 }
-function logFromRecipe(id) { logFood(); var wait = setInterval(function () { var el = document.getElementById('lRecipe'); if (el) { clearInterval(wait); el.value = id; } }, 30); setTimeout(function () { clearInterval(wait); }, 2000); }
-// Totals for typed ingredient lines when every line matches a pantry ingredient with
-// nutrition data; null when any line is unknown (the cloud estimate handles those).
+function logFromRecipe(id) { logFood().then(function () { document.getElementById('lRecipe').value = id; }); }
+// Totals for typed ingredient lines when every line names a pantry ingredient exactly (or
+// by alias) and it has nutrition data; null otherwise, and the cloud estimate handles it.
+// Fuzzy matches are not trusted here: "butternut squash" must never count as butter.
 function estimateFromLines(texts) {
   var lines = texts.map(Units.parseLine), ok = true;
-  var mapped = lines.map(function (l) { var ing = Logic.ingredientMatch(l.name || '', State.ingredients); if (!ing || ing.kcal_100g == null || l.qty == null) ok = false; return { qty: l.qty, unit: l.unit, name: l.name, ingredient_id: ing && ing.id }; });
+  var mapped = lines.map(function (l) { var ing = Logic.exactIngredient(l.name || '', State.ingredients); if (!ing || ing.kcal_100g == null || l.qty == null) ok = false; return { qty: l.qty, unit: l.unit, name: l.name, ingredient_id: ing && ing.id }; });
   if (!ok || !mapped.length) return null;
   return Logic.recipeNutrition({ servings: 1 }, mapped, S.ingById).perServing;
 }
@@ -726,10 +734,12 @@ function saveLog() {
   var manual = !!v('lKcal');
   if (manual) e.kcal = +v('lKcal');
   if (v('lNa')) e.sodium_mg = +v('lNa');
-  var file = (document.getElementById('lPhotoCam').files[0]) || (document.getElementById('lPhoto').files[0]) || S.sharedPhoto;
+  // The simple view's sheet has only some of these fields, so each one is optional.
+  var fileOf = function (id) { var el = document.getElementById(id); return el && el.files ? el.files[0] : null; };
+  var file = fileOf('lPhotoCam') || fileOf('lPhoto') || S.sharedPhoto, warnings = [];
   S.sharedPhoto = null;
   DB.meta('last_eater', who || '');
-  var p = file ? downscale(file, 1280).then(function (d) { e.photo_data = d; }, function () { toast('That photo could not be opened; logging without it.'); }) : Promise.resolve();
+  var p = file ? downscale(file, 1280).then(function (d) { e.photo_data = d; }, function () { warnings.push('the photo could not be opened, so it was left out'); }) : Promise.resolve();
   p.then(function () {
     if (rid || manual) return;
     var local = ingLines.length && !size ? estimateFromLines(ingLines) : null;
@@ -740,12 +750,12 @@ function saveLog() {
     return Sync.brain('estimate_plate', { text: desc, image: e.photo_data || null }).then(function (res) {
       Logic.NUTRIENTS.forEach(function (k) { if (res[k] != null) e[k] = res[k]; }); e.estimate_source = 'estimate'; e.confidence = res.confidence;
       if (!text && !ingLines.length && res.items && res.items.length) e.free_text = res.items.map(function (it) { return it.name; }).join(', ');
-    }).catch(function (err) { toast('Logged without an estimate: ' + err.message); });
+    }).catch(function (err) { warnings.push('no calorie estimate (' + err.message + ')'); });
   }).then(function () {
     var writes = [DB.put('diary_entries', e)];
     if (rid) (S.linesByRecipe[rid] || []).forEach(function (l) { writes.push(DB.put('usage_log', { ingredient_id: l.ingredient_id, qty: 1, unit: l.unit, event: 'logged', at: e.eaten_at })); });
     return Promise.all(writes);
-  }).then(function () { closeSheet(); toast('Logged'); State.day = localDay(e.eaten_at); return loadAll(); }).then(function () {
+  }).then(function () { closeSheet(); toast(warnings.length ? 'Logged, but ' + warnings.join(' and ') : 'Logged'); State.day = localDay(e.eaten_at); return loadAll(); }).then(function () {
     showScreen('diary');
     if (e.photo_data && Sync.enabled()) syncNow().then(function () { return loadAll(); }).then(function () { if (currentScreen === 'diary') refresh(); });
   });

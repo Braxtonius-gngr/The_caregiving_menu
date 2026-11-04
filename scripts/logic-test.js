@@ -152,4 +152,11 @@ t('exifTakenAt reads DateTimeOriginal and ignores JPEGs without it', function ()
   assert.strictEqual(Logic.exifTakenAt(new Uint8Array([0xFF, 0xD8, 0xFF, 0xDA, 0, 2]).buffer), null);
   assert.strictEqual(Logic.exifTakenAt(new Uint8Array([1, 2, 3]).buffer), null);
 });
+t('exactIngredient only accepts the exact name or an alias', function () {
+  var ings = [{ name: 'butter', aliases: ['salted butter'] }];
+  assert.strictEqual(Logic.exactIngredient('Butter', ings).name, 'butter');
+  assert.strictEqual(Logic.exactIngredient('salted butter', ings).name, 'butter');
+  assert.strictEqual(Logic.exactIngredient('butternut squash', ings), null);
+  assert.ok(Logic.ingredientMatch('butternut squash', ings)); // the fuzzy matcher would have taken it
+});
 console.log(n + ' tests passed');
