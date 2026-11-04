@@ -760,7 +760,11 @@ function reEstimateEntry(id, quiet) {
   if (!Sync.enabled()) return quiet ? Promise.resolve() : toast('Estimating needs the cloud (Settings)');
   if (!quiet) toast('Estimating calories...');
   var copy = Object.assign({}, e);
-  return Sync.photoSrc(copy).then(function (src) { copy.photo_data = src || null; return estimateEntry(copy, { text: e.free_text }); }).then(function (est) {
+  return Sync.photoSrc(copy).then(function (src) {
+    // Without the photo the plate can't be judged; stop rather than guess a recipe serving.
+    if (e.photo_path && !src) throw new Error('the photo could not be loaded. Check the connection and try again');
+    copy.photo_data = src || null; return estimateEntry(copy, { text: e.free_text });
+  }).then(function (est) {
     return DB.update('diary_entries', id, function (cur) {
       if (!cur || cur.deleted) return null;
       var oldMult = cur.portion_mult || 1, newMult = est.portion_mult || oldMult;
