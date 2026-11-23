@@ -39,6 +39,7 @@ function attentionItems(pid, day, entries, plan) {
   var call = cs.care_phone ? ' <a class="btn sm" href="tel:' + esc(cs.care_phone_e164 || cs.care_phone.replace(/[^\d+]/g, '')) + '">Call</a>' : '';
   if (limit && b.inMl > limit) out.push({ text: 'Fluid in is <b>' + shortOz(b.inMl) + '</b>, over her ' + shortOz(limit) + ' limit' + (cs.fluid_limit_source ? ' (' + esc(cs.fluid_limit_source) + ')' : '') + '.' });
   b.flags.forEach(function (f) { out.push({ text: esc(localTime(f.entry.eaten_at) + ' ' + (OUTPUT_TYPES[f.entry.output_type] || 'output').toLowerCase() + ': ' + f.reasons.join(', ')) + '. Worth a call to the care team if this is new or getting worse.', action: call }); });
+  rhythmFlags(pid, day).forEach(function (m) { out.push({ text: 'The monitor showed <b>' + esc(rhythmName(m.rhythm)) + '</b> at ' + esc(localTime(m.taken_at)) + (m.pulse != null ? ' (pulse ' + esc(m.pulse) + ')' : '') + '. Tell the care team, especially if it is new. Chest pain, fainting or trouble breathing: call 911.', action: call }); });
   var w = Logic.weightChange(State.measurements || [], pid, day, dayStart());
   Logic.weightFlags(w, cs).forEach(function (t) { out.push({ text: 'Weight ' + esc(t) + (cs.alert_source ? ' (alert level: ' + esc(cs.alert_source) + ')' : '') + '.', action: call }); });
   var weighsDaily = Logic.standardWeights(State.measurements || [], pid, dayStart()).some(function (x) { return x.day >= shiftDay(day, -7); });
@@ -52,10 +53,11 @@ function attentionItems(pid, day, entries, plan) {
 var DOSE_TEXT = { given: '&#10003; given', skipped: 'skipped', refused: 'refused', due: 'due now', overdue: 'overdue', later: 'later' };
 function doseRow(p, pid) {
   var f = p.med.fields || {}, d = p.dose;
-  var by = d ? ' ' + esc(localTime(d.occurred_at || d.updated_at)) + (d.edited_by || d.user_id ? ' by ' + esc(whoName(d.edited_by || d.user_id)) : '') : '';
+  var amt = d && d.fields.amount && d.fields.amount !== f.dose ? ' · <b>' + esc(d.fields.amount) + '</b>' : '';
+  var by = d ? ' ' + esc(localTime(d.occurred_at || d.updated_at)) + amt + (d.edited_by || d.user_id ? ' by ' + esc(whoName(d.edited_by || d.user_id)) : '') : (p.time ? ' · ' + esc(p.time) : '');
   return '<div class="list-item dose-' + p.state + '"><div class="grow tappable" onclick="aboutMed(\'' + p.med.id + '\')"><b>' + esc(p.med.title) + '</b> <span class="muted">' + esc([f.dose, f.with_food && f.with_food !== 'Either' ? f.with_food.toLowerCase() : ''].filter(Boolean).join(' · ')) + '</span>' +
     '<div class="muted"><span class="dose-state">' + DOSE_TEXT[p.state] + '</span>' + by + (d && d.fields.note ? ' · ' + esc(d.fields.note) : '') + (f.label_boxed ? ' · <span class="flag-text">boxed warning</span>' : '') + '</div></div>' +
-    (d ? '<button class="btn sm ghost writer-only" onclick="undoDose(\'' + d.id + '\')">Undo</button>'
+    (d ? '<button class="btn sm ghost writer-only" onclick="editDose(\'' + d.id + '\')">Edit</button><button class="btn sm ghost writer-only" onclick="undoDose(\'' + d.id + '\')">Undo</button>'
       : '<button class="btn sm writer-only" onclick="giveDose(\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')">Given</button><button class="btn sm ghost writer-only" onclick="skipDose(\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')">Not given</button>') + '</div>';
 }
 function todayMeds(pid, day, plan) {
@@ -72,10 +74,12 @@ function todayMeds(pid, day, plan) {
       : '<p class="muted">' + (plan.length ? 'Nothing due right now.' : 'No scheduled doses today.') + '</p>') +
     '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'meds\',{pid:' + pidArg(pid) + '})">All meds today</button></div></div>';
 }
-function saveDose(medId, slot, pid, status, note) {
+// opts: { at: ISO time given (default now), amount: what was given (default the usual dose) }
+function saveDose(medId, slot, pid, status, note, opts) {
+  opts = opts || {};
   var med = (State.records || []).find(function (r) { return r.id === medId; }); if (!med) return Promise.resolve();
-  var day = careToday(), old = Logic.doseFor(dosesOf(pid), medId, day, slot === 'prn' ? '__none' : slot);
-  var now = new Date().toISOString(), fields = { med_id: medId, day: day, slot: slot, status: status, note: note || null };
+  var now = opts.at || new Date().toISOString(), day = careDayOf(now), old = Logic.doseFor(dosesOf(pid), medId, day, slot === 'prn' ? '__none' : slot);
+  var fields = { med_id: medId, day: day, slot: slot, status: status, note: note || null, amount: status === 'given' ? (opts.amount || (med.fields || {}).dose || null) : null };
   var write = old ? DB.update('records', old.id, function (cur) { if (!cur) return null; cur.fields = fields; cur.occurred_at = now; cur.deleted = false; return cur; })
     : DB.put('records', { kind: 'dose', for_profile_id: pid, title: med.title, occurred_at: now, fields: fields });
   return write.then(function (saved) {
@@ -90,6 +94,32 @@ function skipDose(medId, slot, pid) {
     '<label for="skipNote">Why (optional)</label><input id="skipNote" placeholder="asleep, doctor said hold it, out of pills...">' +
     '<p class="note">Missed a dose? Check the label or call the pharmacy before giving it late or doubling up.</p>' +
     '<div class="btn-row"><button class="btn" onclick="closeSheet();saveDose(\'' + medId + '\',\'' + slot + '\',' + pidArg(pid) + ',chipValue(\'skipWhy\')||\'skipped\',document.getElementById(\'skipNote\').value.trim())">Save</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
+}
+// Given at another time, or a different amount (half a tablet, a sliding-scale insulin dose...).
+function doseSheet(medId, slot, pid, doseId) {
+  var med = (State.records || []).find(function (r) { return r.id === medId; }); if (!med) return;
+  var d = doseId ? (State.records || []).find(function (r) { return r.id === doseId; }) : null, f = (d && d.fields) || {};
+  var at = d ? (d.occurred_at || d.updated_at) : new Date().toISOString(), status = f.status || 'given';
+  openSheet('<h2 style="margin-top:0">' + esc(med.title) + '</h2><p class="muted">' + esc(slot === 'prn' ? 'Only when needed' : slotName(slot) + ' dose') + ((med.fields || {}).dose ? ' · usual dose ' + esc(med.fields.dose) : '') + '</p>' +
+    '<div class="chips" id="dsStatus">' + [['given', 'Given'], ['skipped', 'Skipped'], ['refused', 'She refused']].map(function (s) { return '<button type="button" class="chip' + (s[0] === status ? ' on' : '') + '" data-v="' + s[0] + '" onclick="pickChip(\'dsStatus\',this)">' + s[1] + '</button>'; }).join('') + '</div>' +
+    '<label for="dsAt">Time given</label><input id="dsAt" type="datetime-local" value="' + localDay(at) + 'T' + localTime(at) + '">' +
+    '<label for="dsAmt">Amount given</label><input id="dsAmt" value="' + esc(f.amount || (med.fields || {}).dose || '') + '" placeholder="40 mg, half a tablet, 6 units...">' +
+    '<label for="dsNote">Note</label><input id="dsNote" value="' + esc(f.note || '') + '" placeholder="with breakfast, crushed in applesauce...">' +
+    '<div class="btn-row"><button class="btn" onclick="saveDoseSheet(\'' + medId + '\',\'' + slot + '\',' + pidArg(pid) + ',' + (d ? '\'' + d.id + '\'' : 'null') + ')">Save</button><button class="btn ghost" onclick="closeSheet()">Cancel</button>' +
+    (d ? '<button class="btn ghost" onclick="showHistory(\'records\',\'' + d.id + '\')">History</button>' : '') + '</div>');
+}
+function editDose(id) { var d = (State.records || []).find(function (r) { return r.id === id; }); if (d) doseSheet(d.fields.med_id, d.fields.slot, d.for_profile_id || null, id); }
+function saveDoseSheet(medId, slot, pid, doseId) {
+  var when = new Date(document.getElementById('dsAt').value), at = (isNaN(when) ? new Date() : when).toISOString();
+  var status = chipValue('dsStatus') || 'given', amount = document.getElementById('dsAmt').value.trim(), note = document.getElementById('dsNote').value.trim() || null;
+  closeSheet();
+  if (!doseId) return saveDose(medId, slot, pid, status, note, { at: at, amount: amount });
+  var med = (State.records || []).find(function (r) { return r.id === medId; }) || {};
+  DB.update('records', doseId, function (cur) {
+    if (!cur) return null;
+    cur.fields = Object.assign({}, cur.fields, { status: status, note: note, amount: status === 'given' ? (amount || (med.fields || {}).dose || null) : null, day: careDayOf(at) });
+    cur.occurred_at = at; return cur;
+  }).then(loadAll).then(function () { refresh(); if (Sync.enabled()) syncNow(); toast('Saved'); }).catch(function (e) { toast('Could not save: ' + e.message); });
 }
 // Undo removes the dose mark entirely (it goes to Deleted, so History still shows it).
 function undoDose(id) {
@@ -126,7 +156,7 @@ function renderMeds(arg) {
   });
   if (prn.length) html += '<h3>Only when needed</h3>' + prn.map(function (m) {
     var given = Logic.prnDoses(doses, m.id, day);
-    return '<div class="list-item"><div class="grow tappable" onclick="aboutMed(\'' + m.id + '\')"><b>' + esc(m.title) + '</b> <span class="muted">' + esc((m.fields || {}).dose || '') + '</span><div class="muted">' + (given.length ? 'Given today at ' + given.map(function (d) { return localTime(d.occurred_at); }).join(', ') : 'Not given today') + '</div></div><button class="btn sm writer-only" onclick="saveDose(\'' + m.id + '\',\'prn\',' + pidArg(pid) + ',\'given\')">Gave a dose</button></div>';
+    return '<div class="list-item"><div class="grow tappable" onclick="aboutMed(\'' + m.id + '\')"><b>' + esc(m.title) + '</b> <span class="muted">' + esc((m.fields || {}).dose || '') + '</span><div class="muted">' + (given.length ? 'Given today: ' + given.map(function (d) { return '<span class="tappable" onclick="event.stopPropagation();editDose(\'' + d.id + '\')">' + esc(localTime(d.occurred_at) + (d.fields.amount ? ' (' + d.fields.amount + ')' : '')) + '</span>'; }).join(', ') : 'Not given today') + '</div></div><button class="btn sm writer-only" onclick="doseSheet(\'' + m.id + '\',\'prn\',' + pidArg(pid) + ')">Gave a dose</button></div>';
   }).join('');
   html += medWeek(pid, meds, doses, day);
   html += '<h2>Her medicines</h2>' + (active.length ? active.map(function (m) { var f = m.fields || {}; return recordCard(m, esc([f.dose, slotsText(m)].filter(Boolean).join(' · ')), esc([f.purpose, f.refill_on ? 'refill ' + f.refill_on : ''].filter(Boolean).join(' · '))); }).join('') : '');
@@ -158,7 +188,15 @@ function latestVital(pid, kind) {
   return (State.measurements || []).filter(function (m) { return !m.deleted && m.kind === kind && (m.for_profile_id || null) === (pid || null); })
     .sort(function (a, b) { return a.taken_at < b.taken_at ? 1 : -1; })[0] || null;
 }
+var RHYTHMS = [['regular', 'Regular'], ['irregular', 'Irregular heartbeat'], ['afib', 'AFib']];
+function rhythmName(r) { var x = RHYTHMS.find(function (y) { return y[0] === r; }); return x ? x[1] : ''; }
 function vitalText(m) { return m.kind === 'blood_pressure' ? m.value + '/' + (m.value2 == null ? '?' : m.value2) : String(m.value); }
+function pulseText(m) { return [m.pulse != null ? 'pulse ' + m.pulse : '', m.rhythm && m.rhythm !== 'regular' ? rhythmName(m.rhythm) : ''].filter(Boolean).join(' · '); }
+// Today's readings where the monitor showed AFib or an irregular heartbeat.
+function rhythmFlags(pid, day) {
+  return (State.measurements || []).filter(function (m) { return !m.deleted && (m.for_profile_id || null) === (pid || null) && (m.rhythm === 'afib' || m.rhythm === 'irregular') && careDayOf(m.taken_at) === day; })
+    .sort(function (a, b) { return a.taken_at < b.taken_at ? -1 : 1; });
+}
 function todayVitals(pid, day) {
   var w = Logic.weightChange(State.measurements || [], pid, day, dayStart());
   var lastW = Logic.standardWeights(State.measurements || [], pid, dayStart())[0];
@@ -167,7 +205,8 @@ function todayVitals(pid, day) {
   Object.keys(VITALS).forEach(function (k) {
     var m = latestVital(pid, k); if (!m) return;
     var age = careDayOf(m.taken_at) === day ? localTime(m.taken_at) : esc(localDay(m.taken_at));
-    tiles.push(tile(VITALS[k][0], esc(vitalText(m)) + ' <small>' + esc(m.unit || VITALS[k][1]) + '</small>', age));
+    var pt = pulseText(m);
+    tiles.push(tile(VITALS[k][0], esc(vitalText(m)) + ' <small>' + esc(m.unit || VITALS[k][1]) + '</small>', age + (pt ? '<br><span class="' + (m.rhythm === 'afib' || m.rhythm === 'irregular' ? 'flag-text' : '') + '">' + esc(pt) + '</span>' : '')));
   });
   return '<div class="card"><h3>&#10084; Vitals</h3><div class="vitals">' + tiles.join('') + '</div>' +
     '<div class="btn-row writer-only"><button class="btn sm" onclick="logWeight()">Log weight</button><button class="btn sm ghost" onclick="logVital(' + pidArg(pid) + ')">Log BP, sugar, oxygen...</button></div></div>';
@@ -179,16 +218,20 @@ function logVital(pid, kind) {
     '<label for="vKind">What</label><select id="vKind" onchange="logVital(' + pidArg(pid) + ',this.value)">' + Object.keys(VITALS).map(function (k) { return '<option value="' + k + '"' + (k === kind ? ' selected' : '') + '>' + VITALS[k][0] + '</option>'; }).join('') + '</select>' +
     (kind === 'blood_pressure' ? '<div class="row"><div class="grow"><label for="vVal">Top number</label><input id="vVal" type="number" inputmode="numeric"></div><div class="grow"><label for="vVal2">Bottom number</label><input id="vVal2" type="number" inputmode="numeric"></div></div>'
       : '<label for="vVal">' + VITALS[kind][0] + ' (' + VITALS[kind][1] + ')</label><input id="vVal" type="number" step="any" inputmode="decimal">') +
+    (kind === 'blood_pressure' || kind === 'oxygen' ? '<label for="vPulse">Pulse (beats a minute)</label><input id="vPulse" type="number" inputmode="numeric">' +
+      '<label>Heart rhythm, if the monitor shows it</label><div class="chips" id="vRhythm">' + RHYTHMS.map(function (r) { return '<button type="button" class="chip" data-v="' + r[0] + '" onclick="pickChip(\'vRhythm\',this,true)">' + r[1] + '</button>'; }).join('') + '</div>' +
+      '<p class="muted">Many home cuffs show a heart symbol with waves, "IHB" or "AFib" when the beat was uneven. Tap what the screen showed; leave blank if it shows nothing.</p>' : '') +
     '<label for="vWhen">When</label><input id="vWhen" type="datetime-local" value="' + localDay(now) + 'T' + localTime(now) + '">' +
     '<label for="vNote">Note</label><input id="vNote" placeholder="before breakfast, left arm, after a nap...">' +
     '<div class="btn-row"><button class="btn" onclick="saveVital(' + pidArg(pid) + ',\'' + kind + '\')">Save</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
   setTimeout(function () { var el = document.getElementById('vVal'); if (el) el.focus(); }, 50);
 }
 function saveVital(pid, kind) {
-  var v = document.getElementById('vVal').value, v2 = document.getElementById('vVal2');
+  var v = document.getElementById('vVal').value, v2 = document.getElementById('vVal2'), pu = document.getElementById('vPulse');
   if (v === '') return toast('Type the reading first');
   var when = new Date(document.getElementById('vWhen').value);
-  DB.put('measurements', { kind: kind, value: +v, value2: v2 && v2.value !== '' ? +v2.value : null, unit: VITALS[kind][1], taken_at: (isNaN(when) ? new Date() : when).toISOString(), standard: false, note: document.getElementById('vNote').value.trim() || null, for_profile_id: pid })
+  DB.put('measurements', { kind: kind, value: +v, value2: v2 && v2.value !== '' ? +v2.value : null, unit: VITALS[kind][1], taken_at: (isNaN(when) ? new Date() : when).toISOString(), standard: false, note: document.getElementById('vNote').value.trim() || null, for_profile_id: pid,
+    pulse: pu && pu.value !== '' ? +pu.value : null, rhythm: document.getElementById('vRhythm') ? chipValue('vRhythm') : null })
     .then(function () { closeSheet(); toast('Saved'); return loadAll(); }).then(function () { refresh(); if (Sync.enabled()) syncNow(); })
     .catch(function (e) { toast('Could not save: ' + e.message); });
 }
@@ -247,7 +290,8 @@ var HELP = [
   ['drink', 'Log a drink', ['Tap <b>Add</b>, then <b>Log a drink</b>. Pick the amount (oz, mL, cups) and save.', 'Soup, Jell-O, ice cream and ice chips count as fluid too: when you log them as food, fill in the fluid box (the app suggests an amount).']],
   ['output', 'Log urine with the hat', ['Diary &rarr; <b>Log output</b>. Read the number on the hat at eye level, pick the colour, tick clots if you see any, and save.', 'Logged it as a drink by mistake? Open the entry and tap <b>This was output, not a drink</b>.', 'Pink, red, cola-coloured urine or clots show in <b>Needs attention</b>.']],
   ['weight', 'Morning weight', ['Every morning: after she pees, before she eats or drinks, same scale, similar clothes.', 'Today &rarr; Vitals &rarr; <b>Log weight</b>, keep the "Morning" box ticked. Only morning weights are compared day to day.']],
-  ['meds', 'Give and record meds', ['First, add each medicine: File &rarr; Summary &rarr; <b>+ Medicine</b>. Type the dose, tap when it is given (morning, midday, evening, bedtime, or only when needed), and save.', 'Tap <b>Fill from the FDA label</b> to copy the official label (how to take it, side effects). Change any of it to what her doctor or pharmacist said; your words are what the app shows.', 'Each day, Today &rarr; Meds shows what is due. Tap <b>Given</b> after she takes it, or <b>Not given</b> with a reason. Everyone in the family sees who gave it and when.', 'Marked the wrong one? Tap <b>Undo</b> on that row.']],
+  ['meds', 'Give and record meds', ['First, add each medicine: File &rarr; Summary &rarr; <b>+ Medicine</b>. Type the dose, tap when it is given (morning, midday, evening, bedtime, or only when needed), and save.', 'Tap <b>Fill from the FDA label</b> to copy the official label (how to take it, side effects). Change any of it to what her doctor or pharmacist said; your words are what the app shows.', 'Each day, Today &rarr; Meds shows what is due. Tap <b>Given</b> after she takes it, or <b>Not given</b> with a reason. Everyone in the family sees who gave it and when.', 'Given at a different time, or a different amount (half a tablet, a sliding-scale dose)? Tap <b>Edit</b> on that row and change the time or amount. For "only when needed" medicines, <b>Gave a dose</b> asks for both.', 'If she takes a medicine at a set time, open the medicine, tap <b>Edit</b>, and type the time under each slot. It then shows as due an hour before and overdue two hours after.', 'Marked the wrong one? Tap <b>Undo</b> on that row.']],
+  ['vitals', 'Blood pressure, pulse and AFib', ['Today &rarr; Vitals &rarr; <b>Log BP, sugar, oxygen...</b>. Type the top and bottom numbers and the pulse.', 'If the cuff shows a heart symbol with waves, "IHB" or "AFib", tap <b>Irregular heartbeat</b> or <b>AFib</b> to match what the screen showed. It then shows in <b>Needs attention</b> for the day.', 'The symbol on the cuff is a hint, not a diagnosis. Tell the care team, especially if it is new. Chest pain, fainting or trouble breathing: call 911.']],
   ['colors', 'What the colours mean', ['<b>Amber/red card</b> on Today: something to look at now, like a dose not marked or a weight gain over the alert level the care team set.', 'The app only flags limits the family or care team typed in. It does not give medical advice. When in doubt, call the care team.']],
   ['visit', 'After a visit', ['File &rarr; Visits &rarr; <b>+ Visit</b>: who, when, what they said, what changed, medicines changed, next appointment.', 'Save, then photograph the After Visit Summary (photos or PDFs attach under the visit).', 'Medicines changed? Update them in File &rarr; Summary the same day.']],
   ['days', 'Important days', ['Today &rarr; Coming up &rarr; <b>+ Important day</b> for lab draws, refills, birthdays. Pick "Every year" or "Every month" for repeats.', 'Refill dates typed on a medicine show up here too.']],

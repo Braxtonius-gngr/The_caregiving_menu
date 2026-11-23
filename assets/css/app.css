@@ -206,3 +206,5 @@ label.check input { width: auto; margin: 0; }
 .help-card summary { cursor: pointer; }
 .help-card ol { padding-left: 20px; margin: 8px 0 0; }
 .help-card li { margin-bottom: 6px; }
+.slot-times { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px 10px; margin-top: 6px; }
+.slot-time { display: flex; flex-direction: column; font-size: 13px; }

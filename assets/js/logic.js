@@ -318,12 +318,17 @@ var Logic = (function () {
     meds.filter(function (m) { return medActive(m, day); }).forEach(function (m) {
       medSlots(m).forEach(function (slot) {
         if (slot === 'prn') return;
-        var h = SLOT_HOURS[slot], d = doseFor(doses, m.id, day, slot);
+        var h = slotHour(m, slot), d = doseFor(doses, m.id, day, slot);
         var state = d ? (d.fields.status || 'given') : hour == null ? 'later' : hour >= h + 2 ? 'overdue' : hour >= h - 1 ? 'due' : 'later';
-        rows.push({ med: m, slot: slot, hour: h, dose: d, state: state });
+        rows.push({ med: m, slot: slot, hour: h, time: ((m.fields || {}).slot_times || {})[slot] || null, dose: d, state: state });
       });
     });
     return rows.sort(function (a, b) { return a.hour - b.hour || String(a.med.title).localeCompare(String(b.med.title)); });
+  }
+  // A medicine can set its own time for a slot ("07:30"); otherwise the slot's usual hour.
+  function slotHour(med, slot) {
+    var t = ((med.fields || {}).slot_times || {})[slot], m = /^(\d{1,2}):(\d{2})/.exec(t || '');
+    return m ? +m[1] + +m[2] / 60 : SLOT_HOURS[slot];
   }
   function prnDoses(doses, medId, day) { return doses.filter(function (d) { var f = d.fields || {}; return !d.deleted && f.med_id === medId && f.day === day && f.slot === 'prn' && f.status === 'given'; }); }
 
@@ -350,6 +355,6 @@ var Logic = (function () {
   function addDays(day, n) { var d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
   function addMonths(day, n) { var d = new Date(day + 'T12:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); }
 
-  return { medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
+  return { slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();
