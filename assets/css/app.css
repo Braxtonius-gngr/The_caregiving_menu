@@ -146,3 +146,24 @@ body.simple .photo-thumb { width: 64px; height: 64px; }
 /* Viewers in a shared family: hide ways to add or change things (the server refuses them anyway). */
 .role-viewer .writer-only, .role-viewer .tab-scan, .role-viewer .plate-actions { display: none !important; }
 .list-item .role-select { width: auto; flex: 0 0 auto; margin: 0 0 0 8px; min-width: 7.5em; }
+
+/* Fluid balance */
+.fluid-card .fluid-nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+.fluid-card .fluid-nums > div { display: flex; flex-direction: column; }
+.fluid-card .fluid-nums b { font-size: 1.35rem; }
+.fluid-card .bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 4px; }
+.fluid-card .bar span { display: block; height: 100%; background: var(--accent); }
+.fluid-card .bar.over span { background: #c8323a; }
+.note.flag { border-left: 4px solid #c8323a; margin-top: 8px; }
+.flag-text { color: #c8323a; font-weight: 600; }
+.unit-select { width: auto; flex: 0 0 auto; margin-left: 8px; }
+.chip.swatch i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; border: 1px solid rgba(0,0,0,.25); }
+button.chip { font: inherit; cursor: pointer; }
+label.check { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+label.check input { width: auto; margin: 0; }
+.io-table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: .95rem; }
+.io-table th, .io-table td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.io-table tfoot th { border-bottom: 0; }
+.io-table .flag-row td { color: #c8323a; }
+.trend { margin: 8px 0; color: var(--accent); }
+.trend svg { width: 100%; height: auto; }

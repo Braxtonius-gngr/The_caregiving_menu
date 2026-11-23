@@ -165,4 +165,33 @@ await fails(U.me, 'select set_household_name($1, $2)', [hid, 'x'], 'a caregiver 
 assert.equal((await db.query('select name from households where id = $1', [hid])).rows[0].name, "Our care team");
 ok('owners can name the family');
 
+// ---------- Phase 1: outputs, food fluid, weights, day start ----------
+await as(U.mom, `insert into diary_entries (id, household_id, eaten_at, free_text, entry_kind, output_type, output_color, clots, volume_ml, portion_mult)
+  values (gen_random_uuid(), $1, now(), 'Urine', 'output', 'urine', 'dark_yellow', false, 562, 1)`, [hid]);
+await fails(U.mom, `insert into diary_entries (id, household_id, eaten_at, free_text, entry_kind) values (gen_random_uuid(), $1, now(), 'x', 'snack')`, [hid], 'an unknown entry kind');
+await fails(U.mom, `insert into diary_entries (id, household_id, eaten_at, free_text, entry_kind, output_type) values (gen_random_uuid(), $1, now(), 'x', 'output', 'blood')`, [hid], 'an unknown output type');
+await as(U.mom, `insert into diary_entries (id, household_id, eaten_at, free_text, fluid_ml) values (gen_random_uuid(), $1, now(), 'Soup', 237)`, [hid]);
+ok('outputs and fluid in food are stored');
+
+const w = '66666666-6666-4666-8666-666666666666';
+await as(U.mom, `insert into measurements (id, household_id, kind, value, unit, taken_at, standard) values ($1, $2, 'weight', 152.4, 'lb', now(), true)`, [w, hid]);
+row = (await db.query('select user_id, edited_by from measurements where id = $1', [w])).rows[0];
+assert.equal(row.user_id, U.mom);
+await as(U.me, `update measurements set value = 152.2 where id = $1`, [w]); // me is a caregiver here
+assert.deepEqual((await as(U.mom, `select action from audit_log where row_id = $1 order by id`, [w])).rows.map(r => r.action), ['insert', 'update']);
+await as(U.mom, 'select set_member_role($1, $2, $3)', [hid, U.me, 'viewer']);
+await fails(U.me, `insert into measurements (id, household_id, kind, value, taken_at) values (gen_random_uuid(), $1, 'weight', 1, now())`, [hid], 'a viewer logging a weight');
+assert.equal((await as(U.me, 'select id from measurements')).rows.length, 1);
+assert.equal((await as(U.stranger, 'select id from measurements')).rows.length, 0);
+await as(U.mom, 'select set_member_role($1, $2, $3)', [hid, U.me, 'caregiver']);
+ok('weights follow the same roles, author stamp and edit history');
+
+assert.equal((await as(U.aunt, 'select day_start_hour from households')).rows.length, 0); // aunt was removed
+assert.equal((await as(U.me, 'select day_start_hour from households')).rows[0].day_start_hour, 6);
+await as(U.mom, 'select set_day_start($1, 5)', [hid]);
+await fails(U.me, 'select set_day_start($1, 4)', [hid], 'a caregiver changing the day start');
+await fails(U.mom, 'select set_day_start($1, 24)', [hid], 'an impossible hour');
+assert.equal((await db.query('select day_start_hour from households where id = $1', [hid])).rows[0].day_start_hour, 5);
+ok('the family day starts at 6 am by default; owners can change it');
+
 console.log(`\nAll ${n} family checks passed.`);
