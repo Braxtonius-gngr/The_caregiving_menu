@@ -4,10 +4,12 @@ function loadAll() {
     DB.all('ingredients'), DB.all('recipes'), DB.all('recipe_ingredients'), DB.all('recipe_variations'),
     DB.all('pantry_items'), DB.all('diet_profiles'), DB.all('profile_rules'), DB.all('diary_entries'),
     DB.all('shopping_list'), DB.all('usage_log'), DB.meta('aisle_order'), DB.meta('my_role'), DB.meta('family_members'), DB.all('measurements'),
-    DB.meta('day_start_hour'), DB.meta('fluid_unit'), DB.meta('weight_unit'), DB.allRaw('diary_entries'), DB.allRaw('measurements'), DB.allRaw('entry_photos'), DB.meta('pending_members')
+    DB.meta('day_start_hour'), DB.meta('fluid_unit'), DB.meta('weight_unit'), DB.allRaw('diary_entries'), DB.allRaw('measurements'), DB.allRaw('entry_photos'), DB.meta('pending_members'), DB.allRaw('records')
   ]).then(function (r) {
+    State.records = r[21].filter(function (x) { return !x.deleted; });
     State.trash = r[17].filter(function (x) { return x.deleted; }).map(function (x) { x._store = 'diary_entries'; return x; })
-      .concat(r[18].filter(function (x) { return x.deleted; }).map(function (x) { x._store = 'measurements'; return x; }));
+      .concat(r[18].filter(function (x) { return x.deleted; }).map(function (x) { x._store = 'measurements'; return x; }))
+      .concat(r[21].filter(function (x) { return x.deleted; }).map(function (x) { x._store = 'records'; return x; }));
     State.allEntryPhotos = r[19];
     State.entryPhotos = r[19].filter(function (p) { return !p.deleted; });
     State.pendingMembers = r[20] || [];

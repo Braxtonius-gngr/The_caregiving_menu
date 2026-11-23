@@ -6,7 +6,7 @@ Conventions for anyone (human or agent) changing this repo.
 
 - **Build-free static PWA.** Deployed as-is, including under GitHub Pages subpaths, so keep every local URL relative. No bundler, no framework, nothing to `npm install` for the app.
 - **Runtime dependencies:** `supabase-js` from a pinned CDN `<script>`, and ZXing (pinned) lazy-loaded by `scanner.js` only on browsers without a native `BarcodeDetector`. The service worker caches both. The app must keep working when either fails to load.
-- **Classic scripts, global functions, inline `onclick` handlers.** Load order in `index.html` matters: `config → units → db → logic → sync → scanner → ui → fluids → history → simple → app`.
+- **Classic scripts, global functions, inline `onclick` handlers.** Load order in `index.html` matters: `config → units → db → logic → sync → scanner → ui → fluids → history → file → simple → app`.
 - **Two-space indentation, semicolons, `var`/function style** to match the existing files.
 
 ## Where things live
@@ -19,6 +19,7 @@ Conventions for anyone (human or agent) changing this repo.
 | `assets/js/sync.js` | Supabase auth, push/pull, photo upload/download, Edge Function calls. |
 | `assets/js/scanner.js` | Camera barcode scanning (native detector or ZXing). |
 | `assets/js/ui.js` | Every screen and sheet. |
+| `assets/js/file.js` | The patient file (summary, care team, labs, visits, documents, updates, export) and the Kitchen tab. |
 | `assets/js/history.js` | Entry history and restore, recent changes, the 30-day Trash, extra photos per entry. |
 | `assets/js/fluids.js` | Fluid balance: outputs, the In/Out card and sheet, fluid in food, weights, the care day. |
 | `assets/js/simple.js` | The large-text simple view for one person, locked on a device. |

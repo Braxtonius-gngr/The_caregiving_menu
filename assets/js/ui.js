@@ -46,13 +46,14 @@ function openSheet(html) { document.getElementById('sheetBody').innerHTML = html
 var scanSession = 0; // bumped when the scanner opens or a sheet closes; late lookups compare against it
 function closeSheet() { scanSession++; S.sharedPhoto = null; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
 
-var TITLES = { simple: '', home: 'Home', recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted' };
+var TITLES = { simple: '', home: 'Home', recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted', file: 'Patient file', kitchen: 'Kitchen' };
 var currentScreen = 'home';
 function showScreen(name, arg) {
   currentScreen = name;
   document.getElementById('screenTitle').textContent = TITLES[name] || name;
-  document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
-  var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe, fluids: renderFluids, trash: renderTrash }[name];
+  var tab = { recipes: 'kitchen', pantry: 'kitchen', recipe: 'kitchen', fluids: 'diary', trash: 'diary' }[name] || name;
+  document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === tab); });
+  var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe, fluids: renderFluids, trash: renderTrash, file: renderFile, kitchen: renderKitchen }[name];
   document.getElementById('screen').innerHTML = fn ? fn(arg) : '';
   window.scrollTo(0, 0);
 }

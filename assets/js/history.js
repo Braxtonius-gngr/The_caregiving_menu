@@ -90,8 +90,8 @@ function renderTrash() {
   var items = trashItems(), owner = State.role === 'owner' || State.role == null;
   return '<p class="muted">Deleted entries stay here for ' + TRASH_DAYS + ' days with their photos, then the photos are removed.</p>' +
     (items.length ? items.map(function (r) {
-      var label = r._store === 'measurements' ? 'Weight ' + r.value + ' ' + (r.unit || '') : ((r.entry_kind === 'output' ? '&#128701; ' : r.entry_kind === 'drink' ? '&#129380; ' : '') + esc(r.free_text || 'Meal'));
-      var when = r.eaten_at || r.taken_at;
+      var label = r._store === 'records' ? esc((RECORD_KINDS[r.kind] || {}).label || 'File item') + ': ' + esc(r.title || '') : r._store === 'measurements' ? 'Weight ' + r.value + ' ' + (r.unit || '') : ((r.entry_kind === 'output' ? '&#128701; ' : r.entry_kind === 'drink' ? '&#129380; ' : '') + esc(r.free_text || 'Meal'));
+      var when = r.eaten_at || r.taken_at || r.occurred_at || r.updated_at;
       return '<div class="card row"><div class="grow"><b>' + label + '</b> <span class="muted">' + esc(localDay(when) + ' ' + localTime(when)) + '</span><div class="muted">deleted ' + esc(localDay(r.updated_at) + ' ' + localTime(r.updated_at)) + (r.edited_by ? ' by ' + esc(whoName(r.edited_by)) : '') + '</div></div>' +
         '<div class="btn-col"><button class="btn sm writer-only" onclick="restoreFromTrash(\'' + r._store + '\',\'' + r.id + '\')">Restore</button>' +
         (owner ? '<button class="btn sm danger" onclick="deleteForever(\'' + r._store + '\',\'' + r.id + '\')">Delete forever</button>' : '') + '</div></div>';
@@ -132,41 +132,50 @@ function extraPhotosOf(entryId) {
   return (State.entryPhotos || []).filter(function (p) { return p.entry_id === entryId; }).sort(function (a, b) { return (a.pos || 0) - (b.pos || 0); });
 }
 function extraCount(e) { var n = extraPhotosOf(e.id).length; return n ? ' · +' + n + ' photo' + (n === 1 ? '' : 's') : ''; }
-function extraPhotosSection(entryId) {
+function extraPhotosSection(entryId, store) {
+  store = store || 'diary_entries';
   var list = extraPhotosOf(entryId);
-  return '<h3>More photos</h3><div class="photo-strip" id="xStrip">' + list.map(function (p) {
-    return '<div class="photo-tile"><button type="button" class="photo-btn" aria-label="View photo" onclick="viewExtraPhoto(\'' + p.id + '\')"><img class="photo-thumb" alt="" data-photo="' + p.id + '" data-store="entry_photos"' + (p.photo_data ? ' src="' + esc(p.photo_data) + '"' : '') + '></button>' +
+  return '<h3>' + (store === 'records' ? 'Photos and PDFs' : 'More photos') + '</h3><div class="photo-strip" id="xStrip">' + list.map(function (p) {
+    return '<div class="photo-tile"><button type="button" class="photo-btn" aria-label="View ' + (p.mime === 'application/pdf' ? 'PDF ' + esc(p.file_name || '') : 'photo') + '" onclick="viewExtraPhoto(\'' + p.id + '\')">' + (p.mime === 'application/pdf' ? '<span class="pdf-tile">&#128196;<br>' + esc((p.file_name || 'PDF').slice(0, 14)) + '</span>' : '<img class="photo-thumb" alt="" data-photo="' + p.id + '" data-store="entry_photos"' + (p.photo_data ? ' src="' + esc(p.photo_data) + '"' : '') + '>') + '</button>' +
       '<button type="button" class="icon-btn writer-only" aria-label="Remove photo" onclick="removeExtraPhoto(\'' + p.id + '\',\'' + entryId + '\')">&times;</button></div>';
   }).join('') + '</div>' +
     '<div class="btn-row writer-only"><button type="button" class="btn ghost sm" onclick="document.getElementById(\'xCam\').click()">&#128247; Take another</button><button type="button" class="btn ghost sm" onclick="document.getElementById(\'xLib\').click()">&#128444; Add photos</button></div>' +
-    '<input id="xCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="addExtraPhotos(this, \'' + entryId + '\')"><input id="xLib" type="file" accept="image/*" multiple class="hidden" onchange="addExtraPhotos(this, \'' + entryId + '\')">';
+    '<input id="xCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="addExtraPhotos(this, \'' + entryId + '\', \'' + store + '\')"><input id="xLib" type="file" accept="' + (store === 'records' ? 'image/*,application/pdf' : 'image/*') + '" multiple class="hidden" onchange="addExtraPhotos(this, \'' + entryId + '\', \'' + store + '\')">';
 }
-function addExtraPhotos(input, entryId) {
+function addExtraPhotos(input, entryId, store) {
+  store = store || 'diary_entries';
   var files = [].slice.call(input.files || []); input.value = '';
   if (!files.length) return;
   var start = extraPhotosOf(entryId).length + 1;
   toast('Adding ' + files.length + ' photo' + (files.length === 1 ? '' : 's') + '...');
   Promise.all(files.map(function (f, i) {
-    return downscale(f, 1280).then(function (d) { return DB.put('entry_photos', { entry_id: entryId, entry_store: 'diary_entries', photo_data: d, photo_path: null, pos: start + i, caption: null }); }, function () { return null; });
+    var pdf = f.type === 'application/pdf';
+    if (pdf && f.size > 15e6) { toast(f.name + ' is over 15 MB, so it was left out'); return Promise.resolve(null); }
+    var read = pdf ? new Promise(function (res, rej) { var fr = new FileReader(); fr.onload = function () { res(fr.result); }; fr.onerror = rej; fr.readAsDataURL(f); }) : downscale(f, 1600);
+    return read.then(function (d) { return DB.put('entry_photos', { entry_id: entryId, entry_store: store, photo_data: d, photo_path: null, pos: start + i, caption: null, mime: pdf ? 'application/pdf' : 'image/jpeg', file_name: f.name || null }); }, function () { return null; });
   })).then(function (saved) {
     var ok = saved.filter(Boolean).length;
     toast(ok === files.length ? 'Photos added' : ok + ' of ' + files.length + ' photos added; the rest could not be opened');
     return loadAll();
-  }).then(function () { refreshExtraStrip(entryId); refresh(); if (Sync.enabled()) syncNow(); });
+  }).then(function () { refreshExtraStrip(entryId, store); refresh(); if (Sync.enabled()) syncNow(); });
 }
-function refreshExtraStrip(entryId) {
+function refreshExtraStrip(entryId, store) {
   var strip = document.getElementById('xStrip'); if (!strip) return;
-  var holder = document.createElement('div'); holder.innerHTML = extraPhotosSection(entryId);
+  var holder = document.createElement('div'); holder.innerHTML = extraPhotosSection(entryId, store);
   strip.replaceWith(holder.querySelector('#xStrip'));
   hydratePhotos();
 }
 function removeExtraPhoto(id, entryId) {
   if (!confirm('Remove this photo?')) return;
   DB.update('entry_photos', id, function (cur) { if (!cur) return null; cur.deleted = true; cur.photo_data = null; return cur; })
-    .then(function () { return Sync.removeRecordPhotos('entry_photos', id); }).then(loadAll).then(function () { refreshExtraStrip(entryId); refresh(); });
+    .then(function () { return Sync.removeRecordPhotos('entry_photos', id); }).then(loadAll).then(function () { var p = (State.allEntryPhotos || []).find(function (x) { return x.id === id; }); refreshExtraStrip(entryId, p && p.entry_store); refresh(); });
 }
 function viewExtraPhoto(id) {
   var p = (State.entryPhotos || []).find(function (x) { return x.id === id; }); if (!p) return;
+  if (p.mime === 'application/pdf') {
+    toast('Opening ' + (p.file_name || 'PDF') + '...');
+    return Sync.photoSrc(p, 'entry_photos').then(function (src) { if (!src) return toast('This PDF is not available offline yet'); return fetch(src).then(function (r) { return r.blob(); }).then(function (b) { window.open(URL.createObjectURL(new Blob([b], { type: 'application/pdf' })), '_blank'); }); });
+  }
   openSheet('<img id="xBig" class="photo-big" alt="Photo"><div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
   Sync.photoSrc(p, 'entry_photos').then(function (src) { var el = document.getElementById('xBig'); if (el && src) el.src = src; });
 }

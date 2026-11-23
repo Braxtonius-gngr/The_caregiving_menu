@@ -173,3 +173,19 @@ label.check input { width: auto; margin: 0; }
 .photo-tile { position: relative; }
 .photo-tile .icon-btn { position: absolute; top: -8px; right: -8px; background: var(--panel); border-radius: 50%; width: 26px; height: 26px; line-height: 1; }
 .btn-col { display: flex; flex-direction: column; gap: 6px; }
+
+/* Patient file */
+.seg { display: flex; gap: 6px; overflow-x: auto; margin: 8px 0 12px; padding-bottom: 2px; scrollbar-width: none; }
+.seg-btn { flex: 0 0 auto; border: 1px solid var(--line); background: var(--panel); color: inherit; border-radius: 999px; padding: 8px 14px; font: inherit; cursor: pointer; white-space: nowrap; }
+.seg-btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.big-num { font-size: 1.5rem; }
+.prewrap { white-space: pre-wrap; font: inherit; margin: 4px 0; }
+.pdf-tile { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; width: 64px; height: 64px; border: 1px solid var(--line); border-radius: 10px; font-size: .7rem; line-height: 1.2; text-align: center; overflow: hidden; }
+.export-preview h2 { margin-top: 0; }
+.export-preview ul { padding-left: 18px; margin: 4px 0; }
+#printArea { display: none; }
+@media print {
+  body.printing > *:not(#printArea) { display: none !important; }
+  body.printing #printArea { display: block; color: #000; background: #fff; font-size: 11pt; }
+  body.printing #printArea .muted { color: #444; }
+}

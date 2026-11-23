@@ -24,10 +24,10 @@
 
   <nav class="tabbar" aria-label="Main">
     <button data-tab="home" class="tab active" onclick="showScreen('home')"><span class="tab-ico">&#8962;</span>Home</button>
-    <button data-tab="recipes" class="tab" onclick="showScreen('recipes')"><span class="tab-ico">&#9636;</span>Recipes</button>
-    <button data-tab="scan" class="tab tab-scan" onclick="showScreen('scan')"><span class="tab-ico">&#10010;</span>Add</button>
-    <button data-tab="pantry" class="tab" onclick="showScreen('pantry')"><span class="tab-ico">&#9744;</span>Pantry</button>
     <button data-tab="diary" class="tab" onclick="showScreen('diary')"><span class="tab-ico">&#9998;</span>Diary</button>
+    <button data-tab="scan" class="tab tab-scan" onclick="showScreen('scan')"><span class="tab-ico">&#10010;</span>Add</button>
+    <button data-tab="file" class="tab" onclick="showScreen('file')"><span class="tab-ico">&#128193;</span>File</button>
+    <button data-tab="kitchen" class="tab" onclick="showScreen('kitchen')"><span class="tab-ico">&#127859;</span>Kitchen</button>
   </nav>
 
   <div id="sheet" class="sheet hidden" onclick="if (event.target === this) closeSheet()">
@@ -45,6 +45,7 @@
   <script src="assets/js/ui.js"></script>
   <script src="assets/js/fluids.js"></script>
   <script src="assets/js/history.js"></script>
+  <script src="assets/js/file.js"></script>
   <script src="assets/js/simple.js"></script>
   <script src="assets/js/app.js"></script>
 </body>

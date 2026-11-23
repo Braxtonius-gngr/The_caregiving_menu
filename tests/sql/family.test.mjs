@@ -215,4 +215,18 @@ await as(U.mom, 'select set_member_role($1, $2, $3)', [hid, U.me, 'caregiver']);
 assert.equal((await as(U.stranger, 'select id from entry_photos')).rows.length, 0);
 ok('extra photos follow the same roles; strangers see none');
 
+// ---------- Phase 3: patient file ----------
+const rec = '88888888-8888-4888-8888-888888888888';
+await as(U.me, `insert into records (id, household_id, kind, title, fields) values ($1, $2, 'lab', 'Potassium', '{"value": 5.4, "unit": "mmol/L", "low": 3.5, "high": 5.1}')`, [rec, hid]);
+await fails(U.me, `insert into records (id, household_id, kind, title) values (gen_random_uuid(), $1, 'gossip', 'x')`, [hid], 'an unknown record kind');
+await as(U.mom, `update records set fields = fields || '{"value": 5.2}' where id = $1`, [rec]);
+assert.deepEqual((await as(U.me, `select action, changed_by from audit_log where row_id = $1 order by id`, [rec])).rows.map(r => [r.action, r.changed_by]), [['insert', U.me], ['update', U.mom]]);
+await as(U.mom, 'select set_member_role($1, $2, $3)', [hid, U.me, 'viewer']);
+await fails(U.me, `insert into records (id, household_id, kind, title) values (gen_random_uuid(), $1, 'update', 'x')`, [hid], 'a viewer adding to the file');
+assert.equal((await as(U.me, 'select id from records')).rows.length, 1);
+await as(U.mom, 'select set_member_role($1, $2, $3)', [hid, U.me, 'caregiver']);
+assert.equal((await as(U.stranger, 'select id from records')).rows.length, 0);
+await as(U.me, `insert into entry_photos (id, household_id, entry_id, entry_store, mime, file_name) values (gen_random_uuid(), $1, $2, 'records', 'application/pdf', 'discharge.pdf')`, [hid, rec]);
+ok('patient file records follow the roles, author stamp and edit history; PDFs attach');
+
 console.log(`\nAll ${n} family checks passed.`);
