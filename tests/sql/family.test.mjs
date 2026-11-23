@@ -70,7 +70,17 @@ ok('upgrade: creator becomes owner, joiner stays caregiver');
 // The old link still works (as a caregiver link) until reset.
 await as(U.aunt, 'select join_household($1)', [oldCode]);
 assert.equal(await roleOf(U.aunt), 'caregiver');
-ok('links sent before the upgrade still work');
+// New members wait for an owner (0012): nothing visible until approved.
+assert.equal((await as(U.aunt, 'select my_role($1) r', [hid])).rows[0].r, 'pending');
+assert.equal((await as(U.aunt, 'select id from diary_entries')).rows.length, 0);
+await fails(U.aunt, 'select * from household_members($1)', [hid], 'a person waiting listing members');
+assert.equal((await as(U.mom, 'select * from household_members($1)', [hid])).rows.length, 2, 'caregivers do not see people waiting');
+const waiting = (await as(U.me, 'select * from household_members($1)', [hid])).rows.find(m => m.user_id === U.aunt);
+assert.equal(waiting.approved, false);
+await fails(U.mom, 'select approve_member($1, $2, $3)', [hid, U.aunt, 'caregiver'], 'a caregiver approving someone');
+await as(U.me, 'select approve_member($1, $2, $3)', [hid, U.aunt, 'caregiver']);
+assert.equal((await as(U.aunt, 'select my_role($1) r', [hid])).rows[0].r, 'caregiver');
+ok('links sent before the upgrade still work; new members wait for an owner to approve them');
 
 // Codes are hidden from non-owners.
 await fails(U.mom, 'select invite_code from households', [], 'a caregiver reading invite codes');
@@ -193,5 +203,16 @@ await fails(U.me, 'select set_day_start($1, 4)', [hid], 'a caregiver changing th
 await fails(U.mom, 'select set_day_start($1, 24)', [hid], 'an impossible hour');
 assert.equal((await db.query('select day_start_hour from households where id = $1', [hid])).rows[0].day_start_hour, 5);
 ok('the family day starts at 6 am by default; owners can change it');
+
+// ---------- Phase 2: several photos per entry ----------
+const ph = '77777777-7777-4777-8777-777777777777';
+await as(U.me, `insert into entry_photos (id, household_id, entry_id, photo_path, pos) values ($1, $2, $3, $4, 1)`, [ph, hid, entry, hid + '/extra/' + ph + '.jpg']);
+assert.equal((await db.query('select user_id from entry_photos where id = $1', [ph])).rows[0].user_id, U.me);
+await as(U.mom, 'select set_member_role($1, $2, $3)', [hid, U.me, 'viewer']);
+await fails(U.me, `insert into entry_photos (id, household_id, entry_id) values (gen_random_uuid(), $1, $2)`, [hid, entry], 'a viewer adding a photo');
+assert.equal((await as(U.me, 'select id from entry_photos')).rows.length, 1);
+await as(U.mom, 'select set_member_role($1, $2, $3)', [hid, U.me, 'caregiver']);
+assert.equal((await as(U.stranger, 'select id from entry_photos')).rows.length, 0);
+ok('extra photos follow the same roles; strangers see none');
 
 console.log(`\nAll ${n} family checks passed.`);

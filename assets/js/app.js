@@ -4,8 +4,13 @@ function loadAll() {
     DB.all('ingredients'), DB.all('recipes'), DB.all('recipe_ingredients'), DB.all('recipe_variations'),
     DB.all('pantry_items'), DB.all('diet_profiles'), DB.all('profile_rules'), DB.all('diary_entries'),
     DB.all('shopping_list'), DB.all('usage_log'), DB.meta('aisle_order'), DB.meta('my_role'), DB.meta('family_members'), DB.all('measurements'),
-    DB.meta('day_start_hour'), DB.meta('fluid_unit'), DB.meta('weight_unit')
+    DB.meta('day_start_hour'), DB.meta('fluid_unit'), DB.meta('weight_unit'), DB.allRaw('diary_entries'), DB.allRaw('measurements'), DB.allRaw('entry_photos'), DB.meta('pending_members')
   ]).then(function (r) {
+    State.trash = r[17].filter(function (x) { return x.deleted; }).map(function (x) { x._store = 'diary_entries'; return x; })
+      .concat(r[18].filter(function (x) { return x.deleted; }).map(function (x) { x._store = 'measurements'; return x; }));
+    State.allEntryPhotos = r[19];
+    State.entryPhotos = r[19].filter(function (p) { return !p.deleted; });
+    State.pendingMembers = r[20] || [];
     State.measurements = r[13]; State.dayStart = r[14] == null ? 6 : r[14]; State.fluidUnit = r[15] || 'oz'; State.weightUnit = r[16] || 'lb';
     State.aisleOrder = r[10] || [];
     applyRole(r[11]);
@@ -153,7 +158,8 @@ function renderFamilyBox() {
       '<p class="muted">You are ' + (me.role === 'owner' ? 'an' : 'a') + ' <b>' + esc(mine[0].toLowerCase()) + '</b>: you ' + esc(mine[1]) + '.</p>' +
       dayStartPicker(owner) +
       '<label for="myName">Your name (shown on what you log)</label><div class="row"><input id="myName" class="grow" maxlength="40" value="' + esc(me.display_name || '') + '" placeholder="e.g. Mom, Brax"><button class="btn sm" onclick="saveMyName()">Save</button></div>' +
-      '<h3>People (' + people.length + ')</h3>' + people.map(function (m) {
+      pendingSection(people.filter(function (m) { return m.approved === false; }), owner) +
+      '<h3>People (' + people.filter(function (m) { return m.approved !== false; }).length + ')</h3>' + people.filter(function (m) { return m.approved !== false; }).map(function (m) {
         var info = ROLE_INFO[m.role] || [m.role, ''], label = memberLabel(m);
         var controls = owner && !m.is_me
           ? '<select class="role-select" aria-label="Role for ' + esc(label) + '" onchange="changeRole(\'' + m.user_id + '\', this.value)">' + ['owner', 'caregiver', 'viewer'].map(function (k) { return '<option value="' + k + '"' + (k === m.role ? ' selected' : '') + '>' + ROLE_INFO[k][0] + '</option>'; }).join('') + '</select>' +
@@ -164,19 +170,38 @@ function renderFamilyBox() {
       (owner
         ? '<h3>Invite family</h3><p class="muted">A link works for whoever opens it and signs in, so send it only to the person you mean. You can change anyone\'s role later.</p>' +
           '<div class="btn-row"><button class="btn sm" onclick="shareInvite(\'caregiver\')">Invite a caregiver (can log)</button><button class="btn sm ghost" onclick="shareInvite(\'viewer\')">Invite a viewer (read only)</button></div>' +
-          '<p><button class="linkish" onclick="resetInvites()">Cancel all invite links sent so far</button></p>'
+          '<p><button class="linkish" onclick="resetInvites()">Cancel all invite links sent so far</button></p><p><button class="linkish" onclick="showRecentChanges()">Recent changes</button></p>'
         : '<p class="muted">Ask an owner to invite others.</p>' + (me.role ? '<p><button class="linkish" onclick="leaveFamily()">Leave this family</button></p>' : ''));
   }).catch(function (e) {
+    if (State.role === 'pending') { box.innerHTML = '<p><b>Waiting for approval.</b> An owner of the family needs to approve you before you can see or add anything.</p>' + '<label for="myName">Your name (so they know who is asking)</label><div class="row"><input id="myName" class="grow" maxlength="40" placeholder="e.g. Mom"><button class="btn sm" onclick="saveMyName()">Save</button></div>'; return; }
     var msg = (e && e.message) || String(e);
     box.innerHTML = '<p class="muted">Couldn\'t load the family: ' + esc(msg) + '</p>' +
       (/function|schema cache|does not exist/i.test(msg) ? '<p class="muted">The cloud needs the family update (database migration 0010) first.</p>' : '');
   });
 }
+function pendingSection(list, owner) {
+  if (!list.length || !owner) return '';
+  return '<h3>Waiting for approval (' + list.length + ')</h3>' + list.map(function (m) {
+    return '<div class="list-item"><div class="grow"><b>' + esc(memberLabel(m)) + '</b><div class="muted">' + esc(m.email || '') + ' · asked to join as ' + esc((ROLE_INFO[m.role] || [m.role])[0].toLowerCase()) + '</div></div>' +
+      '<select class="role-select" id="ap-' + m.user_id + '" aria-label="Role for ' + esc(memberLabel(m)) + '">' + ['caregiver', 'viewer', 'owner'].map(function (k) { return '<option value="' + k + '"' + (k === m.role ? ' selected' : '') + '>' + ROLE_INFO[k][0] + '</option>'; }).join('') + '</select>' +
+      '<button class="btn sm" onclick="approvePerson(\'' + m.user_id + '\')">Approve</button><button class="icon-btn" aria-label="Turn down ' + esc(memberLabel(m)) + '" onclick="denyPerson(\'' + m.user_id + '\')">&times;</button></div>';
+  }).join('');
+}
+function approvePerson(uid) {
+  var role = document.getElementById('ap-' + uid).value;
+  Sync.approveMember(uid, role).then(function () { toast('Approved'); renderFamilyBox(); }).catch(function (e) { toast(e.message); });
+}
+function denyPerson(uid) {
+  if (!confirm('Turn down this request? They will not see anything. You can invite them again later.')) return;
+  Sync.removeMember(uid).then(function () { toast('Turned down'); renderFamilyBox(); }).catch(function (e) { toast(e.message); });
+}
 function cacheMembers(people) {
   var names = {};
   (people || []).forEach(function (m) { names[m.user_id] = memberLabel(m); });
-  State.memberNames = names; State.memberCount = (people || []).length;
-  return DB.meta('family_members', names);
+  var approved = (people || []).filter(function (m) { return m.approved !== false; });
+  State.memberNames = names; State.memberCount = approved.length;
+  State.pendingMembers = (people || []).filter(function (m) { return m.approved === false; }).map(function (m) { return memberLabel(m); });
+  return Promise.all([DB.meta('family_members', names), DB.meta('pending_members', State.pendingMembers)]);
 }
 function saveMyName() {
   var v = document.getElementById('myName').value.trim();
@@ -231,8 +256,8 @@ function resetInvites() {
 // Viewers get a read-only app on their device; the server enforces the same rule.
 function applyRole(role) {
   State.role = role || null;
-  DB.setReadOnly(role === 'viewer');
-  document.body.classList.toggle('role-viewer', role === 'viewer');
+  DB.setReadOnly(role === 'viewer' || role === 'pending');
+  document.body.classList.toggle('role-viewer', role === 'viewer' || role === 'pending');
 }
 function renderSettingsAgain() { showScreen('settings'); }
 // Background sync: once per page, whenever the cloud is (or becomes) configured.
@@ -255,6 +280,7 @@ function syncNow() {
     var roleBefore = State.role;
     return Promise.all([Sync.members().then(cacheMembers, function () {}), Sync.refreshDayStart()]).then(function () {
       if (justJoined) askMyName();
+      purgeOldTrashPhotos().catch(function () {});
       return DB.meta('my_role').then(function (role) {
         if (r.pulled || r.photos || role !== roleBefore || justJoined) return loadAll().then(refresh);
       });

@@ -103,7 +103,8 @@ function logOutput(id) {
       '<input id="oCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="pickOutputPhoto(this)"><input id="oLib" type="file" accept="image/*" class="hidden" onchange="pickOutputPhoto(this)">' +
       '<img id="oPrev" class="photo-thumb hidden" alt="Output photo preview">' +
       '<p class="muted">No calories or sodium are counted for outputs.</p>' +
-      '<div class="btn-row"><button class="btn" onclick="saveOutput(' + (e ? '\'' + e.id + '\'' : '') + ')">' + (e ? 'Save' : 'Log output') + '</button><button class="btn ghost" onclick="closeSheet()">Cancel</button>' + (e ? '<button class="btn danger" onclick="closeSheet();deleteDiaryEntry(\'' + e.id + '\')">Delete</button>' : '') + '</div>');
+      (e && Sync.enabled() ? extraPhotosSection(e.id) : '') +
+      '<div class="btn-row"><button class="btn" onclick="saveOutput(' + (e ? '\'' + e.id + '\'' : '') + ')">' + (e ? 'Save' : 'Log output') + '</button><button class="btn ghost" onclick="closeSheet()">Cancel</button>' + (e ? '<button class="btn ghost" onclick="showHistory(\'diary_entries\',\'' + e.id + '\')">History</button>' : '') + (e ? '<button class="btn danger" onclick="closeSheet();deleteDiaryEntry(\'' + e.id + '\')">Delete</button>' : '') + '</div>');
     if (e && (e.photo_data || e.photo_path)) Sync.photoSrc(e).then(function (src) { var img = document.getElementById('oPrev'); if (src && img && S.outputPhoto === undefined) { img.src = src; img.classList.remove('hidden'); } });
   });
 }
@@ -191,8 +192,8 @@ function saveWeight() {
     .catch(function (err) { toast('Could not save: ' + err.message); });
 }
 function deleteMeasurement(id) {
-  if (!confirm('Delete this weight?')) return;
-  DB.remove('measurements', id).then(loadAll).then(refresh);
+  if (!confirm('Delete this weight? It goes to Deleted for 30 days.')) return;
+  DB.remove('measurements', id).then(loadAll).then(function () { refresh(); toast('Deleted', 'Undo', function () { restoreFromTrash('measurements', id); }); });
 }
 
 /* ---------- limits and alerts on a person's profile ---------- */
