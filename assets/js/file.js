@@ -10,7 +10,7 @@ var LAB_UNITS = { eGFR: 'mL/min/1.73m²', Creatinine: 'mg/dL', BUN: 'mg/dL', Pot
 var RECORD_KINDS = {
   condition: { label: 'Condition', title: 'Condition', fields: [['since', 'Since', 'text'], ['notes', 'Notes', 'textarea']] },
   allergy: { label: 'Allergy', title: 'Allergic to', fields: [['reaction', 'Reaction', 'text'], ['severity', 'Severity', 'select:Mild|Moderate|Severe|Unknown']] },
-  medication: { label: 'Medicine', title: 'Medicine', fields: [['dose', 'Dose (e.g. 40 mg, 1 tablet)', 'text'], ['slots', 'When to give it', 'slots'], ['time', 'Exact time, if the doctor gave one', 'text'], ['with_food', 'Food', 'select:With food|Without food|Either'], ['when', 'Other timing notes', 'text'], ['purpose', 'What it is for', 'text'], ['prescriber', 'Prescribed by', 'text'], ['pharmacy', 'Pharmacy', 'text'], ['start', 'Started', 'date'], ['stop', 'Stop on (leave blank if ongoing)', 'date'], ['refill_on', 'Next refill due', 'date'], ['instructions', 'Instructions from the doctor or pharmacist', 'textarea'],
+  medication: { label: 'Medicine', title: 'Medicine', fields: [['dose', 'Dose (e.g. 40 mg, 1 tablet)', 'text'], ['slots', 'When to give it', 'slots'], ['with_food', 'Food', 'select:With food|Without food|Either'], ['when', 'Other timing notes', 'text'], ['purpose', 'What it is for', 'text'], ['prescriber', 'Prescribed by', 'text'], ['pharmacy', 'Pharmacy', 'text'], ['start', 'Started', 'date'], ['stop', 'Stop on (leave blank if ongoing)', 'date'], ['refill_on', 'Next refill due', 'date'], ['instructions', 'Instructions from the doctor or pharmacist', 'textarea'],
     ['label_head', 'From the label', 'heading'], ['label_boxed', 'Boxed warning', 'textarea'], ['label_how', 'How to take it', 'textarea'], ['label_side', 'Side effects to watch for', 'textarea'], ['label_warn', 'Warnings', 'textarea'], ['label_patients', 'For patients and families', 'textarea'], ['label_older', 'Older adults', 'textarea'], ['label_source', '', 'hidden'], ['label_date', '', 'hidden']] },
   directive: { label: 'Directive', title: 'Document (e.g. DNR, POLST, living will, power of attorney)', fields: [['kept', 'Where the original is kept', 'text'], ['notes', 'Notes', 'textarea']] },
   contact: { label: 'Care team', title: 'Name', fields: [['role', 'Role (kidney doctor, hospice nurse, pharmacy...)', 'text'], ['phone', 'Phone', 'tel'], ['fax', 'Fax', 'text'], ['address', 'Address', 'text'], ['portal', 'Patient portal link', 'text'], ['notes', 'Notes', 'textarea']] },
@@ -157,7 +157,12 @@ function editRecord(id, kind, pid) {
     if (type === 'tel') return '<label for="' + fid + '">' + label + '</label><div class="row"><input id="' + fid + '" class="grow" type="tel" value="' + esc(v) + '" oninput="S.phoneCheck=null"><button type="button" class="btn sm ghost" onclick="checkPhoneField(\'' + fid + '\')">Check number</button></div><div class="muted" id="' + fid + 'Hint" aria-live="polite">' + (fl.phone_type ? esc(phoneTypeText(fl.phone_type, fl.phone_carrier)) : '') + '</div>';
     if (type === 'heading') return '<h3>' + esc(label) + '</h3>' + (key === 'label_head' ? labelHelp(fl) : '');
     if (type === 'hidden') return '<input id="' + fid + '" type="hidden" value="' + esc(v) + '">';
-    if (type === 'slots') { var on = String(v).split(','); return '<label>' + label + '</label><div class="chips" id="' + fid + '">' + MED_SLOTS.map(function (s) { var sel = on.indexOf(s[0]) >= 0; return '<button type="button" class="chip' + (sel ? ' on' : '') + '" data-v="' + s[0] + '" aria-pressed="' + sel + '" onclick="toggleChip(this)">' + s[1] + '</button>'; }).join('') + '</div>'; }
+    if (type === 'slots') {
+      var on = String(v).split(','), times = fl.slot_times || {};
+      return '<label>' + label + '</label><div class="chips" id="' + fid + '">' + MED_SLOTS.map(function (s) { var sel = on.indexOf(s[0]) >= 0; return '<button type="button" class="chip' + (sel ? ' on' : '') + '" data-v="' + s[0] + '" aria-pressed="' + sel + '" onclick="toggleChip(this)">' + s[1] + '</button>'; }).join('') + '</div>' +
+        '<div class="slot-times">' + MED_SLOTS.filter(function (s) { return s[2] != null; }).map(function (s) { return '<label class="slot-time"><span class="muted">' + s[1] + '</span><input type="time" id="rf-st-' + s[0] + '" value="' + esc(times[s[0]] || '') + '" placeholder="' + pad2(s[2]) + ':00"></label>'; }).join('') + '</div>' +
+        '<p class="muted">Set a time only if she takes it at a set time; blank uses ' + MED_SLOTS.filter(function (s) { return s[2] != null; }).map(function (s) { return s[1].toLowerCase() + ' ' + (s[2] % 12 || 12) + (s[2] < 12 ? ' am' : ' pm'); }).join(', ') + '. A dose shows as due an hour before and overdue two hours after.</p>' + (fl.time ? '<p class="muted">Earlier note on timing: ' + esc(fl.time) + '</p>' : '');
+    }
     if (type === 'date') return '<label for="' + fid + '">' + label + '</label><input id="' + fid + '" type="date" value="' + esc(v) + '">';
     if (type === 'datetime') { var dv = v ? localDay(new Date(v).toISOString()) + 'T' + localTime(new Date(v).toISOString()) : ''; return '<label for="' + fid + '">' + label + '</label><input id="' + fid + '" type="datetime-local" value="' + dv + '">'; }
     return '<label for="' + fid + '">' + label + '</label><input id="' + fid + '" ' + (type === 'number' ? 'type="number" step="any" inputmode="decimal"' : 'type="text"') + ' value="' + esc(v) + '">';
@@ -181,7 +186,11 @@ function saveRecord(id, kind, pid) {
   var fields = {};
   K.fields.forEach(function (f) {
     var el = document.getElementById('rf-' + f[0]); if (!el || f[2] === 'heading') return;
-    if (f[2] === 'slots') { fields[f[0]] = Array.prototype.map.call(el.querySelectorAll('.chip.on'), function (c) { return c.dataset.v; }).join(',') || null; return; }
+    if (f[2] === 'slots') {
+      fields[f[0]] = Array.prototype.map.call(el.querySelectorAll('.chip.on'), function (c) { return c.dataset.v; }).join(',') || null;
+      var st = {}; MED_SLOTS.forEach(function (s) { var t = document.getElementById('rf-st-' + s[0]); if (t && t.value) st[s[0]] = t.value; });
+      fields.slot_times = st; return;
+    }
     var v = el.value.trim();
     if (f[2] === 'number') fields[f[0]] = v === '' ? null : +v;
     else if (f[2] === 'datetime') fields[f[0]] = v ? new Date(v).toISOString() : null;
@@ -264,7 +273,8 @@ function renderKitchen(arg) {
 function toggleChip(btn) { btn.classList.toggle('on'); btn.setAttribute('aria-pressed', btn.classList.contains('on')); }
 function slotsText(r) {
   var fl = r.fields || {}, on = String(fl.slots || '').split(',');
-  return MED_SLOTS.filter(function (s) { return on.indexOf(s[0]) >= 0; }).map(function (s) { return s[1].toLowerCase(); }).join(', ') + (fl.time ? ' (' + fl.time + ')' : '');
+  var times = fl.slot_times || {};
+  return MED_SLOTS.filter(function (s) { return on.indexOf(s[0]) >= 0; }).map(function (s) { return s[1].toLowerCase() + (times[s[0]] ? ' ' + times[s[0]] : ''); }).join(', ');
 }
 var LABEL_KEYS = [['label_boxed', 'boxed_warning'], ['label_how', 'how_to_take'], ['label_side', 'side_effects'], ['label_warn', 'warnings'], ['label_patients', 'for_patients'], ['label_older', 'older_adults']];
 function labelHelp(fl) {

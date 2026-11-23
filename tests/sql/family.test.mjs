@@ -238,4 +238,9 @@ await as(U.mom, 'select set_member_role($1, $2, $3)', [hid, U.me, 'caregiver']);
 assert.equal((await as(U.mom, `select id from records where kind = 'dose'`)).rows.length, 1);
 ok('important days and dose marks are records: caregivers write, viewers cannot');
 
+await as(U.me, `insert into measurements (id, household_id, kind, value, value2, unit, taken_at, pulse, rhythm) values (gen_random_uuid(), $1, 'blood_pressure', 142, 80, 'mmHg', now(), 96, 'afib')`, [hid]);
+await fails(U.me, `insert into measurements (id, household_id, kind, value, unit, taken_at, rhythm) values (gen_random_uuid(), $1, 'blood_pressure', 120, 'mmHg', now(), 'wobbly')`, [hid], 'an unknown heart rhythm');
+assert.equal((await as(U.mom, `select pulse, rhythm from measurements where rhythm = 'afib'`)).rows[0].pulse, '96');
+ok('blood pressure keeps pulse and rhythm (regular, irregular, AFib)');
+
 console.log(`\nAll ${n} family checks passed.`);

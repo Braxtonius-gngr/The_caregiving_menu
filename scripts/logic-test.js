@@ -241,6 +241,14 @@ t('medPlan: due, overdue, later, marked; stopped and not-started meds drop out; 
   assert.strictEqual(Logic.medPlan(meds, [], '2026-11-30', 22).filter(function (r) { return r.med.id === 'c'; })[0].state, 'due');
   assert.strictEqual(Logic.prnDoses(doses, 'd', '2026-11-23').length, 1);
 });
+t('medPlan: a medicine set for 6:30 is due at 5:45 and overdue at 8:45; blank uses the slot hour', function () {
+  var m = [{ id: 'a', title: 'Levothyroxine', fields: { slots: 'morning,evening', slot_times: { morning: '06:30' } } }];
+  assert.strictEqual(Logic.slotHour(m[0], 'morning'), 6.5);
+  assert.strictEqual(Logic.slotHour(m[0], 'evening'), 17);
+  assert.strictEqual(Logic.medPlan(m, [], '2026-11-23', 5.75)[0].state, 'due');
+  assert.strictEqual(Logic.medPlan(m, [], '2026-11-23', 8.75)[0].state, 'overdue');
+  assert.strictEqual(Logic.medPlan(m, [], '2026-11-23', 8.75)[0].time, '06:30');
+});
 t('upcoming: visits, follow-ups, yearly and monthly days, refills, within the window only', function () {
   var day = function (iso) { return iso.slice(0, 10); };
   var rs = [
