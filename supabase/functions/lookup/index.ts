@@ -1,5 +1,7 @@
 // /lookup — free nutrition sources. Barcodes go to Open Food Facts (no key);
 // generic ingredients go to USDA FoodData Central (free key: USDA_API_KEY, falls back to DEMO_KEY).
+// Phone numbers (care team, pharmacy, family) go to Twilio Lookup v2 when TWILIO_ACCOUNT_SID and
+// TWILIO_AUTH_TOKEN are set: validity, standard format and line type (mobile, landline, VoIP).
 import { corsHeaders, json } from "../_shared/cors.ts";
 
 const USDA_KEY = Deno.env.get("USDA_API_KEY") ?? "DEMO_KEY";
@@ -43,12 +45,40 @@ async function usda(q: string) {
   return out;
 }
 
+const TW_SID = Deno.env.get("TWILIO_ACCOUNT_SID") ?? "";
+const TW_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN") ?? "";
+
+// One number per call. A number without a country code is read as a US number.
+async function phone(q: string) {
+  const raw = String(q ?? "").trim();
+  const digits = raw.replace(/[^\d+]/g, "");
+  if (digits.replace("+", "").length < 7 || digits.length > 16) return { available: true, valid: false, error: "That doesn't look like a phone number." };
+  if (!TW_SID || !TW_TOKEN) return { available: false };
+  const international = digits.startsWith("+");
+  const url = `https://lookups.twilio.com/v2/PhoneNumbers/${encodeURIComponent(digits)}?Fields=line_type_intelligence` + (international ? "" : "&CountryCode=US");
+  const r = await fetch(url, { headers: { Authorization: "Basic " + btoa(`${TW_SID}:${TW_TOKEN}`) } });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return { available: true, valid: false, error: d.message || `Number check failed (${r.status})` };
+  const lti = d.line_type_intelligence ?? {};
+  return {
+    available: true,
+    valid: !!d.valid,
+    e164: d.phone_number ?? null,
+    national: d.national_format ?? null,
+    country: d.country_code ?? null,
+    line_type: lti.type ?? null,
+    carrier: lti.carrier_name ?? null,
+    errors: d.validation_errors ?? [],
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const { kind, q } = await req.json();
     if (kind === "barcode") return json(await barcode(String(q)));
     if (kind === "usda") return json(await usda(String(q)));
+    if (kind === "phone") return json(await phone(String(q)));
     return json({ error: "unknown kind" }, 400);
   } catch (e) {
     return json({ error: (e as Error).message }, 400);

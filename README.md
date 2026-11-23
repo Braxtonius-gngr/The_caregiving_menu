@@ -50,6 +50,8 @@ Try it without any setup: **Settings → Load sample data**.
 4. Open the app, go to **Settings > Cloud sync**, paste the project URL and the anon (public) key, then sign in with the emailed link.
 5. Still in Settings, under **Family**, tap **Invite a caregiver** (can log) or **Invite a viewer** (read only) and send the link to that person. Opening it on their phone connects the app; once they sign in they join your family and are asked for their name. Owners can change roles, remove people, add a second owner and cancel old links from the same screen.
 
+Optional: to check phone numbers (care team, pharmacy) for validity and line type, add `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` as project secrets; the `lookup` function uses Twilio Lookup v2 (basic validation is free, line type is a fraction of a cent per check). Without them the app only checks the digit count.
+
 The anon key is meant to be public; row-level security keeps each household's data private. The AI function uses Claude Opus 5.5 (`CLAUDE_MODEL` overrides it) with Anthropic's server-side refusal fallback, and only signed-in household members can call it.
 
 ## Publishing the app (GitHub Pages)

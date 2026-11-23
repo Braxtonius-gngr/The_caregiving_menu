@@ -73,7 +73,7 @@ function fluidCardFor(pid, entries, day) {
     '<div><span class="muted">Difference</span><b>' + (b.netMl >= 0 ? '+' : '&minus;') + shortOz(Math.abs(b.netMl)) + '</b><span class="muted">' + (b.netMl >= 0 ? 'more in' : 'more out') + '</span></div></div>' +
     (limit ? '<div class="bar' + (b.inMl > limit ? ' over' : '') + '" role="img" aria-label="' + pct + '% of the daily fluid limit"><span style="width:' + pct + '%"></span></div><div class="muted">' + shortOz(b.inMl) + ' of ' + shortOz(limit) + ' limit' + (cs.fluid_limit_source ? ' (' + esc(cs.fluid_limit_source) + ')' : '') + '</div>' : '') +
     (w ? '<div class="muted">Morning weight ' + localTime(w.m.taken_at) + ': <b>' + (Math.round(w.lb * 10) / 10) + ' lb</b>' + (w.sincePrev != null ? ' (' + (w.sincePrev >= 0 ? '+' : '') + w.sincePrev.toFixed(1) + ' since ' + (w.prevDays === 1 ? 'yesterday' : w.prevDays + ' days ago') + ')' : '') + '</div>' : '') +
-    (flags.length ? '<div class="note flag" role="alert"><b>Worth a call to the care team if this is new or getting worse:</b><br>' + flags.map(esc).join('<br>') + (cs.care_phone ? '<br><a href="tel:' + esc(cs.care_phone.replace(/[^\d+]/g, '')) + '">Call ' + esc(cs.care_phone) + '</a>' : '') + '</div>' : '') +
+    (flags.length ? '<div class="note flag" role="alert"><b>Worth a call to the care team if this is new or getting worse:</b><br>' + flags.map(esc).join('<br>') + (cs.care_phone ? '<br><a href="tel:' + esc(cs.care_phone_e164 || cs.care_phone.replace(/[^\d+]/g, '')) + '">Call ' + esc(cs.care_phone) + '</a>' : '') + '</div>' : '') +
     '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'fluids\',{day:\'' + day + '\',pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">In &amp; Out sheet</button></div></div>';
 }
 
@@ -207,7 +207,9 @@ function careSettingsFields(p) {
     '<div class="grow"><label for="csWeek">Weight gain alert, 1 week (lb)</label><input id="csWeek" type="number" min="0" step="0.1" value="' + (cs.weight_alert_week_lb || '') + '"></div></div>' +
     '<button type="button" class="linkish" onclick="document.getElementById(\'csDay\').value=3;document.getElementById(\'csWeek\').value=5;document.getElementById(\'csAlertSrc\').value=\'common heart-failure guidance, confirm with care team\'">Use common heart-failure guidance (3 lb a day, 5 lb a week). Confirm with the care team.</button>' +
     '<label for="csAlertSrc">Alert levels set by</label><input id="csAlertSrc" value="' + esc(cs.alert_source || '') + '">' +
-    '<label for="csPhone">Care team phone (shown with warnings)</label><input id="csPhone" type="tel" value="' + esc(cs.care_phone || '') + '">';
+    '<label for="csPhone">Care team phone (shown with warnings)</label><div class="row"><input id="csPhone" class="grow" type="tel" autocomplete="off" value="' + esc(cs.care_phone || '') + '" oninput="S.phoneCheck=null;document.getElementById(\'csPhoneHint\').textContent=\'\'">' +
+    '<button type="button" class="btn sm ghost" onclick="checkPhoneField(\'csPhone\')">Check number</button></div>' +
+    '<div class="muted" id="csPhoneHint" aria-live="polite">' + (cs.care_phone_type ? esc(phoneTypeText(cs.care_phone_type, cs.care_phone_carrier)) : '') + '</div>';
 }
 function readCareSettings(prev) {
   var cs = Object.assign({}, prev || {});
@@ -216,7 +218,11 @@ function readCareSettings(prev) {
   var oz = num('csLimit');
   cs.fluid_limit_ml = oz ? Math.round(Logic.toMl(oz, 'oz')) : null; cs.fluid_limit_source = txt('csLimitSrc');
   cs.weight_alert_day_lb = num('csDay'); cs.weight_alert_week_lb = num('csWeek'); cs.alert_source = txt('csAlertSrc');
-  cs.care_phone = txt('csPhone');
+  var typed = txt('csPhone');
+  if (typed !== (prev || {}).care_phone) { delete cs.care_phone_e164; delete cs.care_phone_type; delete cs.care_phone_carrier; }
+  var chk = S.phoneCheck;
+  if (chk && chk.id === 'csPhone' && chk.res.valid) { typed = chk.res.national || typed; cs.care_phone_e164 = chk.res.e164; cs.care_phone_type = chk.res.line_type; cs.care_phone_carrier = chk.res.carrier; }
+  cs.care_phone = typed;
   Object.keys(cs).forEach(function (k) { if (cs[k] == null) delete cs[k]; });
   return cs;
 }
@@ -315,4 +321,25 @@ function dayStartPicker(owner) {
 function saveDayStart(h) {
   Sync.setDayStart(h).then(function () { State.dayStart = h; return DB.meta('day_start_hour', h); }).then(function () { toast('Day now starts at ' + dayStartLabel(h)); })
     .catch(function (e) { toast(e.message); renderFamilyBox(); });
+}
+
+/* ---------- checking a phone number (Twilio Lookup, through the lookup cloud function) ---------- */
+var LINE_TYPE_TEXT = { mobile: 'mobile', landline: 'landline', fixedVoip: 'internet phone (fixed)', nonFixedVoip: 'internet phone', voip: 'internet phone', 'toll-free': 'toll-free', personal: 'personal', pager: 'pager', unknown: 'type unknown' };
+function phoneTypeText(type, carrier) { return '✓ ' + (LINE_TYPE_TEXT[type] || type || 'checked') + (carrier ? ' · ' + carrier : ''); }
+// Confirms the number is real, puts it in standard form and says whether it's a mobile or
+// a landline. Without the cloud or Twilio keys it only checks the digit count.
+function checkPhoneField(id) {
+  var input = document.getElementById(id), hint = document.getElementById(id + 'Hint'), v = input.value.trim();
+  var digits = v.replace(/[^\d]/g, '');
+  if (!v) { hint.textContent = 'Type a number first.'; return; }
+  if (!Sync.enabled()) { hint.textContent = digits.length === 10 || (digits.length === 11 && digits[0] === '1') ? 'Looks like a US number (connect to the cloud to check it properly).' : 'That does not look like a US number. Check the digits.'; return; }
+  hint.textContent = 'Checking...';
+  Sync.lookup('phone', v).then(function (res) {
+    if (!document.getElementById(id)) return;
+    if (!res || res.available === false) { hint.textContent = 'Number checking is not set up yet (it needs Twilio keys in the cloud). The number is saved as typed.'; return; }
+    S.phoneCheck = { id: id, res: res };
+    if (!res.valid) { hint.textContent = '⚠ ' + (res.error || 'This number does not look valid. Check the digits.'); return; }
+    if (res.national) input.value = res.national;
+    hint.textContent = phoneTypeText(res.line_type, res.carrier) + (res.line_type === 'landline' ? ' (it can take calls, not texts)' : '');
+  }).catch(function (e) { hint.textContent = 'Could not check: ' + e.message; });
 }
