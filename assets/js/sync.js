@@ -2,7 +2,7 @@
  * the outbox is pushed when online, remote changes newer than our watermark are pulled. */
 var Sync = (function () {
   var client = null;
-  var SYNCED = ['ingredients', 'recipes', 'recipe_ingredients', 'recipe_variations', 'pantry_items', 'diet_profiles', 'profile_rules', 'diary_entries', 'shopping_list', 'usage_log', 'measurements'];
+  var SYNCED = ['ingredients', 'recipes', 'recipe_ingredients', 'recipe_variations', 'pantry_items', 'diet_profiles', 'profile_rules', 'diary_entries', 'shopping_list', 'usage_log', 'measurements', 'entry_photos'];
 
   // Where the cloud lives: details saved on this device (Settings or a setup link) win,
   // then the values baked into config.js. The anon key is public by design; RLS guards data.
@@ -152,7 +152,7 @@ var Sync = (function () {
   }
 
   // Which records carry a photo, and the Storage folder each one uses.
-  var PHOTO_STORES = { diary_entries: 'diary', recipes: 'recipes' };
+  var PHOTO_STORES = { diary_entries: 'diary', recipes: 'recipes', entry_photos: 'extra' };
   // Photo slots per record: the local copy field, the Storage path field and a file-name tag.
   // A diary entry can also hold an "after the meal" photo of what was left on the plate.
   var MAIN_SLOT = { data: 'photo_data', path: 'photo_path', tag: '' };
@@ -256,7 +256,7 @@ var Sync = (function () {
       if (!s) return { pushed: 0, pulled: 0, photos: 0, signedIn: false };
       return refreshRole().then(dropLocalChangesIfViewer).then(push).then(function (p) {
         return pull().then(function (q) {
-          return DB.meta('my_role').then(function (role) { return role === 'viewer' ? 0 : uploadPendingPhotos(); }).then(function (ph) {
+          return DB.meta('my_role').then(function (role) { return role === 'viewer' || role === 'pending' ? 0 : uploadPendingPhotos(); }).then(function (ph) {
             return flushPhotoDeletes().then(function () { return { pushed: p, pulled: q, photos: ph, signedIn: true }; });
           });
         });
@@ -307,6 +307,22 @@ var Sync = (function () {
   function setHouseholdName(name) { return rpcHid('set_household_name', { new_name: name }); }
   function setMemberRole(uid, role) { return rpcHid('set_member_role', { uid: uid, new_role: role }); }
   function removeMember(uid) { return rpcHid('remove_member', { uid: uid }); }
+  function approveMember(uid, role) { return rpcHid('approve_member', { uid: uid, new_role: role }); }
+  function history(store, id) {
+    var c = getClient();
+    return c.from('audit_log').select('*').eq('table_name', store).eq('row_id', id).order('changed_at', { ascending: false }).limit(100)
+      .then(function (r) { if (r.error) throw r.error; return r.data; });
+  }
+  function recentChanges(n) {
+    var c = getClient();
+    return householdId().then(function (hid) { return c.from('audit_log').select('*').eq('household_id', hid).order('changed_at', { ascending: false }).limit(n || 50); })
+      .then(function (r) { if (r.error) throw r.error; return r.data; });
+  }
+  // Owners only (row-level security refuses anyone else).
+  function hardDelete(store, id) {
+    var c = getClient();
+    return session().then(function (s) { if (!s) return; return c.from(store).delete().eq('id', id).then(function (r) { if (r.error) throw r.error; }); });
+  }
   function setDayStart(hour) { return rpcHid('set_day_start', { hour: hour }); }
   // The family's day start hour, cached on the device. Servers before 0011 answer null.
   function refreshDayStart() {
@@ -330,7 +346,7 @@ var Sync = (function () {
   // brings back the family's version, so nothing on this phone drifts from the shared file.
   function dropLocalChangesIfViewer() {
     return DB.meta('my_role').then(function (role) {
-      if (role !== 'viewer') return 0;
+      if (role !== 'viewer' && role !== 'pending') return 0;
       return DB.outbox().then(function (items) {
         if (!items.length) return 0;
         return DB.clearOutbox(items.map(function (i) { return i.id; })).then(function () { return DB.meta('last_pull', null); }).then(function () { return items.length; });
@@ -441,5 +457,5 @@ var Sync = (function () {
     return queuePhotoDelete('record:' + PHOTO_STORES[store] + '/' + id).then(flushIfSignedIn);
   }
 
-  return { authStorageKey: authStorageKey, config: config, configured: configured, saveConfig: saveConfig, clearConfig: clearConfig, setupLink: setupLink, applySetupLink: applySetupLink, joinPendingInvite: joinPendingInvite, pendingInvite: pendingInvite, photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, inviteLinks: inviteLinks, resetInviteLinks: resetInviteLinks, members: members, setMyName: setMyName, setHouseholdName: setHouseholdName, setMemberRole: setMemberRole, removeMember: removeMember, householdName: householdName, setDayStart: setDayStart, refreshDayStart: refreshDayStart, refreshRole: refreshRole, householdId: householdId, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
+  return { authStorageKey: authStorageKey, config: config, configured: configured, saveConfig: saveConfig, clearConfig: clearConfig, setupLink: setupLink, applySetupLink: applySetupLink, joinPendingInvite: joinPendingInvite, pendingInvite: pendingInvite, photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, inviteLinks: inviteLinks, resetInviteLinks: resetInviteLinks, members: members, setMyName: setMyName, setHouseholdName: setHouseholdName, setMemberRole: setMemberRole, removeMember: removeMember, householdName: householdName, setDayStart: setDayStart, approveMember: approveMember, history: history, recentChanges: recentChanges, hardDelete: hardDelete, refreshDayStart: refreshDayStart, refreshRole: refreshRole, householdId: householdId, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
 })();

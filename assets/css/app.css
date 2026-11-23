@@ -167,3 +167,9 @@ label.check input { width: auto; margin: 0; }
 .io-table .flag-row td { color: #c8323a; }
 .trend { margin: 8px 0; color: var(--accent); }
 .trend svg { width: 100%; height: auto; }
+
+/* Extra photos and Trash */
+.photo-strip { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.photo-tile { position: relative; }
+.photo-tile .icon-btn { position: absolute; top: -8px; right: -8px; background: var(--panel); border-radius: 50%; width: 26px; height: 26px; line-height: 1; }
+.btn-col { display: flex; flex-direction: column; gap: 6px; }

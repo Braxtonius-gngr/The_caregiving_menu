@@ -2,8 +2,8 @@
  * All records carry: id (uuid), updated_at (ISO), deleted (bool). */
 var DB = (function () {
   var NAME = 'tcm';
-  var VERSION = 2; // 2: measurements (weights)
-  var STORES = ['ingredients', 'recipes', 'recipe_ingredients', 'recipe_variations', 'pantry_items', 'diet_profiles', 'profile_rules', 'diary_entries', 'shopping_list', 'usage_log', 'intake_jobs', 'outbox', 'meta', 'measurements'];
+  var VERSION = 3; // 2: measurements (weights); 3: entry_photos
+  var STORES = ['ingredients', 'recipes', 'recipe_ingredients', 'recipe_variations', 'pantry_items', 'diet_profiles', 'profile_rules', 'diary_entries', 'shopping_list', 'usage_log', 'intake_jobs', 'outbox', 'meta', 'measurements', 'entry_photos'];
   var dbp = null;
 
   function open() {
@@ -48,6 +48,18 @@ var DB = (function () {
 
   function all(store) {
     return tx(store, 'readonly', function (os) { return os.getAll(); }).then(function (rows) { return (rows || []).filter(function (r) { return !r.deleted; }); });
+  }
+  // Every row, deleted ones too (the Trash reads tombstones).
+  function allRaw(store) { return tx(store, 'readonly', function (os) { return os.getAll(); }).then(function (rows) { return rows || []; }); }
+  // Remove a row from this device for good, with any upload still queued for it.
+  function purge(store, id) {
+    return open().then(function (d) {
+      return new Promise(function (resolve, reject) {
+        var t = d.transaction([store, 'outbox'], 'readwrite');
+        t.objectStore(store).delete(id); t.objectStore('outbox').delete(store + ':' + id);
+        t.oncomplete = function () { resolve(); }; t.onerror = function () { reject(t.error); };
+      });
+    });
   }
   function get(store, id) { return tx(store, 'readonly', function (os) { return os.get(id); }); }
   function byIndex(store, index, value) {
@@ -168,5 +180,5 @@ var DB = (function () {
   function clearOutbox(ids) { return tx('outbox', 'readwrite', function (os) { ids.forEach(function (id) { os.delete(id); }); }); }
   function wipe() { return open().then(function (d) { d.close(); dbp = null; return new Promise(function (res) { var r = indexedDB.deleteDatabase(NAME); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; }); }); }
 
-  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, metaUpdate: metaUpdate, update: update, reconcile: reconcile, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe, setReadOnly: setReadOnly };
+  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, metaUpdate: metaUpdate, update: update, reconcile: reconcile, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe, setReadOnly: setReadOnly, allRaw: allRaw, purge: purge };
 })();

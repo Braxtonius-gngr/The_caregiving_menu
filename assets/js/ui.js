@@ -46,13 +46,13 @@ function openSheet(html) { document.getElementById('sheetBody').innerHTML = html
 var scanSession = 0; // bumped when the scanner opens or a sheet closes; late lookups compare against it
 function closeSheet() { scanSession++; S.sharedPhoto = null; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
 
-var TITLES = { simple: '', home: 'Home', recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out' };
+var TITLES = { simple: '', home: 'Home', recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted' };
 var currentScreen = 'home';
 function showScreen(name, arg) {
   currentScreen = name;
   document.getElementById('screenTitle').textContent = TITLES[name] || name;
   document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
-  var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe, fluids: renderFluids }[name];
+  var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe, fluids: renderFluids, trash: renderTrash }[name];
   document.getElementById('screen').innerHTML = fn ? fn(arg) : '';
   window.scrollTo(0, 0);
 }
@@ -670,13 +670,16 @@ function renderDiary() {
   return '<div class="row between"><button class="btn ghost sm" onclick="State.day=\'' + shift(-1) + '\';refresh()">&larr;</button><b>' + esc(dayLabel(day)) + '</b><button class="btn ghost sm" onclick="State.day=\'' + shift(1) + '\';refresh()">&rarr;</button></div>' +
     profileSwitcher() + dvTiles(Logic.dayTotals(entries), prof && prof.daily_targets) +
     fluidCard(entries, day) +
+    (State.role === 'pending' ? '<p class="note"><b>Waiting for approval.</b> An owner of the family needs to approve you before anything is shared with this phone.</p>' : '') +
+    ((State.role === 'owner' || State.role == null) && (State.pendingMembers || []).length ? '<p class="note">' + esc(State.pendingMembers.join(', ')) + (State.pendingMembers.length === 1 ? ' is' : ' are') + ' waiting to join the family. <button class="linkish" onclick="showScreen(\'settings\')">Review in Settings</button></p>' : '') +
     (State.role === 'viewer' ? '<p class="note">View only. You can see everything the family logs; ask an owner if you need to add entries.</p>' : '') +
     '<div class="btn-row writer-only"><button class="btn" onclick="logFood()">+ Log a meal</button><button class="btn ghost" onclick="logDrink()">&#129380; Log a drink</button><button class="btn ghost" onclick="logOutput()">&#128701; Log output</button><button class="btn ghost" onclick="logWeight()">&#9878; Weight</button></div>' + afterInputs() +
     (entries.length ? entries.map(function (e) {
       var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
       var who = State.profiles.find(function (p) { return p.id === e.for_profile_id; });
-      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===this){event.preventDefault();this.click();}" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + (e.entry_kind === 'drink' ? '&#129380; ' : e.entry_kind === 'output' ? '&#128701; ' : '') + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + loggedBy(e) + '</span><div class="muted">' + (e.entry_kind === 'output' ? '<span class="' + (Logic.outputFlags(e).length ? 'flag-text' : '') + '">Out · ' + outputLine(e) + '</span>' + photoStatus(e) : Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + plateNote(e) + (e.entry_kind !== 'drink' && e.fluid_ml ? ' · +' + shortOz(Logic.fluidIn(e)) + ' fluid' : '')) + (e.entry_kind !== 'output' && !(e.kcal > 0) && e.estimate_source !== 'manual' && e.estimate_source !== 'water' && Sync.enabled() ? ' <button class="btn sm writer-only" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + plateButtons(e) + '</div></div><button class="icon-btn writer-only" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
+      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===this){event.preventDefault();this.click();}" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + (e.entry_kind === 'drink' ? '&#129380; ' : e.entry_kind === 'output' ? '&#128701; ' : '') + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + loggedBy(e) + '</span><div class="muted">' + (e.entry_kind === 'output' ? '<span class="' + (Logic.outputFlags(e).length ? 'flag-text' : '') + '">Out · ' + outputLine(e) + '</span>' + photoStatus(e) : Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + extraCount(e) + plateNote(e) + (e.entry_kind !== 'drink' && e.fluid_ml ? ' · +' + shortOz(Logic.fluidIn(e)) + ' fluid' : '')) + (e.entry_kind !== 'output' && !(e.kcal > 0) && e.estimate_source !== 'manual' && e.estimate_source !== 'water' && Sync.enabled() ? ' <button class="btn sm writer-only" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + plateButtons(e) + '</div></div><button class="icon-btn writer-only" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
     }).join('') : '<div class="empty">Nothing logged.</div>') +
+    trashLink() +
     (prof ? '<h2>Notes for ' + esc(prof.person_name) + '\'s next appointment</h2><div class="card"><textarea id="profNotes" rows="4" placeholder="Questions to ask, patterns you noticed...">' + esc(prof.notes || '') + '</textarea><div class="btn-row"><button class="btn sm" onclick="saveProfileNotes(\'' + prof.id + '\')">Save notes</button><button class="btn sm ghost" onclick="weeklyDigest(\'' + prof.id + '\')">Weekly digest</button></div></div>' : '');
 }
 // Log a meal for whoever is eating it. The caregiver usually logs for someone else, so
@@ -868,7 +871,7 @@ function photoStatus(e) {
 function hydratePhotos() {
   document.querySelectorAll('img[data-photo]:not([src])').forEach(function (img) {
     var store = img.dataset.store || 'diary_entries';
-    var list = store === 'recipes' ? State.recipes : State.diary;
+    var list = store === 'recipes' ? State.recipes : store === 'entry_photos' ? (State.entryPhotos || []) : State.diary;
     var rec = list.find(function (x) { return x.id === img.dataset.photo; });
     if (!rec) return;
     Sync.photoSrc(rec, store).then(function (src) { if (src && img.isConnected) img.src = src; });
@@ -923,7 +926,8 @@ function editDiaryEntry(id, focusNote) {
     '<div class="grid-2">' + Logic.NUTRIENTS.map(function (k) { return '<div><label for="eN-' + k + '">' + NUT_LABELS[k] + '</label><input id="eN-' + k + '" type="number" step="any" value="' + nutShown(e[k], mult) + '" oninput="markNutEdited(\'' + k + '\')"></div>'; }).join('') + '</div>' +
     (Sync.enabled() ? '<div class="btn-row"><button type="button" class="btn ghost" onclick="estimateIntoForm()">Estimate again</button></div><p class="muted">Fills the numbers from the recipe, description and photo. Nothing is saved until you tap Save.</p>' : '') +
     '</fieldset>' +
-    '<div class="btn-row"><button class="btn" id="eSave" onclick="saveDiaryEdit()">Save</button><button class="btn ghost" onclick="closeSheet()">Close</button>' + (drink ? '<button class="btn ghost writer-only" onclick="convertToOutput(\'' + id + '\')">This was output, not a drink</button>' : '') + '<button class="btn danger" onclick="closeSheet();deleteDiaryEntry(\'' + id + '\')">Delete</button></div>');
+    (Sync.enabled() ? extraPhotosSection(id) : '') +
+    '<div class="btn-row"><button class="btn" id="eSave" onclick="saveDiaryEdit()">Save</button><button class="btn ghost" onclick="closeSheet()">Close</button>' + (drink ? '<button class="btn ghost writer-only" onclick="convertToOutput(\'' + id + '\')">This was output, not a drink</button>' : '') + '<button class="btn ghost" onclick="showHistory(\'diary_entries\',\'' + id + '\')">History</button><button class="btn danger" onclick="closeSheet();deleteDiaryEntry(\'' + id + '\')">Delete</button></div>');
   ['eWho', 'eWhen', 'eRecipe', 'eText', 'ePort', 'eOz', 'eNote', 'eFluid'].forEach(function (fid) { var el = document.getElementById(fid); if (el) sess.before[fid] = el.value; });
   Logic.NUTRIENTS.forEach(function (k) { sess.base[k] = e[k] != null ? e[k] : null; sess.shown[k] = nutShown(e[k], mult); });
   if (focusNote) setTimeout(function () { var n = document.getElementById('eNote'); if (n) { n.scrollIntoView({ block: 'center' }); n.focus(); } }, 50);
@@ -1233,9 +1237,10 @@ function clearPlateStatus(id) {
 }
 function deleteDiaryEntry(id) {
   var e = State.diary.find(function (x) { return x.id === id; });
-  if (!e || !confirm('Delete this diary entry' + (e.photo_data || e.photo_path || e.after_photo_data || e.after_photo_path ? ' and its photos' : '') + '?')) return;
-  DB.update('diary_entries', id, function (cur) { if (!cur) return null; cur.deleted = true; cur.photo_data = null; cur.after_photo_data = null; return cur; })
-    .then(function () { return Sync.removeRecordPhotos('diary_entries', id); }).then(loadAll).then(refresh);
+  if (!e || !confirm('Delete this diary entry? It goes to Deleted for 30 days, photos included.')) return;
+  // Soft delete only: photos stay in the cloud so Restore brings everything back.
+  DB.update('diary_entries', id, function (cur) { if (!cur) return null; cur.deleted = true; return cur; })
+    .then(loadAll).then(function () { refresh(); toast('Deleted', 'Undo', function () { restoreFromTrash('diary_entries', id); }); });
 }
 function saveProfileNotes(id) { var p = State.profiles.find(function (x) { return x.id === id; }); p.notes = document.getElementById('profNotes').value; DB.put('diet_profiles', p).then(function () { toast('Saved'); }); }
 // Everything the digest, the copyable summary and the Claude draft are built from.
