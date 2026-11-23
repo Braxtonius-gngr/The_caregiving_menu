@@ -214,3 +214,4 @@ label.check input { width: auto; margin: 0; }
 .q-list, .src-list { padding-left: 20px; }
 .q-list li, .src-list li { margin-bottom: 6px; }
 .ok-note { background: color-mix(in srgb, var(--ok) 12%, transparent); border-left-color: var(--ok); }
+.cuff-log { font-size: 11px; max-height: 200px; overflow: auto; background: var(--line); padding: 6px; border-radius: 6px; }

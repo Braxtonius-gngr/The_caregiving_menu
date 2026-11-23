@@ -477,7 +477,26 @@ var Logic = (function () {
     ];
   }
 
-  return { doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
+  /* ---------- Bluetooth blood pressure (standard Blood Pressure Service, 0x2A35) ---------- */
+  // IEEE-11073 16-bit float: 4-bit signed exponent, 12-bit signed mantissa.
+  function sfloat(lo, hi) {
+    var raw = lo | (hi << 8), m = raw & 0x0fff, e = raw >> 12;
+    if (m === 0x07ff || m === 0x0800 || m === 0x07fe || m === 0x0802 || m === 0x0801) return null; // NaN / NRes / +-INF / reserved
+    if (m >= 0x0800) m -= 0x1000; if (e >= 0x8) e -= 0x10;
+    return Math.round(m * Math.pow(10, e) * 100) / 100;
+  }
+  function parseBpMeasurement(bytes) {
+    var b = Array.prototype.slice.call(bytes), flags = b[0], i = 7;
+    var r = { unit: flags & 1 ? 'kPa' : 'mmHg', sys: sfloat(b[1], b[2]), dia: sfloat(b[3], b[4]), map: sfloat(b[5], b[6]), time: null, pulse: null, user: null, irregular: false, movement: false, cuffLoose: false };
+    if (flags & 2) { r.time = { y: b[i] | (b[i + 1] << 8), mo: b[i + 2], d: b[i + 3], h: b[i + 4], mi: b[i + 5], s: b[i + 6] }; i += 7; }
+    if (flags & 4) { r.pulse = sfloat(b[i], b[i + 1]); i += 2; }
+    if (flags & 8) { r.user = b[i]; i += 1; }
+    if (flags & 16) { var st = b[i] | (b[i + 1] << 8); r.movement = !!(st & 1); r.cuffLoose = !!(st & 2); r.irregular = !!(st & 4); }
+    if (r.unit === 'kPa') ['sys', 'dia', 'map'].forEach(function (k) { if (r[k] != null) r[k] = Math.round(r[k] * 7.50062); });
+    return r;
+  }
+
+  return { parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
     slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();
