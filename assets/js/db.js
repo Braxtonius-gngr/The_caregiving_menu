@@ -2,8 +2,8 @@
  * All records carry: id (uuid), updated_at (ISO), deleted (bool). */
 var DB = (function () {
   var NAME = 'tcm';
-  var VERSION = 3; // 2: measurements (weights); 3: entry_photos
-  var STORES = ['ingredients', 'recipes', 'recipe_ingredients', 'recipe_variations', 'pantry_items', 'diet_profiles', 'profile_rules', 'diary_entries', 'shopping_list', 'usage_log', 'intake_jobs', 'outbox', 'meta', 'measurements', 'entry_photos'];
+  var VERSION = 4; // 2: measurements (weights); 3: entry_photos; 4: records (patient file)
+  var STORES = ['ingredients', 'recipes', 'recipe_ingredients', 'recipe_variations', 'pantry_items', 'diet_profiles', 'profile_rules', 'diary_entries', 'shopping_list', 'usage_log', 'intake_jobs', 'outbox', 'meta', 'measurements', 'entry_photos', 'records'];
   var dbp = null;
 
   function open() {

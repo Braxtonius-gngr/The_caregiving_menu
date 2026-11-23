@@ -2,7 +2,7 @@
  * the outbox is pushed when online, remote changes newer than our watermark are pulled. */
 var Sync = (function () {
   var client = null;
-  var SYNCED = ['ingredients', 'recipes', 'recipe_ingredients', 'recipe_variations', 'pantry_items', 'diet_profiles', 'profile_rules', 'diary_entries', 'shopping_list', 'usage_log', 'measurements', 'entry_photos'];
+  var SYNCED = ['ingredients', 'recipes', 'recipe_ingredients', 'recipe_variations', 'pantry_items', 'diet_profiles', 'profile_rules', 'diary_entries', 'shopping_list', 'usage_log', 'measurements', 'entry_photos', 'records'];
 
   // Where the cloud lives: details saved on this device (Settings or a setup link) win,
   // then the values baked into config.js. The anon key is public by design; RLS guards data.
@@ -172,10 +172,11 @@ var Sync = (function () {
           res[i + 1].filter(function (e) { return e[sl.data] && !e[sl.path]; }).forEach(function (e) {
             chain = chain.then(function (n) {
               // File names start with the record id, so deleting the record removes every photo it had.
-              var path = hid + '/' + PHOTO_STORES[store] + '/' + e.id + sl.tag + '-' + Date.now().toString(36) + '.jpg';
+              var mime = e.mime || 'image/jpeg', ext = mime === 'application/pdf' ? '.pdf' : '.jpg';
+              var path = hid + '/' + PHOTO_STORES[store] + '/' + e.id + sl.tag + '-' + Date.now().toString(36) + ext;
               var uploaded = false;
               return dataUrlToBlob(e[sl.data]).then(function (blob) {
-                return c.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+                return c.storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: true });
               }).then(function (r) {
                 if (r.error) throw r.error;
                 uploaded = true;
