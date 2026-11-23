@@ -355,6 +355,129 @@ var Logic = (function () {
   function addDays(day, n) { var d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
   function addMonths(day, n) { var d = new Date(day + 'T12:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); }
 
-  return { slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
+  /* ---------- timing review and patterns (plain math on her own data) ---------- */
+  // Minutes after midnight of a local time; times before the day start count as the next day.
+  function minuteOfDay(iso, startHour) { var d = new Date(iso), m = d.getHours() * 60 + d.getMinutes(); return m < (startHour || 0) * 60 ? m + 1440 : m; }
+  function hhmm(min) { min = Math.round(min) % 1440; return pad(Math.floor(min / 60)) + ':' + pad(min % 60); }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function median(xs) { if (!xs.length) return null; var s = xs.slice().sort(function (a, b) { return a - b; }), h = Math.floor(s.length / 2); return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2; }
+  function mean(xs) { return xs.length ? xs.reduce(function (a, b) { return a + b; }, 0) / xs.length : null; }
+  // How a medicine's doses in one slot actually went over `days` (list of care days).
+  function doseTiming(med, doses, slot, days, startHour) {
+    var sched = slotHour(med, slot) * 60, given = [], skipped = 0, unmarked = 0, late = 0;
+    days.forEach(function (day) {
+      if (!medActive(med, day)) return;
+      var d = doseFor(doses, med.id, day, slot);
+      if (!d) { unmarked++; return; }
+      if (d.fields.status !== 'given') { skipped++; return; }
+      var m = minuteOfDay(d.occurred_at, startHour); given.push(m); if (m - sched >= 120) late++;
+    });
+    var typ = median(given);
+    return { scheduled: hhmm(sched), given: given.length, skipped: skipped, unmarked: unmarked, late: late,
+      typical: typ == null ? null : hhmm(typ), offsetMin: typ == null ? null : Math.round(typ - sched),
+      earliest: given.length ? hhmm(Math.min.apply(null, given)) : null, latest: given.length ? hhmm(Math.max.apply(null, given)) : null };
+  }
+  // Timing rules written in a label or the doctor's instructions, with the sentence they came from.
+  var CUES = [
+    ['empty_stomach', 'Empty stomach / before eating', /empty stomach|before (breakfast|a meal|meals|eating)|\d+\s*(to|-)\s*\d+\s*minutes before/i],
+    ['with_food', 'With food', /with (food|meals?|a meal|breakfast|dinner)|after (meals|eating)|take with milk/i],
+    ['bedtime', 'At bedtime / evening', /bedtime|at night|in the evening|before sleep/i],
+    ['morning', 'In the morning', /in the morning|morning dose|early in the day|not later than|avoid (taking )?(it )?(late|in the evening)/i],
+    ['separate', 'Keep apart from other medicines or foods', /separate|apart from|at least \d+\s*hours? (before|after)|(\d+\s*hours? )?(before|after) (taking )?(antacids|iron|calcium|binders?|phosphate)/i],
+    ['same_time', 'Same time every day', /same time (each|every) day/i]
+  ];
+  function labelCues(text) {
+    var out = [], sentences = String(text || '').split(/[.;!?]\s+|\n+/);
+    CUES.forEach(function (c) {
+      var hit = sentences.find(function (s) { return c[2].test(s); });
+      if (hit) out.push({ cue: c[0], label: c[1], sentence: hit.trim().slice(0, 240) });
+    });
+    return out;
+  }
+  // Typical breakfast, lunch and dinner times from meal entries over `days`.
+  function mealTimes(diary, profileId, days, startHour) {
+    var set = {}, b = { breakfast: [], lunch: [], dinner: [] };
+    days.forEach(function (d) { set[d] = true; });
+    diary.forEach(function (e) {
+      if (e.deleted || (e.entry_kind && e.entry_kind !== 'meal') || (e.for_profile_id || null) !== (profileId || null) || !set[careDay(e.eaten_at, startHour)]) return;
+      var m = minuteOfDay(e.eaten_at, startHour), h = m / 60;
+      if (h >= 4 && h < 11) b.breakfast.push(m); else if (h >= 11 && h < 15.5) b.lunch.push(m); else if (h >= 15.5 && h < 22) b.dinner.push(m);
+    });
+    var r = {}; Object.keys(b).forEach(function (k) { r[k] = b[k].length ? { typical: hhmm(median(b[k])), n: b[k].length } : null; });
+    return r;
+  }
+  // Patterns. Each: { key, title, text, n, enough }. `enough` only when both sides have data.
+  function bpAfterEveningDose(measurements, meds, doses, profileId, days, startHour) {
+    var groups = { ontime: [], off: [] }, evening = ['evening', 'bedtime'];
+    days.forEach(function (day, i) {
+      if (i === 0) return;
+      var prev = days[i - 1], bp = measurements.filter(function (m) { return !m.deleted && m.kind === 'blood_pressure' && (m.for_profile_id || null) === (profileId || null) && careDay(m.taken_at, startHour) === day && minuteOfDay(m.taken_at, startHour) < 12 * 60; })
+        .sort(function (a, b) { return a.taken_at < b.taken_at ? -1 : 1; })[0];
+      if (!bp) return;
+      var due = []; meds.forEach(function (m) { if (medActive(m, prev)) medSlots(m).forEach(function (s) { if (evening.indexOf(s) >= 0) due.push([m, s]); }); });
+      if (!due.length) return;
+      var off = due.some(function (x) { var d = doseFor(doses, x[0].id, prev, x[1]); return !d || d.fields.status !== 'given' || minuteOfDay(d.occurred_at, startHour) - slotHour(x[0], x[1]) * 60 >= 120; });
+      groups[off ? 'off' : 'ontime'].push(+bp.value);
+    });
+    var a = mean(groups.ontime), b = mean(groups.off), n = groups.ontime.length + groups.off.length;
+    var enough = groups.ontime.length >= 3 && groups.off.length >= 3;
+    return { key: 'bp_evening', title: 'Morning blood pressure after evening meds', n: n, enough: enough, diff: enough ? Math.round(b - a) : null,
+      text: enough ? 'Top number averaged ' + Math.round(b) + ' on ' + groups.off.length + ' mornings after an evening dose was late, missed or not marked, and ' + Math.round(a) + ' on ' + groups.ontime.length + ' mornings after it was on time.'
+        : 'Needs at least 3 mornings of each kind (after on-time and after late or missed evening doses) with a morning BP. Has ' + groups.ontime.length + ' and ' + groups.off.length + '.' };
+  }
+  function weightVsSodium(measurements, diary, profileId, days, startHour) {
+    var ws = {}; standardWeights(measurements, profileId, startHour).forEach(function (w) { ws[w.day] = w.lb; });
+    var pairs = [];
+    days.forEach(function (day, i) {
+      if (i === 0 || ws[day] == null || ws[days[i - 1]] == null) return;
+      var prev = days[i - 1], es = diary.filter(function (e) { return !e.deleted && (e.for_profile_id || null) === (profileId || null) && careDay(e.eaten_at, startHour) === prev; });
+      if (!es.length) return;
+      var na = es.reduce(function (s, e) { return s + (e.entry_kind === 'output' ? 0 : (e.sodium_mg || 0) * (e.portion_mult || 1)); }, 0);
+      pairs.push({ na: na, inMl: fluidBalance(es).inMl, change: ws[day] - ws[prev] });
+    });
+    var enough = pairs.length >= 7, mid = median(pairs.map(function (p) { return p.na; }));
+    var hi = pairs.filter(function (p) { return p.na > mid; }), lo = pairs.filter(function (p) { return p.na <= mid; });
+    var a = mean(hi.map(function (p) { return p.change; })), b = mean(lo.map(function (p) { return p.change; }));
+    return { key: 'weight_sodium', title: 'Weight the morning after salty days', n: pairs.length, enough: enough && hi.length >= 3 && lo.length >= 3,
+      text: enough && hi.length >= 3 && lo.length >= 3 ? 'After days over ' + Math.round(mid) + ' mg sodium, her morning weight changed ' + fmtLb(a) + ' on average (' + hi.length + ' days); after lower-sodium days, ' + fmtLb(b) + ' (' + lo.length + ' days).'
+        : 'Needs 7 pairs of back-to-back morning weights with the day before logged. Has ' + pairs.length + '.' };
+  }
+  function fmtLb(x) { return (x >= 0 ? '+' : '') + (Math.round(x * 10) / 10) + ' lb'; }
+  function outVsIn(diary, profileId, days, startHour) {
+    var rows = days.map(function (day) { var es = diary.filter(function (e) { return !e.deleted && (e.for_profile_id || null) === (profileId || null) && careDay(e.eaten_at, startHour) === day; }); return fluidBalance(es); })
+      .filter(function (b) { return b.inMl > 0 && b.outMl > 0; });
+    var enough = rows.length >= 5, ratio = enough ? mean(rows.map(function (b) { return b.outMl / b.inMl; })) : null;
+    var lowDays = rows.filter(function (b) { return b.outMl < b.inMl * 0.5; }).length;
+    return { key: 'out_in', title: 'Urine out compared with fluid in', n: rows.length, enough: enough,
+      text: enough ? 'On ' + rows.length + ' days with both logged, output averaged ' + Math.round(ratio * 100) + '% of what went in' + (lowDays ? '; ' + lowDays + ' day' + (lowDays === 1 ? '' : 's') + ' under half.' : '.') : 'Needs 5 days with both drinks and output logged. Has ' + rows.length + '.' };
+  }
+  function byTimeOfDay(measurements, profileId, kind, days, startHour) {
+    var set = {}; days.forEach(function (d) { set[d] = true; });
+    var am = [], pm = [];
+    measurements.forEach(function (m) { if (m.deleted || m.kind !== kind || (m.for_profile_id || null) !== (profileId || null) || !set[careDay(m.taken_at, startHour)]) return; (minuteOfDay(m.taken_at, startHour) < 12 * 60 ? am : pm).push(+m.value); });
+    var enough = am.length >= 3 && pm.length >= 3, label = kind === 'glucose' ? 'Blood sugar' : 'Blood pressure (top number)';
+    return { key: kind + '_tod', title: label + ', morning vs afternoon/evening', n: am.length + pm.length, enough: enough,
+      text: enough ? 'Morning average ' + Math.round(mean(am)) + ' (' + am.length + ' readings); later in the day ' + Math.round(mean(pm)) + ' (' + pm.length + ').' : 'Needs 3 readings in the morning and 3 later in the day. Has ' + am.length + ' and ' + pm.length + '.' };
+  }
+  function rhythmCount(measurements, profileId, days, startHour) {
+    var set = {}; days.forEach(function (d) { set[d] = true; });
+    var rs = measurements.filter(function (m) { return !m.deleted && (m.for_profile_id || null) === (profileId || null) && m.rhythm && set[careDay(m.taken_at, startHour)]; });
+    var odd = rs.filter(function (m) { return m.rhythm === 'afib' || m.rhythm === 'irregular'; });
+    return { key: 'rhythm', title: 'Irregular heartbeat or AFib on the monitor', n: rs.length, enough: rs.length >= 3,
+      text: rs.length ? odd.length + ' of ' + rs.length + ' readings with a rhythm marked showed AFib or an irregular heartbeat.' : 'No readings with a rhythm marked yet.' };
+  }
+  function patterns(data, profileId, days, startHour) {
+    return [
+      bpAfterEveningDose(data.measurements, data.meds, data.doses, profileId, days, startHour),
+      weightVsSodium(data.measurements, data.diary, profileId, days, startHour),
+      outVsIn(data.diary, profileId, days, startHour),
+      byTimeOfDay(data.measurements, profileId, 'blood_pressure', days, startHour),
+      byTimeOfDay(data.measurements, profileId, 'glucose', days, startHour),
+      rhythmCount(data.measurements, profileId, days, startHour)
+    ];
+  }
+
+  return { doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
+    slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();

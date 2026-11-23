@@ -192,7 +192,84 @@ Return only what the schema asks for. Use generic, lowercase, singular ingredien
 Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
 Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
 
-type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas";
+type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance";
+
+/* ---------- current guidance: search trusted sites first, then answer in a fixed shape ---------- */
+// Web search stays on public health sources; the answer step cites them by number.
+const TRUSTED = ["fda.gov", "nih.gov", "medlineplus.gov", "kdigo.org", "kidney.org", "diabetes.org", "diabetesjournals.org", "heart.org", "ahajournals.org", "acc.org", "cdc.gov", "cancer.gov", "ashp.org", "drugs.com", "mayoclinic.org", "clevelandclinic.org"];
+const RESEARCH_SYSTEM = `You research current medical guidance for a family caregiver, using only the search tool's results.
+Prefer official labels (FDA, DailyMed), clinical guidelines (KDIGO, ADA Standards of Care, AHA/ACC) and NIH sources; note each source's year.
+Never search for or mention the patient's name. Describe the person only by age range and conditions.
+Write plain notes of what the sources say, with each claim tied to its source. Say clearly where sources disagree or where nothing was found.`;
+type Source = { url: string; title: string; age: string | null };
+async function research(question: string): Promise<{ notes: string; sources: Source[] }> {
+  // deno-lint-ignore no-explicit-any
+  let messages: any[] = [{ role: "user", content: question }];
+  const sources: Source[] = [];
+  let notes = "";
+  for (let turn = 0; turn < 4; turn++) {
+    const params = {
+      model: MODEL, max_tokens: 16000, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
+      system: RESEARCH_SYSTEM, output_config: { effort: "medium" },
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 6, allowed_domains: TRUSTED }],
+      messages,
+    };
+    // deno-lint-ignore no-explicit-any
+    const res: any = await anthropic.beta.messages.create(params as any);
+    if (res.stop_reason === "refusal") throw new Error("The model declined this request.");
+    for (const b of res.content) {
+      if (b.type === "web_search_tool_result" && Array.isArray(b.content)) {
+        for (const r of b.content) if (r.url && !sources.some((x) => x.url === r.url)) sources.push({ url: r.url, title: r.title ?? r.url, age: r.page_age ?? null });
+      }
+      if (b.type === "text") notes += b.text;
+    }
+    if (res.stop_reason !== "pause_turn") break;
+    messages = [...messages, { role: "assistant", content: res.content }];
+  }
+  return { notes: notes.slice(0, 30000), sources: sources.slice(0, 30) };
+}
+function numbered(sources: Source[]) { return sources.map((s, i) => `[${i + 1}] ${s.title} (${s.url})${s.age ? ", " + s.age : ""}`).join("\n"); }
+
+const draftSchema = {
+  type: "object", additionalProperties: false,
+  required: ["summary", "items", "undecided", "questions_for_pharmacist", "caveat"],
+  properties: {
+    summary: { type: "string", description: "Two or three plain sentences: what the draft changes and why" },
+    items: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["med_ref", "slot", "current_time", "proposed_slot", "proposed_time", "change", "reason", "sources", "confidence", "ask_pharmacist"],
+        properties: {
+          med_ref: { type: "string", description: "The medicine's ref from the input, e.g. m1" },
+          slot: { type: "string", enum: ["morning", "noon", "evening", "bedtime", "prn"] },
+          current_time: { type: "string", description: "HH:MM now scheduled" },
+          proposed_slot: { type: "string", enum: ["morning", "noon", "evening", "bedtime", "prn"] },
+          proposed_time: { type: "string", description: "HH:MM 24-hour; the same as current_time when no change" },
+          change: { type: "boolean" },
+          reason: { type: "string", description: "Why, in plain words, tied to the label, her meals/sleep or her readings" },
+          sources: { type: "array", items: { type: "integer" }, description: "Numbers of the sources used, from the numbered list" },
+          confidence: { type: "string", enum: ["low", "medium", "high"] },
+          ask_pharmacist: { type: "string", description: "The one question to confirm with the pharmacist for this item, or empty" },
+        },
+      },
+    },
+    undecided: strList("Things that need a clinician's judgement (doses, interactions, kidney adjustments) that this draft does not change"),
+    questions_for_pharmacist: strList("3-6 overall questions"),
+    caveat: { type: "string", description: "One sentence: a draft for her pharmacist or doctor to approve" },
+  },
+};
+const guidanceSchema = {
+  type: "object", additionalProperties: false,
+  required: ["answer", "key_points", "sources", "questions_for_care_team", "caveat"],
+  properties: {
+    answer: { type: "string", description: "Plain-language answer, 3-6 sentences, as currently recommended" },
+    key_points: { type: "array", items: { type: "object", additionalProperties: false, required: ["point", "sources"], properties: { point: str, sources: { type: "array", items: { type: "integer" } } } } },
+    sources: { type: "array", items: { type: "integer" }, description: "All source numbers relied on" },
+    questions_for_care_team: strList("2-5 questions to ask her doctors"),
+    caveat: str,
+  },
+};
 
 function imageBlock(dataUrl: string): Anthropic.ImageBlockParam {
   const m = dataUrl.match(/^data:(image\/[a-z+]+);base64,(.*)$/);
@@ -299,6 +376,20 @@ Daily targets: ${JSON.stringify(body.profile?.targets ?? {})}
 Fluid left today (oz): ${body.fluid_left_oz ?? "no limit set"}
 Eaten so far today: ${JSON.stringify(body.today ?? [])}
 On hand: ${(body.pantry ?? []).join(", ")}` }], "low");
+    case "schedule_draft": {
+      // body.context: meds (with refs, slots, times, label timing text), actual timings,
+      // meals, wake/bed times, conditions, kidney labs, patterns. No names.
+      const ctx = JSON.stringify(body.context ?? {}).slice(0, 40000);
+      const found = await research(`Find current guidance on WHEN to take each of these medicines (time of day, with or without food, spacing from other medicines or binders, bedtime vs morning) for an older adult with: ${(body.context?.conditions ?? []).join(", ") || "chronic illness"}. Note anything about kidney disease. Medicines: ${(body.context?.meds ?? []).map((m: { name: string }) => m.name).join(", ")}.`);
+      const out = await ask(draftSchema, [{ type: "text", text: `Draft a medicine TIMING schedule for a family caregiver to take to her pharmacist. Change only times and slots, never doses or which medicines. Fit times to her day (wake, meals, bed) and her real dose times; keep a time when there is no clear reason to move it. Use the research notes and cite the numbered sources. If the research does not support a change, do not make it.\n\nHer data:\n${ctx}\n\nResearch notes:\n${found.notes}\n\nNumbered sources:\n${numbered(found.sources)}` }], "high");
+      return { ...out, source_list: found.sources };
+    }
+    case "guidance": {
+      const q = String(body.question ?? "").slice(0, 600);
+      const found = await research(`${q}\nContext (no names): ${JSON.stringify(body.context ?? {}).slice(0, 4000)}`);
+      const out = await ask(guidanceSchema, [{ type: "text", text: `Answer the caregiver's question from the research notes, as currently recommended, citing the numbered sources. If the sources do not answer it, say so. Do not tell them to change treatment; turn anything treatment-related into questions for her care team.\nQuestion: ${q}\n\nResearch notes:\n${found.notes}\n\nNumbered sources:\n${numbered(found.sources)}` }], "medium");
+      return { ...out, source_list: found.sources };
+    }
     default:
       throw new Error("unknown mode");
   }
