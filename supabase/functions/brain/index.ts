@@ -192,7 +192,7 @@ Return only what the schema asks for. Use generic, lowercase, singular ingredien
 Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
 Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
 
-type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance" | "read_vitals" | "read_photo";
+type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance" | "read_vitals" | "read_photo" | "fill_form";
 
 /* ---------- current guidance: search trusted sites first, then answer in a fixed shape ---------- */
 // Web search stays on public health sources; the answer step cites them by number.
@@ -294,6 +294,17 @@ const photoSchema = {
       properties: { test: str, value: num, value_text: nstr, unit: nstr, low: num, high: num, range_text: nstr, flag: nstr, date: { ...nstr, description: "YYYY-MM-DD collected" } } } },
     appointment: { type: "object", additionalProperties: false, required: ["with_whom", "date", "time", "place", "reason", "notes"],
       properties: { with_whom: nstr, date: { ...nstr, description: "YYYY-MM-DD" }, time: { ...nstr, description: "HH:MM 24h" }, place: nstr, reason: nstr, notes: nstr } },
+  },
+};
+const formSchema = {
+  type: "object", additionalProperties: false,
+  required: ["decision", "retake_reason", "retake_tip", "summary", "values", "uncertain"],
+  properties: {
+    decision: { type: "string", enum: ["use", "retake"] },
+    retake_reason: str, retake_tip: str,
+    summary: { type: "string", description: "One line: what the photo shows and what you filled" },
+    values: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "value"], properties: { id: str, value: str } } },
+    uncertain: strList("Field labels left empty because the photo was not clear there"),
   },
 };
 const PHOTO_RULES = `You read photos for a family caring for an elderly relative. Wrong numbers are worse than no numbers: the family would rather take another photo.
@@ -432,6 +443,24 @@ On hand: ${(body.pantry ?? []).join(", ")}` }], "low");
     }
     case "read_vitals":
       return await ask(vitalsSchema, [imageBlock(body.image), { type: "text", text: "This is a photo of a home health monitor's screen (usually a blood pressure cuff: SYS top, DIA middle, pulse bottom). Read exactly what the screen shows. Do not guess digits you cannot see; set readable=false instead. Report whether an irregular heartbeat or AFib symbol is lit. Ignore stored-memory averages unless they are the only reading shown, and say so in notes." }], "low");
+    case "fill_form": {
+      const images: string[] = (body.images ?? []).filter(Boolean).slice(-3);
+      if (!images.length) throw new Error("No photo sent.");
+      const fields = (body.fields ?? []).slice(0, 50).map((f: Record<string, unknown>) =>
+        `- id=${String(f.id).slice(0, 40)} | ${String(f.label ?? "").slice(0, 120)} | type=${String(f.type ?? "text").slice(0, 20)}` +
+        (Array.isArray(f.options) && f.options.length ? ` | one of: ${f.options.slice(0, 30).map((o) => String(o).slice(0, 40)).join(" / ")}` : "")).join("\n");
+      const text = PHOTO_RULES.split("\n- First decide")[0] + `
+The family is filling in a form called "${String(body.form ?? "").slice(0, 80)}". Fill its fields from the photo(s).
+Fields:
+${fields}
+- Fill only fields the photo clearly answers; leave the rest out. Never guess a digit or a word you cannot read.
+- Formats: date YYYY-MM-DD, datetime-local YYYY-MM-DDTHH:MM, time HH:MM, number = digits only (convert units only if the field label names a unit and the photo uses another, and say so in summary). A field with "one of" must use one of those options exactly.
+- If several photos are given they are tries of the same thing; combine them. If they disagree on a value, leave it out and retake.
+- decision = "retake" if the main thing this form needs is unclear (glare, cut off, blurry), with the reason and one specific tip. Use "use" when everything you report is clear, even if some fields stay empty.
+- If the photo has nothing to do with this form, decision = "use", no values, and say so in summary.
+Today is ${new Date().toISOString().slice(0, 10)}.`;
+      return await ask(formSchema, [...images.map(imageBlock), { type: "text", text }], "medium");
+    }
     case "read_photo": {
       const images: string[] = (body.images ?? [body.image]).filter(Boolean).slice(-3);
       if (!images.length) throw new Error("No photo sent.");

@@ -143,3 +143,76 @@ function saveSnapLabs() {
     .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast(picks.length + ' result(s) saved'); })
     .catch(function (e) { toast('Could not save: ' + e.message); });
 }
+
+/* ---------- Fill from a photo: any form ----------
+ * Every sheet with fields gets a "Fill from a photo" button. It sends the form's own field
+ * list (id, label, type, options) with the photo; the AI fills only what it can read
+ * clearly and asks for another photo otherwise. Filled fields are outlined so they get checked. */
+var FORM_SNAP_SKIP = '[onclick*="snapIt"], #snapOut, [data-nosnap]';
+var _openSheetPlain = openSheet;
+openSheet = function (html) { _openSheetPlain(html); addFormSnap(); };
+
+function formFields() {
+  var body = document.getElementById('sheetBody'), out = [];
+  Array.prototype.forEach.call(body.querySelectorAll('input[id], select[id], textarea[id]'), function (el) {
+    var t = (el.type || el.tagName).toLowerCase();
+    if (/^(hidden|file|checkbox|radio|button|submit)$/.test(t) || el.disabled || el.readOnly || el.offsetParent === null) return;
+    var lab = body.querySelector('label[for="' + el.id + '"]'), text = lab ? lab.textContent : (el.getAttribute('aria-label') || el.placeholder || '');
+    if (!text) { var prev = el.closest('.slot-time'); if (prev) text = prev.textContent; }
+    var f = { id: el.id, label: text.trim().slice(0, 120), type: el.tagName === 'SELECT' ? 'select' : el.tagName === 'TEXTAREA' ? 'long text' : t };
+    if (el.placeholder && lab) f.label += ' (e.g. ' + el.placeholder + ')';
+    if (el.tagName === 'SELECT') f.options = Array.prototype.map.call(el.options, function (o) { return o.textContent.trim(); }).filter(Boolean);
+    out.push(f);
+  });
+  return out;
+}
+function addFormSnap() {
+  var body = document.getElementById('sheetBody');
+  S.formSnap = null;
+  if (!body || body.querySelector(FORM_SNAP_SKIP) || !formFields().length) return;
+  var h2 = body.querySelector('h2');
+  var box = '<div class="form-snap writer-only"><button type="button" class="btn sm ghost" onclick="document.getElementById(\'fsCam\').click()">&#128247; Fill from a photo</button>' +
+    '<button type="button" class="btn sm ghost" onclick="document.getElementById(\'fsLib\').click()" aria-label="Fill from a saved photo">&#128444;</button>' +
+    '<input id="fsCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="formSnapFile(this)"><input id="fsLib" type="file" accept="image/*" class="hidden" onchange="formSnapFile(this)">' +
+    '<div id="fsOut" class="muted" aria-live="polite"></div></div>';
+  if (h2) h2.insertAdjacentHTML('afterend', box); else body.insertAdjacentHTML('afterbegin', box);
+}
+function formSnapFile(input) {
+  var f = input.files[0]; input.value = ''; if (!f) return;
+  if (!Sync.enabled()) return toast('Turn on sync in Settings to read photos');
+  var out = document.getElementById('fsOut'), h2 = document.querySelector('#sheetBody h2');
+  var fs = S.formSnap || (S.formSnap = { images: [], tries: 0 });
+  out.textContent = 'Reading the photo...';
+  downscale(f, 1600).then(function (img) {
+    fs.images.push(img); if (fs.images.length > SNAP_MAX_TRIES) fs.images.shift(); fs.tries++;
+    return Sync.brain('fill_form', { images: fs.images, form: h2 ? h2.textContent : '', fields: formFields() });
+  }).then(function (d) {
+    var o = document.getElementById('fsOut'); if (!o) return;
+    if (d.decision === 'retake') {
+      o.innerHTML = '<div class="card attention"><b>One more photo, please.</b> ' + esc(d.retake_reason || 'Part of it was not clear.') + (d.retake_tip ? '<br>&#128161; ' + esc(d.retake_tip) : '') +
+        '<br><span class="muted">' + (fs.tries >= SNAP_MAX_TRIES ? 'Still unclear after ' + fs.tries + ' photos; you can type it in.' : 'Your earlier photo is kept so they can be combined.') + '</span></div>';
+      return;
+    }
+    var n = formSnapApply(d.values || []);
+    o.innerHTML = '<div class="ok-note">&#128247; ' + esc(d.summary || '') + ' ' + (n ? 'Filled ' + n + ' field' + (n > 1 ? 's' : '') + ' (outlined). Check them before saving.' : 'Nothing on this form could be filled from it.') +
+      (d.uncertain && d.uncertain.length ? ' Left blank (not clear): ' + esc(d.uncertain.join(', ')) + '.' : '') + '</div>';
+  }).catch(function (e) { var o = document.getElementById('fsOut'); if (o) o.textContent = 'Could not read the photo: ' + e.message; });
+}
+function formSnapApply(values) {
+  var n = 0;
+  values.forEach(function (v) {
+    var el = document.getElementById(v.id), val = v.value == null ? '' : String(v.value).trim();
+    if (!el || !val || !document.getElementById('sheetBody').contains(el)) return;
+    if (el.tagName === 'SELECT') {
+      var opt = Array.prototype.find.call(el.options, function (o) { return o.value.toLowerCase() === val.toLowerCase() || o.textContent.trim().toLowerCase() === val.toLowerCase(); });
+      if (!opt) return; el.value = opt.value;
+    } else {
+      if (el.type === 'number' && isNaN(+val)) return;
+      el.value = val; if (el.value !== val && el.type !== 'number') return;
+    }
+    el.classList.add('snap-filled'); n++;
+    // input only: some selects re-draw the whole form on change, which would wipe what was filled.
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  return n;
+}
