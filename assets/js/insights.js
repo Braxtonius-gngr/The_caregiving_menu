@@ -68,7 +68,6 @@ function renderPatterns(arg) {
 }
 function todayInsights(pid) {
   var ps = patternsFor(pid).filter(function (p) { return p.enough; }), drafts = recordsOf(pid, ['plan']).filter(function (r) { return (r.fields || {}).status === 'draft'; });
-  if (!ps.length && !drafts.length && !activeMeds(pid).length) return '';
   return '<div class="card"><div class="row between"><h3>&#128200; Insights</h3><button class="btn sm ghost" onclick="showScreen(\'patterns\',{pid:' + pidArg(pid) + '})">Patterns</button></div>' +
     (drafts.length ? '<div class="note">A medicine schedule draft is waiting for her pharmacist or doctor to approve. <button class="linkish" onclick="showScreen(\'plans\',{pid:' + pidArg(pid) + '})">Open</button></div>' : '') +
     (ps.length ? ps.slice(0, 2).map(function (p) { return '<div class="list-item"><div class="grow"><b>' + esc(p.title) + '</b><div class="muted">' + esc(p.text) + '</div></div></div>'; }).join('') : '<p class="muted">Patterns show here once there are enough days logged.</p>') +
