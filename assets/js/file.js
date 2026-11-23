@@ -15,7 +15,7 @@ var RECORD_KINDS = {
   directive: { label: 'Directive', title: 'Document (e.g. DNR, POLST, living will, power of attorney)', fields: [['kept', 'Where the original is kept', 'text'], ['notes', 'Notes', 'textarea']] },
   contact: { label: 'Care team', title: 'Name', fields: [['role', 'Role (kidney doctor, hospice nurse, pharmacy...)', 'text'], ['phone', 'Phone', 'tel'], ['fax', 'Fax', 'text'], ['address', 'Address', 'text'], ['portal', 'Patient portal link', 'text'], ['notes', 'Notes', 'textarea']] },
   lab: { label: 'Lab result', title: 'Test', date: 'date', fields: [['value', 'Result', 'number'], ['unit', 'Unit', 'text'], ['low', 'Range low (from the report)', 'number'], ['high', 'Range high (from the report)', 'number'], ['range_text', 'Range as printed, if not numbers', 'text'], ['notes', 'Notes', 'textarea']] },
-  visit: { label: 'Visit', title: 'Who (doctor, nurse, hospice...)', date: 'datetime', fields: [['where', 'Where', 'text'], ['why', 'Why', 'text'], ['said', 'What they said', 'textarea'], ['changed', 'What changed', 'textarea'], ['meds_changed', 'Medicines started, stopped or changed', 'textarea'], ['tests', 'Tests ordered', 'textarea'], ['next_appt', 'Next appointment', 'datetime'], ['questions', 'Questions for next time', 'textarea']] },
+  visit: { label: 'Visit', title: 'Who (doctor, nurse, hospice...)', date: 'datetime', fields: [['where', 'Where', 'text'], ['why', 'Why', 'text'], ['said', 'What they said', 'textarea'], ['changed', 'What changed', 'textarea'], ['meds_changed', 'Medicines started, stopped or changed', 'textarea'], ['tests', 'Tests ordered', 'textarea'], ['next_appt', 'Next appointment', 'datetime'], ['questions', 'Questions for next time', 'textarea'], ['transcript', 'Full notes from the scribe', 'textarea']] },
   document: { label: 'Document', title: 'Title', date: 'date', fields: [['doc_type', 'Kind', 'select:Discharge papers|Report|Insurance card|ID|Directive|Bill|Other'], ['notes', 'Notes', 'textarea']] },
   update: { label: 'Update', title: 'Headline (optional)', date: 'datetime', fields: [['text', 'What happened', 'textarea']] },
   event: { label: 'Important day', title: 'What (lab draw, refill, birthday...)', date: 'date', fields: [['repeat', 'Repeats', 'select:No|Every year|Every month'], ['notes', 'Notes', 'textarea']] },
@@ -123,7 +123,7 @@ function fileVisits(pid) {
   var upcoming = rs.filter(function (r) { return r.occurred_at > now; }).sort(function (a, b) { return a.occurred_at < b.occurred_at ? -1 : 1; });
   var past = rs.filter(function (r) { return !(r.occurred_at > now); }).sort(byDateDesc);
   var card = function (r) { var fl = r.fields || {}; return recordCard(r, esc(fmtWhen(r.occurred_at, true)) + (fl.where ? ' · ' + esc(fl.where) : ''), esc([fl.why, fl.changed ? 'Changed: ' + fl.changed : ''].filter(Boolean).join(' · ').slice(0, 160))); };
-  return '<div class="row between"><h2>Visits</h2>' + addBtn('visit', pid) + '</div>' +
+  return '<div class="row between"><h2>Visits</h2><span>' + addBtn('visit', pid) + ' <button class="btn sm ghost writer-only" onclick="scribeIt(' + (pid ? '\'' + pid + '\'' : 'null') + ')">&#127897; Scribe</button></span></div>' +
     (upcoming.length ? '<h3>Coming up</h3>' + upcoming.map(card).join('') : '') +
     '<h3>Past visits</h3>' + (past.length ? past.map(card).join('') : '<p class="muted">After each visit, note what they said and what changed, and photograph the After Visit Summary.</p>');
 }
@@ -172,6 +172,7 @@ function editRecord(id, kind, pid) {
     ? '<label for="rTitle">' + K.title + '</label><input id="rTitle" list="labList" value="' + esc(r ? r.title : '') + '" oninput="fillLabUnit(this.value)"><datalist id="labList">' + LAB_TESTS.map(function (t) { return '<option value="' + esc(t) + '">'; }).join('') + '</datalist>'
     : '<label for="rTitle">' + K.title + '</label><input id="rTitle" value="' + esc(r ? r.title : '') + '">';
   if (!r && (kind === 'medication' || kind === 'lab' || kind === 'visit')) titleField = '<div class="btn-row writer-only"><button type="button" class="btn sm ghost" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ',\'' + kind + '\')">&#128247; From a photo</button></div>' + titleField;
+  if (!r && kind === 'visit') titleField = titleField.replace('</button></div>', '</button><button type="button" class="btn sm ghost" onclick="scribeIt(' + (pid ? '\'' + pid + '\'' : 'null') + ')">&#127897; Scribe it</button></div>');
   if (kind === 'medication') titleField += '<div class="btn-row writer-only"><button type="button" class="btn sm ghost" onclick="fillFromLabel()">Fill from the FDA label</button></div><div class="muted" id="labelHint" aria-live="polite"></div>';
   openSheet('<h2 style="margin-top:0">' + (r ? '' : 'Add ') + esc(K.label) + '</h2>' + titleField +
     (dateType ? '<label for="rWhen">' + (kind === 'lab' ? 'Date of the test' : 'When') + '</label><input id="rWhen" type="' + (dateType === 'date' ? 'date' : 'datetime-local') + '" value="' + dateVal + '">' : '') +
@@ -211,6 +212,7 @@ function saveRecord(id, kind, pid) {
     : DB.put('records', { kind: kind, for_profile_id: pid, title: title, occurred_at: K.date ? when : null, fields: fields });
   write.then(function (saved) {
     S.phoneCheck = null; toast(saved ? 'Saved' : 'This was deleted elsewhere');
+    if (saved && kind === 'visit' && S.scribe && S.scribe.pendingClear) { scribeClear(); S.scribe = null; }
     return loadAll().then(function () {
       if (!id && saved && Sync.enabled() && (kind === 'visit' || kind === 'document' || kind === 'lab')) { editRecord(saved.id); toast('Saved. Attach photos or PDFs below.'); }
       else closeSheet();

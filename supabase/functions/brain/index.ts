@@ -192,7 +192,7 @@ Return only what the schema asks for. Use generic, lowercase, singular ingredien
 Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
 Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
 
-type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance" | "read_vitals" | "read_photo" | "fill_form";
+type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance" | "read_vitals" | "read_photo" | "fill_form" | "scribe";
 
 /* ---------- current guidance: search trusted sites first, then answer in a fixed shape ---------- */
 // Web search stays on public health sources; the answer step cites them by number.
@@ -305,6 +305,28 @@ const formSchema = {
     summary: { type: "string", description: "One line: what the photo shows and what you filled" },
     values: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "value"], properties: { id: str, value: str } } },
     uncertain: strList("Field labels left empty because the photo was not clear there"),
+  },
+};
+const scribeSchema = {
+  type: "object", additionalProperties: false,
+  required: ["summary", "visit", "to_do", "double_check"],
+  properties: {
+    summary: { type: "string", description: "One or two plain sentences: the most important things from the visit" },
+    visit: { type: "object", additionalProperties: false,
+      required: ["who", "when", "where", "why", "said", "changed", "meds_changed", "tests", "next_appt", "questions"],
+      properties: {
+        who: { ...nstr, description: "Role and name if said, e.g. Home health nurse (Pat)" },
+        when: { ...nstr, description: "Visit start, YYYY-MM-DDTHH:MM local, if known" },
+        where: nstr, why: nstr,
+        said: { ...nstr, description: "Findings and readings they reported, short lines, numbers exactly as said" },
+        changed: { ...nstr, description: "Changes to care, diet, fluids, activity, equipment, with any warning signs to call about" },
+        meds_changed: { ...nstr, description: "Each medicine started, stopped or changed: name, dose, when. Null if none" },
+        tests: { ...nstr, description: "Tests or referrals ordered, with dates" },
+        next_appt: { ...nstr, description: "Next visit, YYYY-MM-DDTHH:MM local, only if a date was said" },
+        questions: { ...nstr, description: "Questions the family raised that were not answered, or worth asking next time" },
+      } },
+    to_do: strList("Concrete follow-ups for the family: calls, refills, appointments to book, things to watch"),
+    double_check: strList("Anything unclear, contradictory or possibly misheard (odd drug names, doses, numbers), phrased so the family can confirm it"),
   },
 };
 const PHOTO_RULES = `You read photos for a family caring for an elderly relative. Wrong numbers are worse than no numbers: the family would rather take another photo.
@@ -460,6 +482,25 @@ ${fields}
 - If the photo has nothing to do with this form, decision = "use", no values, and say so in summary.
 Today is ${new Date().toISOString().slice(0, 10)}.`;
       return await ask(formSchema, [...images.map(imageBlock), { type: "text", text }], "medium");
+    }
+    case "scribe": {
+      // body.text: the family's notes or a speech-to-text transcript of the visit (may be messy).
+      const text = String(body.text ?? "").slice(-80000);
+      if (text.trim().length < 15) throw new Error("No notes sent.");
+      const meds = (body.meds ?? []).slice(0, 60).map((m: unknown) => String(m).slice(0, 80)).join(", ");
+      return await ask(scribeSchema, [{ type: "text", text: `You are a careful scribe for a family caring for an elderly relative at home. Below are notes about a visit from a nurse, doctor, therapist or hospice worker: either typed by the family or an automatic speech-to-text transcript of the whole visit, with no speaker labels and possible mishearings.
+Pull out only what matters for her care, in short plain lines. Leave out small talk.
+- Use only what the notes say. Never add advice, diagnoses or doses that were not said.
+- Keep numbers (blood pressure, weight, doses, dates) exactly as said. If a number or drug name may have been misheard, still record it as heard and add it to double_check.
+- Speech-to-text often garbles drug names; compare with her current medicines and say in double_check if a heard name probably means one of them.
+- Medicine changes go in meds_changed, never only in changed.
+- Relative dates ("next Tuesday") become real dates using today; if unsure, keep the words and add to double_check.
+- Fields with nothing in the notes are null.
+Today is ${String(body.today ?? new Date().toISOString().slice(0, 10)).slice(0, 10)}. Notes started ${String(body.started ?? "").slice(0, 25)} (UTC).
+Her current medicines: ${meds || "none listed"}.
+
+Notes:
+${text}` }], "medium");
     }
     case "read_photo": {
       const images: string[] = (body.images ?? [body.image]).filter(Boolean).slice(-3);
