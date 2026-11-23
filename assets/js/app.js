@@ -3,9 +3,11 @@ function loadAll() {
   return Promise.all([
     DB.all('ingredients'), DB.all('recipes'), DB.all('recipe_ingredients'), DB.all('recipe_variations'),
     DB.all('pantry_items'), DB.all('diet_profiles'), DB.all('profile_rules'), DB.all('diary_entries'),
-    DB.all('shopping_list'), DB.all('usage_log'), DB.meta('aisle_order')
+    DB.all('shopping_list'), DB.all('usage_log'), DB.meta('aisle_order'), DB.meta('my_role'), DB.meta('family_members')
   ]).then(function (r) {
     State.aisleOrder = r[10] || [];
+    applyRole(r[11]);
+    State.memberNames = r[12] || {}; State.memberCount = Object.keys(State.memberNames).length;
     State.ingredients = r[0]; State.recipes = r[1]; State.lines = r[2]; State.variations = r[3];
     State.pantry = r[4].filter(function (p) { return p.qty > 0; }); State.profiles = r[5]; State.rules = r[6];
     State.diary = r[7]; State.shopping = r[8]; State.usage = r[9];
@@ -118,10 +120,116 @@ function toggleShop(id) {
 function renderAuthBox() {
   var box = document.getElementById('authBox'); if (!box) return;
   Sync.session().then(function (s) {
-    if (s) Sync.inviteCode().then(function (c) { var el = document.getElementById('inviteCode'); if (el) el.textContent = c; }).catch(function () {});
-    box.innerHTML = s ? '<p>Signed in as <b>' + esc(s.user.email) + '</b></p><p id="syncError" class="note' + (lastSyncError ? '' : ' hidden') + '">' + (lastSyncError ? 'Last sync failed: ' + esc(lastSyncError) : '') + '</p><p class="muted">Household invite code: <b id="inviteCode">...</b>. Family members sign in, then enter it below to share this kitchen.</p><div class="row"><input id="joinCode" placeholder="Join with a code" class="grow"><button class="btn sm" onclick="Sync.joinHousehold(document.getElementById(\'joinCode\').value.trim()).then(syncNow).then(function(){toast(\'Joined\');renderSettingsAgain()}).catch(function(e){toast(e.message)})">Join</button></div><div class="btn-row"><button class="btn sm" onclick="syncNow()">Sync now</button><button class="btn sm ghost" onclick="copySetupLink()">Copy setup link for another device</button><button class="btn sm ghost" onclick="Sync.signOut().then(function(){renderSettingsAgain()})">Sign out</button></div>'
+    box.innerHTML = s ? '<p>Signed in as <b>' + esc(s.user.email) + '</b></p><p id="syncError" class="note' + (lastSyncError ? '' : ' hidden') + '">' + (lastSyncError ? 'Last sync failed: ' + esc(lastSyncError) : '') + '</p>' +
+        '<div class="btn-row"><button class="btn sm" onclick="syncNow()">Sync now</button><button class="btn sm ghost" onclick="Sync.signOut().then(function(){renderSettingsAgain()})">Sign out</button></div>' +
+        '<details><summary class="muted">Have an invite code instead of a link?</summary><div class="row"><input id="joinCode" placeholder="Invite code" class="grow" autocomplete="off"><button class="btn sm" onclick="joinWithCode()">Join</button></div></details>'
       : '<label>Email for a sign-in link</label><input id="authEmail" type="email"><div class="btn-row"><button class="btn sm" onclick="Sync.signIn(document.getElementById(\'authEmail\').value).then(function(){toast(\'Check your email\')}).catch(function(e){toast(e.message)})">Send link</button></div>';
+    var fam = document.getElementById('familyBox');
+    if (fam) { if (s) renderFamilyBox(); else fam.innerHTML = '<p class="muted">Sign in above to see and invite your family.</p>'; }
   });
+}
+function joinWithCode() {
+  var code = document.getElementById('joinCode').value.trim();
+  if (!code) return toast('Paste the code first');
+  Sync.joinHousehold(code).then(syncNow).then(function () { toast('Joined'); renderSettingsAgain(); askMyName(); }).catch(function (e) { toast(e.message); });
+}
+
+/* ---------- family: roles, invite links, names ---------- */
+var ROLE_INFO = {
+  owner: ['Owner', 'manage the family, invites and settings'],
+  caregiver: ['Caregiver', 'can log and edit entries'],
+  viewer: ['Viewer', 'can read everything but not change anything']
+};
+function memberLabel(m) { return m.display_name || (m.email ? m.email.split('@')[0] : 'Someone'); }
+function renderFamilyBox() {
+  var box = document.getElementById('familyBox'); if (!box) return;
+  Promise.all([Sync.members(), Sync.householdName()]).then(function (r) {
+    var people = r[0] || [], name = r[1], me = people.find(function (m) { return m.is_me; }) || {}, owner = me.role === 'owner';
+    var mine = ROLE_INFO[me.role] || ['member', ''];
+    cacheMembers(people);
+    box.innerHTML = '<div class="row between"><h3 style="margin:0">' + esc(name) + '</h3>' + (owner ? '<button class="btn sm ghost" onclick="renameFamily()">Rename</button>' : '') + '</div>' +
+      '<p class="muted">You are ' + (me.role === 'owner' ? 'an' : 'a') + ' <b>' + esc(mine[0].toLowerCase()) + '</b>: you ' + esc(mine[1]) + '.</p>' +
+      '<label for="myName">Your name (shown on what you log)</label><div class="row"><input id="myName" class="grow" maxlength="40" value="' + esc(me.display_name || '') + '" placeholder="e.g. Mom, Brax"><button class="btn sm" onclick="saveMyName()">Save</button></div>' +
+      '<h3>People (' + people.length + ')</h3>' + people.map(function (m) {
+        var info = ROLE_INFO[m.role] || [m.role, ''], label = memberLabel(m);
+        var controls = owner && !m.is_me
+          ? '<select class="role-select" aria-label="Role for ' + esc(label) + '" onchange="changeRole(\'' + m.user_id + '\', this.value)">' + ['owner', 'caregiver', 'viewer'].map(function (k) { return '<option value="' + k + '"' + (k === m.role ? ' selected' : '') + '>' + ROLE_INFO[k][0] + '</option>'; }).join('') + '</select>' +
+            '<button class="icon-btn" aria-label="Remove ' + esc(label) + '" onclick="removePerson(\'' + m.user_id + '\')">&times;</button>'
+          : '<span class="badge' + (m.role === 'owner' ? ' ok' : m.role === 'caregiver' ? ' warn' : '') + '">' + esc(info[0]) + '</span>';
+        return '<div class="list-item"><div class="grow"><b>' + esc(label) + '</b>' + (m.is_me ? ' <span class="muted">(you)</span>' : '') + '<div class="muted">' + esc(m.email || '') + '</div></div>' + controls + '</div>';
+      }).join('') +
+      (owner
+        ? '<h3>Invite family</h3><p class="muted">A link works for whoever opens it and signs in, so send it only to the person you mean. You can change anyone\'s role later.</p>' +
+          '<div class="btn-row"><button class="btn sm" onclick="shareInvite(\'caregiver\')">Invite a caregiver (can log)</button><button class="btn sm ghost" onclick="shareInvite(\'viewer\')">Invite a viewer (read only)</button></div>' +
+          '<p><button class="linkish" onclick="resetInvites()">Cancel all invite links sent so far</button></p>'
+        : '<p class="muted">Ask an owner to invite others.</p>' + (me.role ? '<p><button class="linkish" onclick="leaveFamily()">Leave this family</button></p>' : ''));
+  }).catch(function (e) {
+    var msg = (e && e.message) || String(e);
+    box.innerHTML = '<p class="muted">Couldn\'t load the family: ' + esc(msg) + '</p>' +
+      (/function|schema cache|does not exist/i.test(msg) ? '<p class="muted">The cloud needs the family update (database migration 0010) first.</p>' : '');
+  });
+}
+function cacheMembers(people) {
+  var names = {};
+  (people || []).forEach(function (m) { names[m.user_id] = memberLabel(m); });
+  State.memberNames = names; State.memberCount = (people || []).length;
+  return DB.meta('family_members', names);
+}
+function saveMyName() {
+  var v = document.getElementById('myName').value.trim();
+  if (!v) return toast('Type a name first');
+  Sync.setMyName(v).then(function () { toast('Saved'); renderFamilyBox(); }).catch(function (e) { toast(e.message); });
+}
+function askMyName() {
+  openSheet('<h2 style="margin-top:0">Welcome to the family</h2><p>What should everyone call you? It shows next to the things you log.</p>' +
+    '<input id="welcomeName" maxlength="40" placeholder="e.g. Mom, Brax" autocomplete="name"><div class="btn-row"><button class="btn" onclick="saveWelcomeName()">Save</button><button class="btn ghost" onclick="closeSheet()">Later</button></div>');
+  setTimeout(function () { var el = document.getElementById('welcomeName'); if (el) el.focus(); }, 50);
+}
+function saveWelcomeName() {
+  var v = document.getElementById('welcomeName').value.trim();
+  if (!v) return toast('Type a name first');
+  Sync.setMyName(v).then(function () { closeSheet(); toast('Thanks, ' + v); return Sync.members().then(cacheMembers); }).then(refresh).catch(function (e) { toast(e.message); });
+}
+function renameFamily() {
+  var v = prompt('Name this family (everyone sees it):', '');
+  if (v == null || !v.trim()) return;
+  Sync.setHouseholdName(v).then(function () { toast('Renamed'); renderFamilyBox(); }).catch(function (e) { toast(e.message); });
+}
+function changeRole(uid, role) {
+  var msg = role === 'owner' ? 'Make them an owner? Owners can invite and remove people and change roles.'
+    : role === 'viewer' ? 'Make them a viewer? They can read everything but not add or change anything.'
+    : 'Make them a caregiver? They can log and edit entries.';
+  if (!confirm(msg)) { renderFamilyBox(); return; }
+  Sync.setMemberRole(uid, role).then(function () { toast('Role changed'); renderFamilyBox(); }).catch(function (e) { toast(e.message); renderFamilyBox(); });
+}
+function removePerson(uid) {
+  var label = (State.memberNames || {})[uid] || 'this person';
+  if (!confirm('Remove ' + label + ' from the family? They lose access straight away. Their past entries stay.')) return;
+  Sync.removeMember(uid).then(function () { toast('Removed'); renderFamilyBox(); }).catch(function (e) { toast(e.message); });
+}
+function leaveFamily() {
+  if (!confirm('Leave this family? Its diary stops syncing to this device. An owner can invite you back.')) return;
+  Sync.session().then(function (s) { return Sync.removeMember(s.user.id); }).then(function () {
+    return Promise.all([DB.meta('household_id', null), DB.meta('last_pull', null), DB.meta('my_role', null), DB.meta('family_members', null)]);
+  }).then(function () { toast('You left the family'); location.reload(); }).catch(function (e) { toast(e.message); });
+}
+function shareInvite(role) {
+  Promise.all([Sync.inviteLinks(), Sync.householdName()]).then(function (r) {
+    var code = r[0][role]; if (!code) throw new Error('No link for that role');
+    var text = 'Join "' + r[1] + '" on The Caregiving Menu' + (role === 'viewer' ? ' (view only)' : '') + '. Open this link on your phone, then sign in with your email:\n' + Sync.setupLink(code);
+    if (navigator.share) return navigator.share({ title: 'Join ' + r[1], text: text }).catch(function () {});
+    copyText(text, 'Invite copied. Paste it into a text to the person you mean.');
+  }).catch(function (e) { toast(e.message); });
+}
+function resetInvites() {
+  if (!confirm('Cancel every invite link sent so far? People already in the family stay. Anyone who hasn\'t joined yet needs a new link.')) return;
+  Sync.resetInviteLinks().then(function () { toast('Old links cancelled. New ones are ready.'); }).catch(function (e) { toast(e.message); });
+}
+// Viewers get a read-only app on their device; the server enforces the same rule.
+function applyRole(role) {
+  State.role = role || null;
+  DB.setReadOnly(role === 'viewer');
+  document.body.classList.toggle('role-viewer', role === 'viewer');
 }
 function renderSettingsAgain() { showScreen('settings'); }
 // Background sync: once per page, whenever the cloud is (or becomes) configured.
@@ -136,10 +244,18 @@ function startAutoSync() {
 var lastSyncError = null;
 function syncNow() {
   var dot = document.getElementById('syncDot');
-  return Sync.joinPendingInvite().then(function (joined) { if (joined) toast('Joined your household'); }, function (e) { toast('Could not join: ' + e.message); })
+  var justJoined = false;
+  return Sync.joinPendingInvite().then(function (joined) { if (joined) { justJoined = true; toast('You joined the family'); } }, function (e) { toast('Could not join: ' + e.message); })
     .then(function () { return Sync.run(); }).then(function (r) {
     dot.classList.toggle('on', r.signedIn); dot.title = r.signedIn ? 'Synced' : 'Local only';
-    if (r.pulled || r.photos) return loadAll().then(refresh);
+    if (!r.signedIn) return;
+    var roleBefore = State.role;
+    return Sync.members().then(cacheMembers, function () {}).then(function () {
+      if (justJoined) askMyName();
+      return DB.meta('my_role').then(function (role) {
+        if (r.pulled || r.photos || role !== roleBefore || justJoined) return loadAll().then(refresh);
+      });
+    });
   }).then(function () { lastSyncError = null; }, function (e) {
     // Keep the error visible: a sync that keeps failing must never look like it worked.
     lastSyncError = (e && e.message) || String(e);

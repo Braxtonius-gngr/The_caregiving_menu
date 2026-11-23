@@ -60,9 +60,20 @@ var DB = (function () {
     });
   }
 
+  // Viewers in a shared family can read but not change anything. Writes made by sync
+  // itself (silent) still go through, so the shared file keeps arriving.
+  var readOnly = false, LOCAL_ONLY = ['meta', 'outbox', 'intake_jobs'];
+  function setReadOnly(on) { readOnly = !!on; }
+  function blocked(store, opts) {
+    if (!readOnly || (opts && opts.silent) || LOCAL_ONLY.indexOf(store) >= 0) return null;
+    if (typeof toast === 'function') toast('View only: ask an owner to make you a caregiver to add or change things.');
+    return Promise.reject(new Error('View only'));
+  }
+
   // put() stamps updated_at and queues the change for cloud sync.
   function put(store, rec, opts) {
     opts = opts || {};
+    var no = blocked(store, opts); if (no) return no;
     if (!rec.id) rec.id = uuid();
     rec.updated_at = new Date().toISOString();
     if (rec.deleted == null) rec.deleted = false;
@@ -85,6 +96,7 @@ var DB = (function () {
   // the network can never overwrite a change (such as a deletion) made in the meantime.
   function update(store, id, fn, opts) {
     opts = opts || {};
+    var no = blocked(store, opts); if (no) return no;
     return open().then(function (d) {
       return new Promise(function (resolve, reject) {
         var t = d.transaction([store, 'outbox'], 'readwrite');
@@ -156,5 +168,5 @@ var DB = (function () {
   function clearOutbox(ids) { return tx('outbox', 'readwrite', function (os) { ids.forEach(function (id) { os.delete(id); }); }); }
   function wipe() { return open().then(function (d) { d.close(); dbp = null; return new Promise(function (res) { var r = indexedDB.deleteDatabase(NAME); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; }); }); }
 
-  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, metaUpdate: metaUpdate, update: update, reconcile: reconcile, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe };
+  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, metaUpdate: metaUpdate, update: update, reconcile: reconcile, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe, setReadOnly: setReadOnly };
 })();

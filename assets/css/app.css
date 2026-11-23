@@ -142,3 +142,7 @@ body.simple .badge { font-size: 15px; padding: 4px 10px; }
 .simple-input { font-size: 20px; padding: 14px; }
 .simple-footer { text-align: center; margin-top: 32px; }
 body.simple .photo-thumb { width: 64px; height: 64px; }
+
+/* Viewers in a shared family: hide ways to add or change things (the server refuses them anyway). */
+.role-viewer .writer-only, .role-viewer .tab-scan, .role-viewer .plate-actions { display: none !important; }
+.list-item .role-select { width: auto; flex: 0 0 auto; margin: 0 0 0 8px; min-width: 7.5em; }

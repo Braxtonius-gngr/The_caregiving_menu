@@ -655,6 +655,13 @@ function savePantryForm(id) {
 }
 
 /* ---------- Diary ---------- */
+// "logged by Mom" once more than one person shares the diary; "edited by" when someone else changed it.
+function loggedBy(e) {
+  var names = State.memberNames || {};
+  if ((State.memberCount || 0) < 2 || !e.user_id) return '';
+  var by = names[e.user_id] || 'someone who left', ed = e.edited_by && e.edited_by !== e.user_id ? names[e.edited_by] : null;
+  return ' · by ' + esc(by) + (ed ? ' (edited by ' + esc(ed) + ')' : '');
+}
 function renderDiary() {
   var day = State.day || todayISO();
   var entries = State.diary.filter(function (e) { return localDay(e.eaten_at) === day && (!State.activeProfile || e.for_profile_id === State.activeProfile); }).sort(function (a, b) { return a.eaten_at < b.eaten_at ? -1 : 1; });
@@ -663,11 +670,12 @@ function renderDiary() {
   return '<div class="row between"><button class="btn ghost sm" onclick="State.day=\'' + shift(-1) + '\';refresh()">&larr;</button><b>' + (day === todayISO() ? 'Today' : day) + '</b><button class="btn ghost sm" onclick="State.day=\'' + shift(1) + '\';refresh()">&rarr;</button></div>' +
     profileSwitcher() + dvTiles(Logic.dayTotals(entries), prof && prof.daily_targets) +
     fluidsLine(entries) +
-    '<div class="btn-row"><button class="btn" onclick="logFood()">+ Log a meal</button><button class="btn ghost" onclick="logDrink()">&#129380; Log a drink</button></div>' + afterInputs() +
+    (State.role === 'viewer' ? '<p class="note">View only. You can see everything the family logs; ask an owner if you need to add entries.</p>' : '') +
+    '<div class="btn-row writer-only"><button class="btn" onclick="logFood()">+ Log a meal</button><button class="btn ghost" onclick="logDrink()">&#129380; Log a drink</button></div>' + afterInputs() +
     (entries.length ? entries.map(function (e) {
       var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
       var who = State.profiles.find(function (p) { return p.id === e.for_profile_id; });
-      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===this){event.preventDefault();this.click();}" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + (e.entry_kind === 'drink' ? '&#129380; ' : '') + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + plateNote(e) + (!(e.kcal > 0) && e.estimate_source !== 'manual' && e.estimate_source !== 'water' && Sync.enabled() ? ' <button class="btn sm" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + plateButtons(e) + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
+      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===this){event.preventDefault();this.click();}" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + (e.entry_kind === 'drink' ? '&#129380; ' : '') + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + loggedBy(e) + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + plateNote(e) + (!(e.kcal > 0) && e.estimate_source !== 'manual' && e.estimate_source !== 'water' && Sync.enabled() ? ' <button class="btn sm writer-only" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + plateButtons(e) + '</div></div><button class="icon-btn writer-only" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
     }).join('') : '<div class="empty">Nothing logged.</div>') +
     (prof ? '<h2>Notes for ' + esc(prof.person_name) + '\'s next appointment</h2><div class="card"><textarea id="profNotes" rows="4" placeholder="Questions to ask, patterns you noticed...">' + esc(prof.notes || '') + '</textarea><div class="btn-row"><button class="btn sm" onclick="saveProfileNotes(\'' + prof.id + '\')">Save notes</button><button class="btn sm ghost" onclick="weeklyDigest(\'' + prof.id + '\')">Weekly digest</button></div></div>' : '');
 }
@@ -1092,9 +1100,9 @@ function plateNote(e) {
 }
 function plateButtons(e) {
   if (e.entry_kind === 'drink' || e.plate_status) return '';
-  return ((e.photo_data || e.photo_path) ? ' <button class="btn sm ghost" onclick="event.stopPropagation();pickAfterPhoto(\'' + e.id + '\')">&#128247; After photo</button>' : '') +
-    ' <button class="btn sm ghost" onclick="event.stopPropagation();editDiaryEntry(\'' + e.id + '\', true)">&#9998; Ate part</button>' +
-    ' <button class="btn sm ghost" onclick="event.stopPropagation();markPlateFinished(\'' + e.id + '\')">&#10003; Finished plate</button>';
+  return ((e.photo_data || e.photo_path) ? ' <button class="btn sm ghost writer-only" onclick="event.stopPropagation();pickAfterPhoto(\'' + e.id + '\')">&#128247; After photo</button>' : '') +
+    ' <button class="btn sm ghost writer-only" onclick="event.stopPropagation();editDiaryEntry(\'' + e.id + '\', true)">&#9998; Ate part</button>' +
+    ' <button class="btn sm ghost writer-only" onclick="event.stopPropagation();markPlateFinished(\'' + e.id + '\')">&#10003; Finished plate</button>';
 }
 function afterSection(e) {
   if (e.entry_kind === 'drink') return '';
@@ -1314,6 +1322,7 @@ function renderSettings() {
       '<label>Project URL</label><input id="cfgUrl" placeholder="https://abcd1234.supabase.co" autocomplete="off">' +
       '<label>Anon (public) key</label><input id="cfgKey" placeholder="eyJ..." autocomplete="off">' +
       '<div class="btn-row"><button class="btn sm" onclick="connectCloud()">Connect</button></div>') + '</div>' +
+    (cloud ? '<h2>Family</h2><div class="card" id="familyBox">Loading...</div>' : '') +
     '<h2>Diet profiles</h2>' + State.profiles.map(function (p) {
       var rules = S.rulesByProfile[p.id] || [];
       return '<div class="card"><div class="row between"><h3>' + esc(p.person_name) + '</h3><button class="btn sm ghost" onclick="editProfile(\'' + p.id + '\')">Edit</button></div><div class="muted">' + (Object.keys(p.daily_targets || {}).length ? Object.keys(p.daily_targets).map(function (k) { return esc(k.replace('_', ' ') + ' ≤ ' + p.daily_targets[k]); }).join(', ') : 'no daily targets') + '</div>' +

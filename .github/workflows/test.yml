@@ -34,3 +34,14 @@ jobs:
           mkdir -p /tmp/fn && cp -r supabase/functions /tmp/fn/
           echo '{"nodeModulesDir":"auto"}' > /tmp/fn/deno.json
           cd /tmp/fn && deno check functions/brain/index.ts functions/lookup/index.ts
+
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Every migration, then the family roles and privacy rules, in an in-memory Postgres.
+      - run: cd tests && npm ci --omit=optional --ignore-scripts && npm run sql

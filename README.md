@@ -48,7 +48,7 @@ Try it without any setup: **Settings → Load sample data**.
    It creates the tables, privacy rules and photo bucket, deploys the two cloud functions, and stores your Anthropic key (and optional free USDA key) as project secrets. Add `--dry-run` to see the steps first.
 3. In the Supabase dashboard, under Authentication > URL Configuration, set the Site URL to where the app lives and add it to the Redirect URLs.
 4. Open the app, go to **Settings > Cloud sync**, paste the project URL and the anon (public) key, then sign in with the emailed link.
-5. Still in Settings, tap **Copy setup link for another device** and send it to family. Opening it on their phone connects the app, and once they sign in it joins your household. No codes to type.
+5. Still in Settings, under **Family**, tap **Invite a caregiver** (can log) or **Invite a viewer** (read only) and send the link to that person. Opening it on their phone connects the app; once they sign in they join your family and are asked for their name. Owners can change roles, remove people, add a second owner and cancel old links from the same screen.
 
 The anon key is meant to be public; row-level security keeps each household's data private. The AI function uses Claude Opus 5.5 (`CLAUDE_MODEL` overrides it) with Anthropic's server-side refusal fallback, and only signed-in household members can call it.
 

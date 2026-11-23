@@ -26,3 +26,9 @@ API_URL=https://<ref>.supabase.co ANON_KEY=... SERVICE_ROLE_KEY=... npm run live
 
 `functions.test.js` replaces Claude, Open Food Facts and USDA with fakes (see `harness.ts`),
 so it never spends API credit. It checks the exact request each mode would send to Claude.
+
+## Database rules (no Docker)
+
+`npm run sql` applies every migration to an in-memory Postgres (PGlite) with Supabase's
+auth and storage stubbed, then checks family roles, invite links, who-logged-it, the edit
+history and photo privacy. It runs in CI on every pull request.
