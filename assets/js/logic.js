@@ -200,5 +200,107 @@ var Logic = (function () {
     return m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : null;
   }
 
-  return { DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
+
+  /* ---------- fluid balance and weight (Phase 1) ---------- */
+  // Fluid amounts are stored in mL. Grams count as mL: true for water, broth and most drinks.
+  var ML_PER = { oz: 29.5735, ml: 1, g: 1, cup: 236.588 };
+  var FLUID_UNITS = ['oz', 'ml', 'g', 'cup'];
+  function toMl(value, unit) { var f = ML_PER[unit]; value = +value; return f && value > 0 ? value * f : 0; }
+  function fromMl(ml, unit) { return (+ml || 0) / (ML_PER[unit] || ML_PER.oz); }
+  var LB_PER_KG = 2.20462;
+  function toLb(value, unit) { return unit === 'kg' ? value * LB_PER_KG : +value; }
+
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  // The family's day runs from startHour to startHour the next day, in local time, so a
+  // 12:30 am entry with a 6 am start belongs to the day before.
+  function careDay(iso, startHour) {
+    var d = iso ? new Date(iso) : new Date();
+    d = new Date(d.getTime() - (startHour || 0) * 3600e3);
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+
+  // How much of a meal was actually eaten: a plate marked "leftovers" keeps the calories
+  // eaten next to the calories served, so the same share applies to the meal's fluid.
+  function eatenShare(e) {
+    if (e.plate_status === 'leftovers' && e.served_kcal > 0 && e.kcal != null) return Math.max(0, Math.min(1, (e.kcal * (e.portion_mult || 1)) / e.served_kcal));
+    return 1;
+  }
+  function fluidIn(e) {
+    if (e.deleted || e.entry_kind === 'output') return 0;
+    if (e.entry_kind === 'drink') return (e.volume_ml || 0) * (e.portion_mult || 1);
+    return (e.fluid_ml || 0) * (e.portion_mult || 1) * eatenShare(e);
+  }
+  function fluidOut(e) { return !e.deleted && e.entry_kind === 'output' ? (e.volume_ml || 0) * (e.portion_mult || 1) : 0; }
+
+  var RED_COLORS = ['pink_red', 'cola'];
+  // Reasons an output is worth a call to the care team. Never a diagnosis.
+  function outputFlags(e) {
+    if (e.deleted || e.entry_kind !== 'output') return [];
+    var f = [];
+    if (e.output_type === 'none') f.push('tried but could not go');
+    if (RED_COLORS.indexOf(e.output_color) >= 0) f.push(e.output_color === 'cola' ? 'cola-colored' : 'pink or red');
+    if (e.clots) f.push('clots');
+    return f;
+  }
+
+  function fluidBalance(entries) {
+    var r = { drinkMl: 0, foodMl: 0, inMl: 0, outMl: 0, netMl: 0, drinks: 0, foods: 0, outputs: 0, flags: [] };
+    entries.forEach(function (e) {
+      if (e.deleted) return;
+      if (e.entry_kind === 'output') {
+        r.outMl += fluidOut(e); r.outputs++;
+        var fl = outputFlags(e); if (fl.length) r.flags.push({ entry: e, reasons: fl });
+      } else if (e.entry_kind === 'drink') { r.drinkMl += fluidIn(e); r.drinks++; }
+      else { var m = fluidIn(e); if (m > 0) { r.foodMl += m; r.foods++; } }
+    });
+    r.inMl = r.drinkMl + r.foodMl; r.netMl = r.inMl - r.outMl;
+    return r;
+  }
+
+  // Morning ("standard") weights only, one per care day (the earliest), newest first, in lb.
+  function standardWeights(measurements, profileId, startHour) {
+    var byDay = {};
+    measurements.forEach(function (m) {
+      if (m.deleted || m.kind !== 'weight' || !m.standard || (m.for_profile_id || null) !== (profileId || null)) return;
+      var day = careDay(m.taken_at, startHour);
+      if (!byDay[day] || m.taken_at < byDay[day].taken_at) byDay[day] = m;
+    });
+    return Object.keys(byDay).sort().reverse().map(function (day) { var m = byDay[day]; return { day: day, lb: toLb(m.value, m.unit), m: m }; });
+  }
+  function dayDiff(a, b) { return Math.round((new Date(a + 'T12:00:00') - new Date(b + 'T12:00:00')) / 864e5); }
+  // Change since the previous morning weight and over about a week, for the weight on `day`.
+  function weightChange(measurements, profileId, day, startHour) {
+    var all = standardWeights(measurements, profileId, startHour).filter(function (w) { return w.day <= day; });
+    if (!all.length || all[0].day !== day) return null;
+    var today = all[0], prev = all[1] || null;
+    var week = all.filter(function (w) { var d = dayDiff(day, w.day); return d >= 6 && d <= 8; })[0] || null;
+    return {
+      lb: today.lb, m: today.m,
+      sincePrev: prev ? today.lb - prev.lb : null, prevDays: prev ? dayDiff(day, prev.day) : null,
+      sinceWeek: week ? today.lb - week.lb : null
+    };
+  }
+  // Alert levels come from the care team (blank means no alert). A gain since the previous
+  // morning counts only when that reading was the day before.
+  function weightFlags(change, settings) {
+    if (!change || !settings) return [];
+    var f = [], day = +settings.weight_alert_day_lb, week = +settings.weight_alert_week_lb;
+    if (day > 0 && change.sincePrev != null && change.prevDays === 1 && change.sincePrev >= day) f.push('up ' + change.sincePrev.toFixed(1) + ' lb since yesterday morning');
+    if (week > 0 && change.sinceWeek != null && change.sinceWeek >= week) f.push('up ' + change.sinceWeek.toFixed(1) + ' lb in a week');
+    return f;
+  }
+
+  // A suggested fluid amount for one serving of a food, or 0. Only ever a suggestion.
+  var FLUID_FOODS = [
+    [/\b(soup|broth|bouillon|stew|chili|chowder|bisque|gumbo|ramen|pho|consomm)/i, 1],
+    [/\b(jell-?o|gelatin|ice cream|sherbet|sorbet|popsicle|ice pop|italian ice|frozen yogurt|milkshake|shake|smoothie|pudding)\b/i, 1],
+    [/\bice chips\b/i, 0.5]
+  ];
+  function suggestFluidMl(text, portionMl) {
+    text = String(text || '');
+    for (var i = 0; i < FLUID_FOODS.length; i++) if (FLUID_FOODS[i][0].test(text)) return Math.round((portionMl || ML_PER.cup) * FLUID_FOODS[i][1]);
+    return 0;
+  }
+
+  return { ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();

@@ -159,4 +159,71 @@ t('exactIngredient only accepts the exact name or an alias', function () {
   assert.strictEqual(Logic.exactIngredient('butternut squash', ings), null);
   assert.ok(Logic.ingredientMatch('butternut squash', ings)); // the fuzzy matcher would have taken it
 });
+/* ---------- fluid balance and weight ---------- */
+var OZ = Logic.ML_PER.oz;
+function at(h, m, dayOffset) { var d = new Date(2026, 10, 23 + (dayOffset || 0), h, m || 0); return d.toISOString(); }
+t('units: oz, mL, grams and cups convert to mL', function () {
+  assert.strictEqual(Math.round(Logic.toMl(16, 'oz')), 473);
+  assert.strictEqual(Logic.toMl(235, 'g'), 235);
+  assert.strictEqual(Math.round(Logic.toMl(1, 'cup')), 237);
+  assert.strictEqual(Logic.toMl(-3, 'oz'), 0);
+  assert.strictEqual(Math.round(Logic.fromMl(473, 'oz')), 16);
+  assert.strictEqual(Math.round(Logic.toLb(70, 'kg') * 10) / 10, 154.3);
+});
+t('careDay: a 12:30 am entry belongs to the day before with a 6 am start', function () {
+  assert.strictEqual(Logic.careDay(at(0, 30, 1), 6), '2026-11-23');
+  assert.strictEqual(Logic.careDay(at(6, 0, 1), 6), '2026-11-24');
+  assert.strictEqual(Logic.careDay(at(23, 59), 0), '2026-11-23');
+});
+t('fluidBalance: tonight\'s log (water, coffee, soup, water in; three outputs)', function () {
+  var day = [
+    { entry_kind: 'drink', volume_ml: 16 * OZ, portion_mult: 1, kcal: 0 },
+    { entry_kind: 'drink', volume_ml: 16 * OZ, portion_mult: 1, kcal: 5 },
+    { entry_kind: 'output', output_type: 'urine', output_color: 'dark_yellow', volume_ml: 19 * OZ, portion_mult: 1 },
+    { entry_kind: 'meal', free_text: 'Progresso garden vegetable', fluid_ml: 8 * OZ, portion_mult: 1, kcal: 80 },
+    { entry_kind: 'output', output_type: 'urine', volume_ml: 2 * OZ, portion_mult: 1 },
+    { entry_kind: 'drink', volume_ml: 3 * OZ, portion_mult: 1 },
+    { entry_kind: 'output', output_type: 'urine', output_color: 'pink_red', volume_ml: 4 * OZ, portion_mult: 1 },
+    { entry_kind: 'drink', volume_ml: 99 * OZ, portion_mult: 1, deleted: true }
+  ];
+  var b = Logic.fluidBalance(day);
+  assert.strictEqual(Math.round(b.inMl / OZ), 43);
+  assert.strictEqual(Math.round(b.outMl / OZ), 25);
+  assert.strictEqual(Math.round(b.netMl / OZ), 18);
+  assert.strictEqual(Math.round(b.foodMl / OZ), 8);
+  assert.strictEqual(b.flags.length, 1); assert.deepEqual(b.flags[0].reasons, ['pink or red']);
+  // Outputs never add calories.
+  assert.strictEqual(Logic.dayTotals(day.filter(function (e) { return !e.deleted; })).kcal, 85);
+});
+t('fluid from a meal follows servings and what was left on the plate', function () {
+  assert.strictEqual(Logic.fluidIn({ fluid_ml: 200, portion_mult: 2 }), 400);
+  assert.strictEqual(Logic.fluidIn({ fluid_ml: 200, portion_mult: 1, plate_status: 'leftovers', kcal: 50, served_kcal: 100 }), 100);
+  assert.strictEqual(Logic.fluidIn({ entry_kind: 'drink', volume_ml: 240, portion_mult: 0.5 }), 120);
+});
+t('output flags: clots, cola color, could not go', function () {
+  assert.deepEqual(Logic.outputFlags({ entry_kind: 'output', output_type: 'urine', output_color: 'cola', clots: true }), ['cola-colored', 'clots']);
+  assert.deepEqual(Logic.outputFlags({ entry_kind: 'output', output_type: 'none' }), ['tried but could not go']);
+  assert.deepEqual(Logic.outputFlags({ entry_kind: 'drink', output_color: 'cola' }), []);
+});
+t('weights: morning readings only, change since yesterday and over a week, alerts only when set', function () {
+  var P = 'p1', ws = [
+    { kind: 'weight', for_profile_id: P, standard: true, value: 150, unit: 'lb', taken_at: at(6, 30, -7) },
+    { kind: 'weight', for_profile_id: P, standard: true, value: 151, unit: 'lb', taken_at: at(6, 40, -1) },
+    { kind: 'weight', for_profile_id: P, standard: false, value: 160, unit: 'lb', taken_at: at(18, 0, -1) },
+    { kind: 'weight', for_profile_id: P, standard: true, value: 154.5, unit: 'lb', taken_at: at(6, 35) },
+    { kind: 'weight', for_profile_id: 'other', standard: true, value: 200, unit: 'lb', taken_at: at(6, 35) }
+  ];
+  var c = Logic.weightChange(ws, P, '2026-11-23', 6);
+  assert.strictEqual(c.lb, 154.5); assert.strictEqual(c.sincePrev, 3.5); assert.strictEqual(c.prevDays, 1); assert.strictEqual(c.sinceWeek, 4.5);
+  assert.deepEqual(Logic.weightFlags(c, {}), []);
+  assert.deepEqual(Logic.weightFlags(c, { weight_alert_day_lb: 3, weight_alert_week_lb: 5 }), ['up 3.5 lb since yesterday morning']);
+  assert.strictEqual(Logic.weightChange(ws, P, '2026-11-21', 6), null);
+});
+t('fluid suggestions for soup, Jell-O, ice chips; none for toast', function () {
+  assert.strictEqual(Logic.suggestFluidMl('Progresso garden vegetable soup'), 237);
+  assert.strictEqual(Logic.suggestFluidMl('lime Jell-O', 120), 120);
+  assert.strictEqual(Logic.suggestFluidMl('ice chips', 240), 120);
+  assert.strictEqual(Logic.suggestFluidMl('buttered toast'), 0);
+});
+
 console.log(n + ' tests passed');

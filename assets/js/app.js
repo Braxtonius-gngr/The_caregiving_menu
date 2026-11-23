@@ -3,8 +3,10 @@ function loadAll() {
   return Promise.all([
     DB.all('ingredients'), DB.all('recipes'), DB.all('recipe_ingredients'), DB.all('recipe_variations'),
     DB.all('pantry_items'), DB.all('diet_profiles'), DB.all('profile_rules'), DB.all('diary_entries'),
-    DB.all('shopping_list'), DB.all('usage_log'), DB.meta('aisle_order'), DB.meta('my_role'), DB.meta('family_members')
+    DB.all('shopping_list'), DB.all('usage_log'), DB.meta('aisle_order'), DB.meta('my_role'), DB.meta('family_members'), DB.all('measurements'),
+    DB.meta('day_start_hour'), DB.meta('fluid_unit'), DB.meta('weight_unit')
   ]).then(function (r) {
+    State.measurements = r[13]; State.dayStart = r[14] == null ? 6 : r[14]; State.fluidUnit = r[15] || 'oz'; State.weightUnit = r[16] || 'lb';
     State.aisleOrder = r[10] || [];
     applyRole(r[11]);
     State.memberNames = r[12] || {}; State.memberCount = Object.keys(State.memberNames).length;
@@ -149,6 +151,7 @@ function renderFamilyBox() {
     cacheMembers(people);
     box.innerHTML = '<div class="row between"><h3 style="margin:0">' + esc(name) + '</h3>' + (owner ? '<button class="btn sm ghost" onclick="renameFamily()">Rename</button>' : '') + '</div>' +
       '<p class="muted">You are ' + (me.role === 'owner' ? 'an' : 'a') + ' <b>' + esc(mine[0].toLowerCase()) + '</b>: you ' + esc(mine[1]) + '.</p>' +
+      dayStartPicker(owner) +
       '<label for="myName">Your name (shown on what you log)</label><div class="row"><input id="myName" class="grow" maxlength="40" value="' + esc(me.display_name || '') + '" placeholder="e.g. Mom, Brax"><button class="btn sm" onclick="saveMyName()">Save</button></div>' +
       '<h3>People (' + people.length + ')</h3>' + people.map(function (m) {
         var info = ROLE_INFO[m.role] || [m.role, ''], label = memberLabel(m);
@@ -250,7 +253,7 @@ function syncNow() {
     dot.classList.toggle('on', r.signedIn); dot.title = r.signedIn ? 'Synced' : 'Local only';
     if (!r.signedIn) return;
     var roleBefore = State.role;
-    return Sync.members().then(cacheMembers, function () {}).then(function () {
+    return Promise.all([Sync.members().then(cacheMembers, function () {}), Sync.refreshDayStart()]).then(function () {
       if (justJoined) askMyName();
       return DB.meta('my_role').then(function (role) {
         if (r.pulled || r.photos || role !== roleBefore || justJoined) return loadAll().then(refresh);

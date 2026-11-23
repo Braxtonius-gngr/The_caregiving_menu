@@ -2,7 +2,7 @@
  * the outbox is pushed when online, remote changes newer than our watermark are pulled. */
 var Sync = (function () {
   var client = null;
-  var SYNCED = ['ingredients', 'recipes', 'recipe_ingredients', 'recipe_variations', 'pantry_items', 'diet_profiles', 'profile_rules', 'diary_entries', 'shopping_list', 'usage_log'];
+  var SYNCED = ['ingredients', 'recipes', 'recipe_ingredients', 'recipe_variations', 'pantry_items', 'diet_profiles', 'profile_rules', 'diary_entries', 'shopping_list', 'usage_log', 'measurements'];
 
   // Where the cloud lives: details saved on this device (Settings or a setup link) win,
   // then the values baked into config.js. The anon key is public by design; RLS guards data.
@@ -116,7 +116,9 @@ var Sync = (function () {
         delete rec.after_photo_data;
         // A batch upsert sends every column any row has, as NULL where a row lacks it, so
         // older meal records (no entry_kind) would break the NOT NULL column for the whole batch.
-        if (it.store === 'diary_entries' && rec.entry_kind !== 'drink') rec.entry_kind = 'meal';
+        if (it.store === 'diary_entries' && !rec.entry_kind) rec.entry_kind = 'meal';
+        if (it.store === 'diet_profiles' && !rec.care_settings) rec.care_settings = {}; // NOT NULL column (0011)
+        if (it.store === 'measurements' && rec.standard == null) rec.standard = false;
         (byStore[it.store] = byStore[it.store] || []).push(rec);
       });
       return Promise.all(Object.keys(byStore).map(function (store) {
@@ -305,6 +307,14 @@ var Sync = (function () {
   function setHouseholdName(name) { return rpcHid('set_household_name', { new_name: name }); }
   function setMemberRole(uid, role) { return rpcHid('set_member_role', { uid: uid, new_role: role }); }
   function removeMember(uid) { return rpcHid('remove_member', { uid: uid }); }
+  function setDayStart(hour) { return rpcHid('set_day_start', { hour: hour }); }
+  // The family's day start hour, cached on the device. Servers before 0011 answer null.
+  function refreshDayStart() {
+    var c = getClient();
+    return householdId().then(function (hid) { return c.from('households').select('day_start_hour').eq('id', hid).single(); })
+      .then(function (r) { return r.error || r.data.day_start_hour == null ? null : r.data.day_start_hour; }, function () { return null; })
+      .then(function (h) { return h == null ? null : DB.meta('day_start_hour', h).then(function () { return h; }); });
+  }
   function householdName() {
     var c = getClient();
     return householdId().then(function (hid) { return c.from('households').select('name').eq('id', hid).single(); })
@@ -431,5 +441,5 @@ var Sync = (function () {
     return queuePhotoDelete('record:' + PHOTO_STORES[store] + '/' + id).then(flushIfSignedIn);
   }
 
-  return { authStorageKey: authStorageKey, config: config, configured: configured, saveConfig: saveConfig, clearConfig: clearConfig, setupLink: setupLink, applySetupLink: applySetupLink, joinPendingInvite: joinPendingInvite, pendingInvite: pendingInvite, photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, inviteLinks: inviteLinks, resetInviteLinks: resetInviteLinks, members: members, setMyName: setMyName, setHouseholdName: setHouseholdName, setMemberRole: setMemberRole, removeMember: removeMember, householdName: householdName, refreshRole: refreshRole, householdId: householdId, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
+  return { authStorageKey: authStorageKey, config: config, configured: configured, saveConfig: saveConfig, clearConfig: clearConfig, setupLink: setupLink, applySetupLink: applySetupLink, joinPendingInvite: joinPendingInvite, pendingInvite: pendingInvite, photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, inviteLinks: inviteLinks, resetInviteLinks: resetInviteLinks, members: members, setMyName: setMyName, setHouseholdName: setHouseholdName, setMemberRole: setMemberRole, removeMember: removeMember, householdName: householdName, setDayStart: setDayStart, refreshDayStart: refreshDayStart, refreshRole: refreshRole, householdId: householdId, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
 })();
