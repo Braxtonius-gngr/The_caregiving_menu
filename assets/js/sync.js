@@ -252,9 +252,9 @@ var Sync = (function () {
   function runOnce() {
     return session().then(function (s) {
       if (!s) return { pushed: 0, pulled: 0, photos: 0, signedIn: false };
-      return push().then(function (p) {
+      return refreshRole().then(dropLocalChangesIfViewer).then(push).then(function (p) {
         return pull().then(function (q) {
-          return uploadPendingPhotos().then(function (ph) {
+          return DB.meta('my_role').then(function (role) { return role === 'viewer' ? 0 : uploadPendingPhotos(); }).then(function (ph) {
             return flushPhotoDeletes().then(function () { return { pushed: p, pulled: q, photos: ph, signedIn: true }; });
           });
         });
@@ -283,15 +283,55 @@ var Sync = (function () {
   function brain(mode, payload) { return invokeFn('brain', Object.assign({ mode: mode }, payload)); }
   function lookup(kind, q) { return invokeFn('lookup', { kind: kind, q: q }); }
 
-  function inviteCode() {
+  // ---------- family: roles, invite links, names (migration 0010) ----------
+  function rpcHid(fn, args) {
     var c = getClient();
-    return householdId().then(function (hid) { return c.from('households').select('invite_code').eq('id', hid).single(); }).then(function (r) { if (r.error) throw r.error; return r.data.invite_code; });
+    if (!c) return Promise.reject(new Error('Cloud not configured'));
+    return householdId().then(function (hid) {
+      return c.rpc(fn, Object.assign({ hid: hid }, args || {}));
+    }).then(function (r) { if (r.error) throw r.error; return r.data; });
+  }
+  function linksByRole(rows) {
+    var out = {};
+    (rows || []).forEach(function (r) { if (!out[r.role]) out[r.role] = r.code; });
+    return out;
+  }
+  // {caregiver: code, viewer: code}. Owners only.
+  function inviteLinks() { return rpcHid('invite_links').then(linksByRole); }
+  function resetInviteLinks() { return rpcHid('reset_invite_links').then(linksByRole); }
+  function inviteCode() { return inviteLinks().then(function (l) { return l.caregiver; }); }
+  function members() { return rpcHid('household_members'); }
+  function setMyName(name) { return rpcHid('set_my_name', { new_name: name }); }
+  function setHouseholdName(name) { return rpcHid('set_household_name', { new_name: name }); }
+  function setMemberRole(uid, role) { return rpcHid('set_member_role', { uid: uid, new_role: role }); }
+  function removeMember(uid) { return rpcHid('remove_member', { uid: uid }); }
+  function householdName() {
+    var c = getClient();
+    return householdId().then(function (hid) { return c.from('households').select('name').eq('id', hid).single(); })
+      .then(function (r) { if (r.error) throw r.error; return r.data.name; });
+  }
+  // This person's role in the shared household, kept on the device so the app can go
+  // read-only offline. A server without roles (before migration 0010) answers null.
+  function refreshRole() {
+    return rpcHid('my_role').then(function (role) { return role || null; }, function () { return null; })
+      .then(function (role) { return DB.meta('my_role', role).then(function () { return role; }); });
+  }
+  // A viewer's device never pushes. Anything changed locally is dropped and the next pull
+  // brings back the family's version, so nothing on this phone drifts from the shared file.
+  function dropLocalChangesIfViewer() {
+    return DB.meta('my_role').then(function (role) {
+      if (role !== 'viewer') return 0;
+      return DB.outbox().then(function (items) {
+        if (!items.length) return 0;
+        return DB.clearOutbox(items.map(function (i) { return i.id; })).then(function () { return DB.meta('last_pull', null); }).then(function () { return items.length; });
+      });
+    });
   }
   function joinHousehold(code) {
     var c = getClient();
     return c.rpc('join_household', { code: code }).then(function (r) {
       if (r.error) throw r.error;
-      return DB.meta('household_id', r.data).then(function () { return DB.meta('last_pull', null); });
+      return DB.meta('household_id', r.data).then(function () { return DB.meta('last_pull', null); }).then(refreshRole);
     });
   }
 
@@ -391,5 +431,5 @@ var Sync = (function () {
     return queuePhotoDelete('record:' + PHOTO_STORES[store] + '/' + id).then(flushIfSignedIn);
   }
 
-  return { authStorageKey: authStorageKey, config: config, configured: configured, saveConfig: saveConfig, clearConfig: clearConfig, setupLink: setupLink, applySetupLink: applySetupLink, joinPendingInvite: joinPendingInvite, pendingInvite: pendingInvite, photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
+  return { authStorageKey: authStorageKey, config: config, configured: configured, saveConfig: saveConfig, clearConfig: clearConfig, setupLink: setupLink, applySetupLink: applySetupLink, joinPendingInvite: joinPendingInvite, pendingInvite: pendingInvite, photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, inviteLinks: inviteLinks, resetInviteLinks: resetInviteLinks, members: members, setMyName: setMyName, setHouseholdName: setHouseholdName, setMemberRole: setMemberRole, removeMember: removeMember, householdName: householdName, refreshRole: refreshRole, householdId: householdId, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
 })();
