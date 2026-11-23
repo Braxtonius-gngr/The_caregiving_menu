@@ -96,21 +96,3 @@ function saveCuffReadings(pid) {
   }).then(function () { closeSheet(); return loadAll(); }).then(function () { refresh(); if (Sync.enabled()) syncNow(); toast(picks.length + ' reading(s) saved'); })
     .catch(function (e) { toast('Could not save: ' + e.message); });
 }
-
-/* ---------- photograph the cuff screen ---------- */
-function snapCuff(input, pid) {
-  var f = input.files[0]; if (!f) return;
-  if (!Sync.enabled()) return toast('Turn on sync in Settings to read photos');
-  var hint = document.getElementById('vSnapHint'); if (hint) hint.textContent = 'Reading the photo...';
-  downscale(f, 1280).then(function (img) { return Sync.brain('read_vitals', { image: img }); }).then(function (d) {
-    var set = function (id, v) { var el = document.getElementById(id); if (el && v != null && v !== '') el.value = v; };
-    if (d.kind && d.kind !== 'blood_pressure' && VITALS[d.kind]) { logVital(pid, d.kind); set('vVal', d.value); }
-    else { set('vVal', d.systolic); set('vVal2', d.diastolic); }
-    set('vPulse', d.pulse);
-    var rh = d.afib_symbol ? 'afib' : d.irregular_symbol ? 'irregular' : null, chip = rh && document.querySelector('#vRhythm [data-v="' + rh + '"]');
-    if (chip && !chip.classList.contains('on')) chip.click();
-    if (d.time_shown) set('vNote', 'Cuff screen showed ' + d.time_shown);
-    var h = document.getElementById('vSnapHint');
-    if (h) h.textContent = (d.readable ? 'Filled in from the photo' + (d.confidence === 'low' ? ' (not sure; please check every number)' : '. Check the numbers, then Save.') : 'Could not read the numbers from that photo. Type them in, or try again closer and without glare.') + (d.notes ? ' ' + d.notes : '');
-  }).catch(function (e) { var h = document.getElementById('vSnapHint'); if (h) h.textContent = 'Could not read the photo: ' + e.message; });
-}

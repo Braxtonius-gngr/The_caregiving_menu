@@ -192,7 +192,7 @@ Return only what the schema asks for. Use generic, lowercase, singular ingredien
 Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
 Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
 
-type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance" | "read_vitals";
+type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance" | "read_vitals" | "read_photo";
 
 /* ---------- current guidance: search trusted sites first, then answer in a fixed shape ---------- */
 // Web search stays on public health sources; the answer step cites them by number.
@@ -274,6 +274,37 @@ const vitalsSchema = {
     notes: { type: "string", description: "Short note if anything is unclear (glare, cut off, error code); else empty" },
   },
 };
+const nstr = { type: ["string", "null"] };
+const photoSchema = {
+  type: "object", additionalProperties: false,
+  required: ["kind", "decision", "retake_reason", "retake_tip", "summary", "uncertain", "vitals", "weight", "medication", "labs", "appointment"],
+  properties: {
+    kind: { type: "string", enum: ["bp_monitor", "glucose_meter", "pulse_oximeter", "thermometer", "scale", "med_label", "lab_report", "appointment", "food_label", "other"] },
+    decision: { type: "string", enum: ["use", "retake"], description: "retake unless every value you report is clearly legible" },
+    retake_reason: { type: "string", description: "If retake: what is wrong, in plain words (glare over the top number, screen cut off, blurry). Else empty." },
+    retake_tip: { type: "string", description: "If retake: one specific instruction for the next photo. Else empty." },
+    summary: { type: "string", description: "One line: what the photo shows and what you read" },
+    uncertain: strList("Fields you left empty because they were not clearly readable"),
+    vitals: { type: "object", additionalProperties: false, required: ["systolic", "diastolic", "pulse", "value", "unit", "irregular_symbol", "afib_symbol", "time_shown"],
+      properties: { systolic: num, diastolic: num, pulse: num, value: { ...num, description: "Glucose, oxygen % or temperature" }, unit: nstr, irregular_symbol: { type: "boolean" }, afib_symbol: { type: "boolean" }, time_shown: nstr } },
+    weight: { type: "object", additionalProperties: false, required: ["value", "unit"], properties: { value: num, unit: { type: ["string", "null"], enum: ["lb", "kg", null] } } },
+    medication: { type: "object", additionalProperties: false, required: ["name", "strength", "directions", "prescriber", "pharmacy", "filled_on", "refills", "quantity", "warnings"],
+      properties: { name: nstr, strength: nstr, directions: { ...nstr, description: "Directions exactly as printed" }, prescriber: nstr, pharmacy: nstr, filled_on: { ...nstr, description: "YYYY-MM-DD" }, refills: nstr, quantity: nstr, warnings: strList("Warning stickers, as printed") } },
+    labs: { type: "array", items: { type: "object", additionalProperties: false, required: ["test", "value", "value_text", "unit", "low", "high", "range_text", "flag", "date"],
+      properties: { test: str, value: num, value_text: nstr, unit: nstr, low: num, high: num, range_text: nstr, flag: nstr, date: { ...nstr, description: "YYYY-MM-DD collected" } } } },
+    appointment: { type: "object", additionalProperties: false, required: ["with_whom", "date", "time", "place", "reason", "notes"],
+      properties: { with_whom: nstr, date: { ...nstr, description: "YYYY-MM-DD" }, time: { ...nstr, description: "HH:MM 24h" }, place: nstr, reason: nstr, notes: nstr } },
+  },
+};
+const PHOTO_RULES = `You read photos for a family caring for an elderly relative. Wrong numbers are worse than no numbers: the family would rather take another photo.
+- First decide what the photo is (kind).
+- Read only what is clearly printed or lit. Never guess or "correct" a digit. Seven-segment displays: check each segment (a 1 vs 7, 3 vs 8, 5 vs 6).
+- decision = "retake" if ANY value the family needs is unclear, partly cut off, under glare, blurry, or if it is unclear which number is which. Say exactly what was wrong and give one specific tip (move closer, tilt to remove the reflection, include the whole label, turn on a light, hold still).
+- If several photos are given, they are tries of the same thing; combine them and only report a value that at least one photo shows clearly. If photos disagree, retake.
+- Blood pressure cuff: SYS top, DIA middle, pulse bottom. Report the irregular-heartbeat or AFib symbol only if it is lit. Ignore memory averages.
+- Medicine label: the drug name and strength must be clearly readable, else retake.
+- Lab report: report every test row you can read clearly; leave unreadable rows out and list them in uncertain. Retake only if the main results are unreadable.
+- Fill unrelated sections with nulls, false, or empty lists.`;
 const guidanceSchema = {
   type: "object", additionalProperties: false,
   required: ["answer", "key_points", "sources", "questions_for_care_team", "caveat"],
@@ -401,6 +432,14 @@ On hand: ${(body.pantry ?? []).join(", ")}` }], "low");
     }
     case "read_vitals":
       return await ask(vitalsSchema, [imageBlock(body.image), { type: "text", text: "This is a photo of a home health monitor's screen (usually a blood pressure cuff: SYS top, DIA middle, pulse bottom). Read exactly what the screen shows. Do not guess digits you cannot see; set readable=false instead. Report whether an irregular heartbeat or AFib symbol is lit. Ignore stored-memory averages unless they are the only reading shown, and say so in notes." }], "low");
+    case "read_photo": {
+      const images: string[] = (body.images ?? [body.image]).filter(Boolean).slice(-3);
+      if (!images.length) throw new Error("No photo sent.");
+      const expect = body.expect ? `
+The family expects: ${String(body.expect).slice(0, 40)}.` : "";
+      return await ask(photoSchema, [...images.map(imageBlock), { type: "text", text: PHOTO_RULES + expect + `
+Today is ${new Date().toISOString().slice(0, 10)}.` }], "medium");
+    }
     case "guidance": {
       const q = String(body.question ?? "").slice(0, 600);
       const found = await research(`${q}\nContext (no names): ${JSON.stringify(body.context ?? {}).slice(0, 4000)}`);
