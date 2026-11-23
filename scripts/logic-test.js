@@ -283,6 +283,17 @@ t('patterns: BP after late evening doses only shows with 3+ mornings of each kin
   var few = Logic.patterns({ measurements: ms.slice(0, 3), meds: [med], doses: doses, diary: [] }, null, days, 6)[0];
   assert.strictEqual(few.enough, false);
 });
+t('parseBpMeasurement: standard Bluetooth reading with time, pulse, user and irregular pulse', function () {
+  // flags 0x1E: mmHg, timestamp, pulse, user id, status. 142/80 (MAP 101), 2026-11-23 08:30:05, pulse 96, user 1, irregular pulse.
+  var bytes = [0x1E, 142, 0x00, 80, 0x00, 101, 0x00, 0xEA, 0x07, 11, 23, 8, 30, 5, 96, 0x00, 1, 0x04, 0x00];
+  var r = Logic.parseBpMeasurement(bytes);
+  assert.deepEqual([r.sys, r.dia, r.map, r.pulse, r.user, r.irregular, r.movement, r.unit], [142, 80, 101, 96, 1, true, false, 'mmHg']);
+  assert.deepEqual(r.time, { y: 2026, mo: 11, d: 23, h: 8, mi: 30, s: 5 });
+  var plain = Logic.parseBpMeasurement([0x00, 120, 0x00, 70, 0x00, 87, 0x00]);
+  assert.deepEqual([plain.sys, plain.dia, plain.time, plain.pulse, plain.irregular], [120, 70, null, null, false]);
+  // kPa: 16.0 kPa = mantissa 160, exponent -1 (0xF0A0) -> 120 mmHg
+  assert.strictEqual(Logic.parseBpMeasurement([0x01, 0xA0, 0xF0, 0x6C, 0xF0, 0x74, 0xF0]).sys, 120);
+});
 t('upcoming: visits, follow-ups, yearly and monthly days, refills, within the window only', function () {
   var day = function (iso) { return iso.slice(0, 10); };
   var rs = [

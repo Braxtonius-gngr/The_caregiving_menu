@@ -192,7 +192,7 @@ Return only what the schema asks for. Use generic, lowercase, singular ingredien
 Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
 Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
 
-type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance";
+type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance" | "read_vitals";
 
 /* ---------- current guidance: search trusted sites first, then answer in a fixed shape ---------- */
 // Web search stays on public health sources; the answer step cites them by number.
@@ -257,6 +257,21 @@ const draftSchema = {
     undecided: strList("Things that need a clinician's judgement (doses, interactions, kidney adjustments) that this draft does not change"),
     questions_for_pharmacist: strList("3-6 overall questions"),
     caveat: { type: "string", description: "One sentence: a draft for her pharmacist or doctor to approve" },
+  },
+};
+const vitalsSchema = {
+  type: "object", additionalProperties: false,
+  required: ["readable", "kind", "systolic", "diastolic", "pulse", "value", "irregular_symbol", "afib_symbol", "time_shown", "confidence", "notes"],
+  properties: {
+    readable: { type: "boolean", description: "False if the numbers cannot be read with confidence" },
+    kind: { type: "string", enum: ["blood_pressure", "glucose", "oxygen", "temperature", "unknown"] },
+    systolic: num, diastolic: num, pulse: num,
+    value: { ...num, description: "For glucose, oxygen or temperature: the main number" },
+    irregular_symbol: { type: "boolean", description: "The screen shows an irregular heartbeat symbol (heart with waves, IHB)" },
+    afib_symbol: { type: "boolean", description: "The screen shows an AFib indicator" },
+    time_shown: { type: ["string", "null"], description: "Date/time shown on the screen, as printed, or null" },
+    confidence: { type: "string", enum: ["low", "medium", "high"] },
+    notes: { type: "string", description: "Short note if anything is unclear (glare, cut off, error code); else empty" },
   },
 };
 const guidanceSchema = {
@@ -384,6 +399,8 @@ On hand: ${(body.pantry ?? []).join(", ")}` }], "low");
       const out = await ask(draftSchema, [{ type: "text", text: `Draft a medicine TIMING schedule for a family caregiver to take to her pharmacist. Change only times and slots, never doses or which medicines. Fit times to her day (wake, meals, bed) and her real dose times; keep a time when there is no clear reason to move it. Use the research notes and cite the numbered sources. If the research does not support a change, do not make it.\n\nHer data:\n${ctx}\n\nResearch notes:\n${found.notes}\n\nNumbered sources:\n${numbered(found.sources)}` }], "high");
       return { ...out, source_list: found.sources };
     }
+    case "read_vitals":
+      return await ask(vitalsSchema, [imageBlock(body.image), { type: "text", text: "This is a photo of a home health monitor's screen (usually a blood pressure cuff: SYS top, DIA middle, pulse bottom). Read exactly what the screen shows. Do not guess digits you cannot see; set readable=false instead. Report whether an irregular heartbeat or AFib symbol is lit. Ignore stored-memory averages unless they are the only reading shown, and say so in notes." }], "low");
     case "guidance": {
       const q = String(body.question ?? "").slice(0, 600);
       const found = await research(`${q}\nContext (no names): ${JSON.stringify(body.context ?? {}).slice(0, 4000)}`);
