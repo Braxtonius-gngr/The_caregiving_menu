@@ -243,4 +243,14 @@ await fails(U.me, `insert into measurements (id, household_id, kind, value, unit
 assert.equal((await as(U.mom, `select pulse, rhythm from measurements where rhythm = 'afib'`)).rows[0].pulse, '96');
 ok('blood pressure keeps pulse and rhythm (regular, irregular, AFib)');
 
+// ---------- Phase 5: medicine plans need an owner to approve ----------
+const plan = '99999999-9999-4999-8999-999999999999';
+await as(U.me, `insert into records (id, household_id, kind, title, fields) values ($1, $2, 'plan', 'Med timing draft', '{"status": "draft"}')`, [plan, hid]);
+await fails(U.me, `update records set fields = fields || '{"status": "approved"}' where id = $1`, [plan], 'a caregiver approving a plan');
+await fails(U.me, `insert into records (id, household_id, kind, title, fields) values (gen_random_uuid(), $1, 'plan', 'x', '{"status": "approved"}')`, [hid], 'a caregiver adding an already-approved plan');
+await as(U.me, `update records set fields = fields || '{"note": "asked pharmacist"}' where id = $1`, [plan]);
+await as(U.mom, `update records set fields = fields || '{"status": "approved", "approved_by": "Pharmacist"}' where id = $1`, [plan]);
+assert.equal((await as(U.me, `select fields->>'status' s from records where id = $1`, [plan])).rows[0].s, 'approved');
+ok('medicine plans: caregivers draft and edit; only an owner approves');
+
 console.log(`\nAll ${n} family checks passed.`);

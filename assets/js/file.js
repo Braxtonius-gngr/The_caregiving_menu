@@ -19,7 +19,8 @@ var RECORD_KINDS = {
   document: { label: 'Document', title: 'Title', date: 'date', fields: [['doc_type', 'Kind', 'select:Discharge papers|Report|Insurance card|ID|Directive|Bill|Other'], ['notes', 'Notes', 'textarea']] },
   update: { label: 'Update', title: 'Headline (optional)', date: 'datetime', fields: [['text', 'What happened', 'textarea']] },
   event: { label: 'Important day', title: 'What (lab draw, refill, birthday...)', date: 'date', fields: [['repeat', 'Repeats', 'select:No|Every year|Every month'], ['notes', 'Notes', 'textarea']] },
-  dose: { label: 'Dose given', title: 'Medicine', date: 'datetime', fields: [['status', 'Status', 'select:given|skipped|refused'], ['note', 'Note', 'textarea']] }
+  dose: { label: 'Dose given', title: 'Medicine', date: 'datetime', fields: [['status', 'Status', 'select:given|skipped|refused'], ['note', 'Note', 'textarea']] },
+  plan: { label: 'Schedule draft', title: 'Title', date: 'datetime', fields: [] }
 };
 var MED_SLOTS = [['morning', 'Morning', 8], ['noon', 'Midday', 12], ['evening', 'Evening', 17], ['bedtime', 'Bedtime', 21], ['prn', 'Only when needed', null]];
 var FILE_SECTIONS = [['summary', 'Summary'], ['team', 'Care team'], ['labs', 'Labs'], ['visits', 'Visits'], ['documents', 'Documents'], ['updates', 'Updates'], ['export', 'For the doctor']];

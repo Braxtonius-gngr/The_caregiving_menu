@@ -249,6 +249,40 @@ t('medPlan: a medicine set for 6:30 is due at 5:45 and overdue at 8:45; blank us
   assert.strictEqual(Logic.medPlan(m, [], '2026-11-23', 8.75)[0].state, 'overdue');
   assert.strictEqual(Logic.medPlan(m, [], '2026-11-23', 8.75)[0].time, '06:30');
 });
+t('doseTiming: typical time, late (2h+), skipped and unmarked over a week', function () {
+  var med = { id: 'a', fields: { slots: 'morning' } }, days = [], doses = [];
+  for (var i = 0; i < 7; i++) days.push('2026-11-' + (16 + i));
+  var times = [[8, 10], [9, 40], [10, 5], [8, 30], null, 'skipped', [10, 30]];
+  times.forEach(function (t, i) {
+    if (t === null) return;
+    var d = new Date(2026, 10, 16 + i, t === 'skipped' ? 8 : t[0], t === 'skipped' ? 0 : t[1]);
+    doses.push({ id: 'd' + i, updated_at: d.toISOString(), occurred_at: d.toISOString(), fields: { med_id: 'a', day: days[i], slot: 'morning', status: t === 'skipped' ? 'skipped' : 'given' } });
+  });
+  var r = Logic.doseTiming(med, doses, 'morning', days, 6);
+  assert.deepEqual([r.scheduled, r.given, r.skipped, r.unmarked, r.late, r.typical, r.earliest, r.latest], ['08:00', 5, 1, 1, 2, '09:40', '08:10', '10:30']);
+});
+t('labelCues: finds timing rules in label text and keeps the sentence', function () {
+  var c = Logic.labelCues('Take on an empty stomach, 30 to 60 minutes before breakfast. Take at least 4 hours before or after calcium or iron supplements. Take it at the same time every day.');
+  assert.deepEqual(c.map(function (x) { return x.cue; }), ['empty_stomach', 'separate', 'same_time']);
+  assert.ok(/empty stomach/.test(c[0].sentence));
+  assert.deepEqual(Logic.labelCues('Take with food.').map(function (x) { return x.cue; }), ['with_food']);
+  assert.deepEqual(Logic.labelCues(''), []);
+});
+t('patterns: BP after late evening doses only shows with 3+ mornings of each kind', function () {
+  var med = { id: 'e', fields: { slots: 'evening' } }, days = [], doses = [], ms = [];
+  for (var i = 0; i < 9; i++) days.push('2026-11-' + (10 + i));
+  days.forEach(function (day, i) {
+    var late = i % 2 === 1;
+    var given = new Date(2026, 10, 10 + i, late ? 20 : 17, late ? 30 : 10);
+    doses.push({ id: 'x' + i, updated_at: given.toISOString(), occurred_at: given.toISOString(), fields: { med_id: 'e', day: day, slot: 'evening', status: 'given' } });
+    if (i < 8) ms.push({ kind: 'blood_pressure', value: late ? 160 : 140, value2: 80, taken_at: new Date(2026, 10, 11 + i, 8, 0).toISOString() });
+  });
+  var ps = Logic.patterns({ measurements: ms, meds: [med], doses: doses, diary: [] }, null, days, 6);
+  var bp = ps.filter(function (p) { return p.key === 'bp_evening'; })[0];
+  assert.strictEqual(bp.enough, true); assert.strictEqual(bp.diff, 20); assert.strictEqual(bp.n, 8);
+  var few = Logic.patterns({ measurements: ms.slice(0, 3), meds: [med], doses: doses, diary: [] }, null, days, 6)[0];
+  assert.strictEqual(few.enough, false);
+});
 t('upcoming: visits, follow-ups, yearly and monthly days, refills, within the window only', function () {
   var day = function (iso) { return iso.slice(0, 10); };
   var rs = [

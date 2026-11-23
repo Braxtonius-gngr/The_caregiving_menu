@@ -209,7 +209,10 @@ function careSettingsFields(p) {
     '<label for="csAlertSrc">Alert levels set by</label><input id="csAlertSrc" value="' + esc(cs.alert_source || '') + '">' +
     '<label for="csPhone">Care team phone (shown with warnings)</label><div class="row"><input id="csPhone" class="grow" type="tel" autocomplete="off" value="' + esc(cs.care_phone || '') + '" oninput="S.phoneCheck=null;document.getElementById(\'csPhoneHint\').textContent=\'\'">' +
     '<button type="button" class="btn sm ghost" onclick="checkPhoneField(\'csPhone\')">Check number</button></div>' +
-    '<div class="muted" id="csPhoneHint" aria-live="polite">' + (cs.care_phone_type ? esc(phoneTypeText(cs.care_phone_type, cs.care_phone_carrier)) : '') + '</div>';
+    '<div class="muted" id="csPhoneHint" aria-live="polite">' + (cs.care_phone_type ? esc(phoneTypeText(cs.care_phone_type, cs.care_phone_carrier)) : '') + '</div>' +
+    '<h3>Her usual day</h3><p class="muted">Used to line medicine times up with her day.</p>' +
+    '<div class="row"><div class="grow"><label for="csWake">Usually wakes</label><input id="csWake" type="time" value="' + esc(cs.wake_time || '') + '"></div>' +
+    '<div class="grow"><label for="csBed">Usually goes to bed</label><input id="csBed" type="time" value="' + esc(cs.bed_time || '') + '"></div></div>';
 }
 function readCareSettings(prev) {
   var cs = Object.assign({}, prev || {});
@@ -217,6 +220,7 @@ function readCareSettings(prev) {
   var txt = function (id) { return document.getElementById(id).value.trim() || null; };
   var oz = num('csLimit');
   cs.fluid_limit_ml = oz ? Math.round(Logic.toMl(oz, 'oz')) : null; cs.fluid_limit_source = txt('csLimitSrc');
+  cs.wake_time = txt('csWake'); cs.bed_time = txt('csBed');
   cs.weight_alert_day_lb = num('csDay'); cs.weight_alert_week_lb = num('csWeek'); cs.alert_source = txt('csAlertSrc');
   var typed = txt('csPhone');
   if (typed !== (prev || {}).care_phone) { delete cs.care_phone_e164; delete cs.care_phone_type; delete cs.care_phone_carrier; }

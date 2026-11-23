@@ -28,6 +28,7 @@ function renderHome(arg) {
   html += fluidCardFor(pid, entries, day);
   html += todayVitals(pid, day);
   html += todayComing(pid, day);
+  html += todayInsights(pid);
   html += todayMeals(pid, prof, entries);
   html += '<div class="btn-row"><button class="btn ghost sm" onclick="showScreen(\'help\')">&#10067; How to use this app</button></div>';
   return html;
@@ -163,7 +164,7 @@ function renderMeds(arg) {
   var stopped = meds.filter(function (m) { return !Logic.medActive(m, day); });
   if (stopped.length) html += '<details><summary class="muted">Stopped or not started (' + stopped.length + ')</summary>' + stopped.map(function (m) { return recordCard(m, esc([(m.fields || {}).start ? 'from ' + m.fields.start : '', (m.fields || {}).stop ? 'stopped ' + m.fields.stop : ''].filter(Boolean).join(' · '))); }).join('') + '</details>';
   html += '<div class="note">' + MED_PROMPTS.map(esc).join('<br>') + '</div>';
-  html += '<div class="btn-row"><button class="btn ghost" onclick="printExport(' + pidArg(pid) + ')">Print med list and file</button></div>';
+  html += '<div class="btn-row"><button class="btn ghost" onclick="showScreen(\'timing\',{pid:' + pidArg(pid) + '})">Timing review</button><button class="btn ghost" onclick="showScreen(\'plans\',{pid:' + pidArg(pid) + '})">Schedule drafts</button><button class="btn ghost" onclick="printExport(' + pidArg(pid) + ')">Print med list and file</button></div>';
   return html;
 }
 // Seven days, one row per scheduled dose: ✓ given, – skipped/refused, blank not marked.
@@ -297,6 +298,8 @@ var HELP = [
   ['days', 'Important days', ['Today &rarr; Coming up &rarr; <b>+ Important day</b> for lab draws, refills, birthdays. Pick "Every year" or "Every month" for repeats.', 'Refill dates typed on a medicine show up here too.']],
   ['family', 'Family and roles', ['<b>Owner</b>: everything, including approving family and deleting for good. <b>Caregiver</b>: log and edit. <b>Viewer</b>: sees everything, changes nothing.', 'New people wait for an owner to approve them in Settings &rarr; Family.']],
   ['undo', 'Undo a mistake', ['Deleting shows <b>Undo</b> for a few seconds. Deleted items also stay in Diary &rarr; Deleted for 30 days.', 'Every entry has <b>History</b>: who changed what, with <b>Restore this version</b>.']],
+  ['timing', 'Timing review and schedule drafts', ['Meds &rarr; <b>Timing review</b> shows when each medicine is really given, what its label says about timing (empty stomach, with food, bedtime, keep apart), and her usual meals and sleep. It lists questions for the pharmacist.', '<b>Schedule drafts</b> &rarr; <b>Draft a schedule</b>: the app searches current trusted sources and proposes times with reasons and links. It never changes doses or which medicines.', 'Nothing changes until an owner taps <b>Record approval</b> with the pharmacist or doctor who said yes. Approved changes update the medicine times; History keeps the old ones.', '<b>Print for the pharmacist</b> gives them the review and draft on one page.']],
+  ['patterns', 'Patterns and current guidance', ['Today &rarr; Insights and <b>Patterns</b> compare her own logs: BP after late evening doses, weight after salty days, urine out vs fluid in, BP and sugar by time of day, AFib readings.', 'A pattern only shows a number once there are enough days on both sides. It is a reason to ask, not proof.', '<b>Ask about current guidance</b> searches FDA, NIH, kidney, diabetes and heart sources and answers with links and dates. <b>Save to her file</b> keeps the answer under Updates.']],
   ['kitchen', 'Kitchen', ['<b>Ideas</b>: what you can cook now, what is one trip away, what to use up, restock and the shopping list. <b>Recipes</b> and <b>Pantry</b> sit next to it.']]
 ];
 function renderHelp(arg) {

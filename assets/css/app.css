@@ -208,3 +208,9 @@ label.check input { width: auto; margin: 0; }
 .help-card li { margin-bottom: 6px; }
 .slot-times { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px 10px; margin-top: 6px; }
 .slot-time { display: flex; flex-direction: column; font-size: 13px; }
+
+/* Insights */
+.faded { opacity: 0.75; }
+.q-list, .src-list { padding-left: 20px; }
+.q-list li, .src-list li { margin-bottom: 6px; }
+.ok-note { background: color-mix(in srgb, var(--ok) 12%, transparent); border-left-color: var(--ok); }
