@@ -163,12 +163,36 @@ const summarySchema = {
   },
 };
 
+const mealIdeasSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["ideas", "caveat"],
+  properties: {
+    ideas: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "why", "uses", "fluid_oz", "sodium_mg"],
+        properties: {
+          name: str,
+          why: { type: "string", description: "One sentence on why it fits her rules and today's numbers" },
+          uses: strList("Pantry items it uses"),
+          fluid_oz: num,
+          sodium_mg: num,
+        },
+      },
+    },
+    caveat: { type: "string", description: "One sentence: ideas to check against her diet plan" },
+  },
+};
+
 const SYSTEM = `You help a family caregiver run their kitchen: recipes, pantry, and a food diary, including for an older relative whose diet may need adjusting.
 Return only what the schema asks for. Use generic, lowercase, singular ingredient names ("yellow onion", not "Vidalia Onions 3lb").
 Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
 Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
 
-type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary";
+type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas";
 
 function imageBlock(dataUrl: string): Anthropic.ImageBlockParam {
   const m = dataUrl.match(/^data:(image\/[a-z+]+);base64,(.*)$/);
@@ -268,6 +292,13 @@ async function handle(mode: Mode, body: Record<string, any>) {
       return await ask(canonSchema, [{ type: "text", text: `Map each input to an existing ingredient name if it is the same thing, otherwise propose a new generic name.\nInputs: ${JSON.stringify(body.inputs)}\nKnown: ${known}` }], "low");
     case "appointment_summary":
       return await ask(summarySchema, [{ type: "text", text: `Draft a short brief a family caregiver can bring to an appointment, from this home food diary summary. Use only the data given; do not diagnose or recommend treatment. Frame concerns as questions for the clinician. Write in plain language.\n${JSON.stringify(body.digest)}` }], "medium");
+    case "meal_ideas":
+      return await ask(mealIdeasSchema, [{ type: "text", text: `Suggest 3 simple meal ideas for ${body.profile?.name ?? "this person"} for ${body.meal ?? "the next meal"}. Prefer what is on hand. Respect their diet rules strictly (sodium, potassium, phosphorus, fluid). Count soups, gelatin, ice and sauces as fluid. Keep each idea easy for a tired caregiver.
+Their rules: ${JSON.stringify(body.profile?.rules ?? [])}
+Daily targets: ${JSON.stringify(body.profile?.targets ?? {})}
+Fluid left today (oz): ${body.fluid_left_oz ?? "no limit set"}
+Eaten so far today: ${JSON.stringify(body.today ?? [])}
+On hand: ${(body.pantry ?? []).join(", ")}` }], "low");
     default:
       throw new Error("unknown mode");
   }

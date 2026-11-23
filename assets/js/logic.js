@@ -302,5 +302,54 @@ var Logic = (function () {
     return 0;
   }
 
-  return { ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
+  /* ---------- daily meds ---------- */
+  // Medicines are `records` of kind medication; doses given are kind dose with
+  // fields { med_id, day, slot, status }. `hour` is hours into the care day's calendar
+  // (an hour before the day start counts as the next calendar day, e.g. 1 am = 25).
+  var SLOT_HOURS = { morning: 8, noon: 12, evening: 17, bedtime: 21 };
+  function medActive(med, day) { var f = med.fields || {}; return !med.deleted && (!f.start || f.start <= day) && (!f.stop || f.stop >= day); }
+  function medSlots(med) { return String((med.fields || {}).slots || '').split(',').filter(Boolean); }
+  function doseFor(doses, medId, day, slot) {
+    var hit = doses.filter(function (d) { var f = d.fields || {}; return !d.deleted && f.med_id === medId && f.day === day && f.slot === slot; });
+    return hit.sort(function (a, b) { return a.updated_at < b.updated_at ? 1 : -1; })[0] || null;
+  }
+  function medPlan(meds, doses, day, hour) {
+    var rows = [];
+    meds.filter(function (m) { return medActive(m, day); }).forEach(function (m) {
+      medSlots(m).forEach(function (slot) {
+        if (slot === 'prn') return;
+        var h = SLOT_HOURS[slot], d = doseFor(doses, m.id, day, slot);
+        var state = d ? (d.fields.status || 'given') : hour == null ? 'later' : hour >= h + 2 ? 'overdue' : hour >= h - 1 ? 'due' : 'later';
+        rows.push({ med: m, slot: slot, hour: h, dose: d, state: state });
+      });
+    });
+    return rows.sort(function (a, b) { return a.hour - b.hour || String(a.med.title).localeCompare(String(b.med.title)); });
+  }
+  function prnDoses(doses, medId, day) { return doses.filter(function (d) { var f = d.fields || {}; return !d.deleted && f.med_id === medId && f.day === day && f.slot === 'prn' && f.status === 'given'; }); }
+
+  // Dates from now to `days` ahead: visits, follow-ups, important days (repeating yearly or
+  // monthly) and refills due. day strings are local YYYY-MM-DD.
+  function upcoming(records, fromDay, days, dayOfIso) {
+    var out = [], end = addDays(fromDay, days);
+    var push = function (day, title, kind, id, when) { if (day >= fromDay && day <= end) out.push({ day: day, title: title, kind: kind, id: id, when: when || null, inDays: dayDiff(day, fromDay) }); };
+    records.forEach(function (r) {
+      if (r.deleted) return;
+      var f = r.fields || {};
+      if (r.kind === 'visit') {
+        if (r.occurred_at) push(dayOfIso(r.occurred_at), r.title || 'Visit', 'visit', r.id, r.occurred_at);
+        if (f.next_appt) push(dayOfIso(f.next_appt), (r.title || 'Follow-up') + ' (follow-up)', 'visit', r.id, f.next_appt);
+      } else if (r.kind === 'event' && r.occurred_at) {
+        var d = dayOfIso(r.occurred_at);
+        if (f.repeat === 'Every year') { var y = +fromDay.slice(0, 4); [y, y + 1].forEach(function (yy) { push(yy + d.slice(4), r.title, 'event', r.id); }); }
+        else if (f.repeat === 'Every month') { for (var i = 0; i <= 1; i++) { var m = addMonths(fromDay.slice(0, 7) + '-01', i); push(m.slice(0, 8) + d.slice(8), r.title, 'event', r.id); } }
+        else push(d, r.title, 'event', r.id);
+      } else if (r.kind === 'medication' && f.refill_on && medActive(r, fromDay)) push(f.refill_on, 'Refill: ' + r.title, 'refill', r.id);
+    });
+    return out.sort(function (a, b) { return a.day < b.day ? -1 : a.day > b.day ? 1 : String(a.when || '').localeCompare(String(b.when || '')); });
+  }
+  function addDays(day, n) { var d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  function addMonths(day, n) { var d = new Date(day + 'T12:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); }
+
+  return { medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
+    ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();

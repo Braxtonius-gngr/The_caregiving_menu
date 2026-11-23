@@ -225,5 +225,33 @@ t('fluid suggestions for soup, Jell-O, ice chips; none for toast', function () {
   assert.strictEqual(Logic.suggestFluidMl('ice chips', 240), 120);
   assert.strictEqual(Logic.suggestFluidMl('buttered toast'), 0);
 });
+t('medPlan: due, overdue, later, marked; stopped and not-started meds drop out; as-needed is separate', function () {
+  var meds = [
+    { id: 'a', kind: 'medication', title: 'Furosemide', fields: { slots: 'morning,evening' } },
+    { id: 'b', kind: 'medication', title: 'Amlodipine', fields: { slots: 'morning', stop: '2026-11-20' } },
+    { id: 'c', kind: 'medication', title: 'Insulin', fields: { slots: 'bedtime', start: '2026-11-30' } },
+    { id: 'd', kind: 'medication', title: 'Tylenol', fields: { slots: 'prn' } }
+  ];
+  var doses = [{ id: 'x', kind: 'dose', updated_at: '2026-11-23T14:00:00Z', fields: { med_id: 'a', day: '2026-11-23', slot: 'morning', status: 'given' } },
+    { id: 'y', kind: 'dose', fields: { med_id: 'd', day: '2026-11-23', slot: 'prn', status: 'given' } }];
+  var p = Logic.medPlan(meds, [], '2026-11-23', 10.5);
+  assert.deepEqual(p.map(function (r) { return r.med.id + ':' + r.slot + ':' + r.state; }), ['a:morning:overdue', 'a:evening:later']);
+  assert.strictEqual(Logic.medPlan(meds, [], '2026-11-23', 7.5)[0].state, 'due');
+  assert.strictEqual(Logic.medPlan(meds, doses, '2026-11-23', 10.5)[0].state, 'given');
+  assert.strictEqual(Logic.medPlan(meds, [], '2026-11-30', 22).filter(function (r) { return r.med.id === 'c'; })[0].state, 'due');
+  assert.strictEqual(Logic.prnDoses(doses, 'd', '2026-11-23').length, 1);
+});
+t('upcoming: visits, follow-ups, yearly and monthly days, refills, within the window only', function () {
+  var day = function (iso) { return iso.slice(0, 10); };
+  var rs = [
+    { id: 'v', kind: 'visit', title: 'Kidney doctor', occurred_at: '2026-11-25T15:00:00Z', fields: { next_appt: '2026-12-30T15:00:00Z' } },
+    { id: 'b', kind: 'event', title: 'Birthday', occurred_at: '1940-12-01T12:00:00Z', fields: { repeat: 'Every year' } },
+    { id: 'm', kind: 'event', title: 'Labs', occurred_at: '2026-01-28T12:00:00Z', fields: { repeat: 'Every month' } },
+    { id: 'o', kind: 'event', title: 'Old', occurred_at: '2026-11-01T12:00:00Z', fields: {} },
+    { id: 'r', kind: 'medication', title: 'Furosemide', fields: { refill_on: '2026-11-24' } }
+  ];
+  var u = Logic.upcoming(rs, '2026-11-23', 14, day);
+  assert.deepEqual(u.map(function (x) { return x.day + ' ' + x.title + ' ' + x.inDays; }), ['2026-11-24 Refill: Furosemide 1', '2026-11-25 Kidney doctor 2', '2026-11-28 Labs 5', '2026-12-01 Birthday 8']);
+});
 
 console.log(n + ' tests passed');

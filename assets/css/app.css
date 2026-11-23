@@ -189,3 +189,20 @@ label.check input { width: auto; margin: 0; }
   body.printing #printArea { display: block; color: #000; background: #fff; font-size: 11pt; }
   body.printing #printArea .muted { color: #444; }
 }
+
+/* Today */
+.attention { border-left: 4px solid var(--bad); }
+.attention h3 { margin-top: 0; color: var(--bad); }
+.vitals { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin: 8px 0; }
+.vital { display: flex; flex-direction: column; }
+.vital b { font-size: 1.25rem; }
+.vital small { font-size: 0.75rem; font-weight: normal; }
+.dose-overdue .dose-state { color: var(--bad); font-weight: 600; }
+.dose-due .dose-state { color: var(--warn); font-weight: 600; }
+.dose-given .dose-state { color: var(--ok); }
+.table-wrap { overflow-x: auto; }
+.med-week td, .med-week th { text-align: center; }
+.med-week td:first-child { text-align: left; }
+.help-card summary { cursor: pointer; }
+.help-card ol { padding-left: 20px; margin: 8px 0 0; }
+.help-card li { margin-bottom: 6px; }

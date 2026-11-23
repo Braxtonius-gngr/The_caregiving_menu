@@ -229,4 +229,13 @@ assert.equal((await as(U.stranger, 'select id from records')).rows.length, 0);
 await as(U.me, `insert into entry_photos (id, household_id, entry_id, entry_store, mime, file_name) values (gen_random_uuid(), $1, $2, 'records', 'application/pdf', 'discharge.pdf')`, [hid, rec]);
 ok('patient file records follow the roles, author stamp and edit history; PDFs attach');
 
+// ---------- Phase 4: important days and doses ----------
+await as(U.me, `insert into records (id, household_id, kind, title, occurred_at, fields) values (gen_random_uuid(), $1, 'event', 'Lab draw', now(), '{"repeat": "Every month"}')`, [hid]);
+await as(U.me, `insert into records (id, household_id, kind, title, occurred_at, fields) values (gen_random_uuid(), $1, 'dose', 'Furosemide', now(), '{"med_id": "m1", "day": "2026-11-23", "slot": "morning", "status": "given"}')`, [hid]);
+await as(U.mom, 'select set_member_role($1, $2, $3)', [hid, U.me, 'viewer']);
+await fails(U.me, `insert into records (id, household_id, kind, title) values (gen_random_uuid(), $1, 'dose', 'x')`, [hid], 'a viewer marking a dose');
+await as(U.mom, 'select set_member_role($1, $2, $3)', [hid, U.me, 'caregiver']);
+assert.equal((await as(U.mom, `select id from records where kind = 'dose'`)).rows.length, 1);
+ok('important days and dose marks are records: caregivers write, viewers cannot');
+
 console.log(`\nAll ${n} family checks passed.`);

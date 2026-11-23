@@ -3,5 +3,5 @@
 var TCM_CONFIG = {
   SUPABASE_URL: '',
   SUPABASE_ANON_KEY: '',
-  APP_VERSION: '0.5.0'
+  APP_VERSION: '0.6.0'
 };

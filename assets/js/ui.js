@@ -46,14 +46,14 @@ function openSheet(html) { document.getElementById('sheetBody').innerHTML = html
 var scanSession = 0; // bumped when the scanner opens or a sheet closes; late lookups compare against it
 function closeSheet() { scanSession++; S.sharedPhoto = null; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
 
-var TITLES = { simple: '', home: 'Home', recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted', file: 'Patient file', kitchen: 'Kitchen' };
+var TITLES = { simple: '', home: 'Today', meds: 'Daily meds', help: 'How to',  recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted', file: 'Patient file', kitchen: 'Kitchen' };
 var currentScreen = 'home';
 function showScreen(name, arg) {
   currentScreen = name;
   document.getElementById('screenTitle').textContent = TITLES[name] || name;
-  var tab = { recipes: 'kitchen', pantry: 'kitchen', recipe: 'kitchen', fluids: 'diary', trash: 'diary' }[name] || name;
+  var tab = { recipes: 'kitchen', pantry: 'kitchen', recipe: 'kitchen', fluids: 'diary', trash: 'diary', meds: 'home', help: 'home' }[name] || name;
   document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === tab); });
-  var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe, fluids: renderFluids, trash: renderTrash, file: renderFile, kitchen: renderKitchen }[name];
+  var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe, fluids: renderFluids, trash: renderTrash, file: renderFile, kitchen: renderKitchen, meds: renderMeds, help: renderHelp }[name];
   document.getElementById('screen').innerHTML = fn ? fn(arg) : '';
   window.scrollTo(0, 0);
 }
@@ -93,18 +93,15 @@ function profileSwitcher() {
 }
 function setProfile(id) { State.activeProfile = id; DB.meta('active_profile', id); refresh(); }
 
-/* ---------- Home ---------- */
-function renderHome() {
+/* ---------- Kitchen ideas (was Home): what to cook, use up, restock, the shopping list ---------- */
+function renderKitchenIdeas() {
   var cookNow = State.recipes.filter(function (r) { return S.recipeInfo[r.id].cov.pct === 100 && S.recipeInfo[r.id].cov.total > 0; }).sort(function (a, b) { return (a.last_cooked_on || '') < (b.last_cooked_on || '') ? -1 : 1; });
   var oneTrip = State.recipes.filter(function (r) { var c = S.recipeInfo[r.id].cov; return c.pct >= 80 && c.pct < 100; });
   var expiring = Logic.expiringSoon(State.pantry, 4);
   var expIds = {}; expiring.forEach(function (p) { expIds[p.ingredient_id] = true; });
   var useUp = State.recipes.filter(function (r) { return (S.linesByRecipe[r.id] || []).some(function (l) { return expIds[l.ingredient_id]; }); });
   var restock = Logic.restockSuggestions(State.pantry, S.usageByIng, S.ingById);
-  var todays = State.diary.filter(function (e) { return careDayOf(e.eaten_at) === careToday() && (!State.activeProfile || e.for_profile_id === State.activeProfile); });
-  var prof = State.profiles.find(function (p) { return p.id === State.activeProfile; });
   var html = profileSwitcher();
-  html += '<h2>Today so far</h2>' + dvTiles(Logic.dayTotals(todays), prof && prof.daily_targets);
   if (!State.recipes.length) html += '<div class="card"><h3>Welcome</h3><p class="muted">Add a recipe and a few pantry items and this screen fills in with what you can cook tonight. Try <b>Settings &rarr; Load sample data</b> to see it working.</p></div>';
   html += '<h2>Cook tonight</h2>' + (cookNow.length ? cookNow.slice(0, 6).map(recipeCard).join('') : '<div class="empty">Nothing fully covered yet.</div>');
   html += '<h2>One trip away</h2>' + (oneTrip.length ? oneTrip.slice(0, 6).map(recipeCard).join('') : '<div class="empty">No near-misses.</div>');
