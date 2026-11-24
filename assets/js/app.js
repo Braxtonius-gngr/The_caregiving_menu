@@ -284,7 +284,7 @@ function syncNow() {
       if (justJoined) askMyName();
       purgeOldTrashPhotos().catch(function () {});
       return DB.meta('my_role').then(function (role) {
-        if (r.pulled || r.photos || role !== roleBefore || justJoined) return loadAll().then(refresh);
+        if (r.pulled || r.photos || role !== roleBefore || justJoined) return loadAll().then(bgRefresh);
       });
     });
   }).then(function () { lastSyncError = null; }, function (e) {

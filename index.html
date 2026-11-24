@@ -30,7 +30,7 @@
     <button data-tab="kitchen" class="tab" onclick="showScreen('kitchen')"><span class="tab-ico">&#127859;</span>Kitchen</button>
   </nav>
 
-  <div id="sheet" class="sheet hidden" onclick="if (event.target === this) closeSheet()">
+  <div id="sheet" class="sheet hidden" onclick="if (event.target === this) dismissSheet()">
     <div class="sheet-body" id="sheetBody"></div>
   </div>
   <div id="toast" class="toast hidden"></div>
@@ -53,5 +53,6 @@
   <script src="assets/js/scribe.js"></script>
   <script src="assets/js/simple.js"></script>
   <script src="assets/js/app.js"></script>
+  <script src="assets/js/nav.js"></script>
 </body>
 </html>

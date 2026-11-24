@@ -11,7 +11,8 @@ function scribeDraft() { try { return JSON.parse(localStorage.getItem(SCRIBE_KEY
 function scribeSave() {
   var sc = S.scribe, ta = document.getElementById('scribeText'); if (!sc) return;
   if (ta) sc.text = ta.value;
-  try { localStorage.setItem(SCRIBE_KEY, JSON.stringify({ pid: sc.pid, text: sc.text || '', started: sc.started })); } catch (e) { /* storage full or blocked */ }
+  var fo = document.getElementById('scribeFocus'); if (fo) sc.focus = fo.value;
+  try { localStorage.setItem(SCRIBE_KEY, JSON.stringify({ pid: sc.pid, text: sc.text || '', focus: sc.focus || '', started: sc.started })); } catch (e) { /* storage full or blocked */ }
 }
 function scribeClear() { try { localStorage.removeItem(SCRIBE_KEY); } catch (e) { /* blocked */ } }
 function scribeCanListen() { return !!(window.SpeechRecognition || window.webkitSpeechRecognition); }
@@ -19,7 +20,7 @@ function scribeCanListen() { return !!(window.SpeechRecognition || window.webkit
 function scribeIt(pid) {
   var old = scribeDraft();
   S.scribe = { pid: pid || null, text: '', started: new Date().toISOString(), listening: false };
-  if (old && old.text && (old.pid || null) === (pid || null)) { S.scribe.text = old.text; S.scribe.started = old.started || S.scribe.started; }
+  if (old && old.text && (old.pid || null) === (pid || null)) { S.scribe.text = old.text; S.scribe.focus = old.focus || ''; S.scribe.started = old.started || S.scribe.started; }
   scribeSheet();
 }
 function scribeSheet() {
@@ -31,8 +32,16 @@ function scribeSheet() {
         '<p class="muted">Ask first: tell the nurse or doctor you are taking notes with your phone. Some states require everyone&rsquo;s OK to record. No sound is saved, only the words. Keep the phone face up, near whoever is talking, with the app open.</p>'
       : '<p class="muted">Listening is not available in this browser. Type below, or tap the microphone on your keyboard to talk instead of typing.</p>') +
     '<div id="scribeLive" class="muted" aria-live="polite">' + (sc.listening ? 'Listening...' : '') + '</div>' +
+    '<details class="card"><summary><b>Tips for good notes</b></summary><ul>' +
+      '<li>Say who is visiting and why at the start: &ldquo;Home health nurse, weekly check.&rdquo;</li>' +
+      '<li>Ask them to say numbers out loud: blood pressure, weight, doses, dates.</li>' +
+      '<li>Spell or repeat medicine names; speech-to-text often mishears them.</li>' +
+      '<li>Talk to the scribe directly to give it instructions: &ldquo;Scribe, note that she skipped lunch&rdquo; or &ldquo;remind me to call the pharmacy.&rdquo;</li>' +
+      '<li>Before you finish, read the notes and fix anything that looks wrong.</li></ul></details>' +
+    '<label for="scribeFocus">Anything to focus on or leave out? (optional)</label>' +
+    '<input id="scribeFocus" data-autosave value="' + esc(sc.focus || '') + '" oninput="scribeSave()" placeholder="e.g. Focus on her swelling and the new water pill. Skip the insurance talk.">' +
     '<label for="scribeText">What happened (you can edit this)</label>' +
-    '<textarea id="scribeText" rows="10" oninput="scribeSave()" placeholder="e.g. Nurse Pat came at 2. BP 142/80, lungs clear, ankles a little swollen. Stop the furosemide on Sundays, keep the rest. Lab draw next Tuesday. Call if weight up 3 lb in 2 days.">' + esc(sc.text || '') + '</textarea>' +
+    '<textarea id="scribeText" data-autosave rows="10" oninput="scribeSave()" placeholder="e.g. Nurse Pat came at 2. BP 142/80, lungs clear, ankles a little swollen. Stop the furosemide on Sundays, keep the rest. Lab draw next Tuesday. Call if weight up 3 lb in 2 days.">' + esc(sc.text || '') + '</textarea>' +
     '<div class="btn-row"><button class="btn writer-only" onclick="scribeRun()">Pull out the important parts</button><button class="btn ghost" onclick="closeSheet()">Close</button>' +
     (sc.text ? '<button class="btn ghost" onclick="scribeDiscard()">Start over</button>' : '') + '</div>' +
     '<div id="scribeOut" aria-live="polite"></div>');
@@ -97,7 +106,7 @@ function scribeRun() {
   scribeStop();
   var out = document.getElementById('scribeOut'); if (out) out.innerHTML = '<p>Reading the notes...</p>';
   var meds = recordsOf(sc.pid, ['medication']).map(function (r) { return r.title; }).filter(Boolean).slice(0, 60);
-  Sync.brain('scribe', { text: text.slice(-SCRIBE_MAX), meds: meds, started: sc.started, today: localDay(new Date().toISOString()) })
+  Sync.brain('scribe', { text: text.slice(-SCRIBE_MAX), focus: sc.focus || '', meds: meds, started: sc.started, today: localDay(new Date().toISOString()) })
     .then(function (d) { scribeFill(d, text); })
     .catch(function (e) { var o = document.getElementById('scribeOut'); if (o) o.innerHTML = '<p class="flag-text">Could not read the notes: ' + esc(e.message) + '. Your notes are still saved.</p>'; });
 }

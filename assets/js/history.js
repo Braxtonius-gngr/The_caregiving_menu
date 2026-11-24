@@ -176,6 +176,5 @@ function viewExtraPhoto(id) {
     toast('Opening ' + (p.file_name || 'PDF') + '...');
     return Sync.photoSrc(p, 'entry_photos').then(function (src) { if (!src) return toast('This PDF is not available offline yet'); return fetch(src).then(function (r) { return r.blob(); }).then(function (b) { window.open(URL.createObjectURL(new Blob([b], { type: 'application/pdf' })), '_blank'); }); });
   }
-  openSheet('<img id="xBig" class="photo-big" alt="Photo"><div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
-  Sync.photoSrc(p, 'entry_photos').then(function (src) { var el = document.getElementById('xBig'); if (el && src) el.src = src; });
+  Sync.photoSrc(p, 'entry_photos').then(function (src) { if (src) zoomImage(src, 'Photo'); else toast('This photo is not available offline yet'); });
 }

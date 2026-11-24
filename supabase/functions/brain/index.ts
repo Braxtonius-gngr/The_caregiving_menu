@@ -488,8 +488,12 @@ Today is ${new Date().toISOString().slice(0, 10)}.`;
       const text = String(body.text ?? "").slice(-80000);
       if (text.trim().length < 15) throw new Error("No notes sent.");
       const meds = (body.meds ?? []).slice(0, 60).map((m: unknown) => String(m).slice(0, 80)).join(", ");
-      return await ask(scribeSchema, [{ type: "text", text: `You are a careful scribe for a family caring for an elderly relative at home. Below are notes about a visit from a nurse, doctor, therapist or hospice worker: either typed by the family or an automatic speech-to-text transcript of the whole visit, with no speaker labels and possible mishearings.
-Pull out only what matters for her care, in short plain lines. Leave out small talk.
+      const focus = String(body.focus ?? "").slice(0, 1500).trim();
+      return await ask(scribeSchema, [{ type: "text", text: `You are a careful medical scribe for a family caring for an elderly relative at home. Below are notes about a care visit (home health nurse, doctor, therapist, hospice, pharmacist): either typed by the family or an automatic speech-to-text transcript of the whole visit, with no speaker labels and possible mishearings.
+This is care talk. Pull out what matters for her care, in short plain lines a tired family member can act on: findings and readings, what the clinician said to do or watch for, when to call them, changes to medicines, diet, fluids, activity, wound care or equipment, tests and referrals, the next visit. Leave out small talk, greetings and chatter about other things.
+The family's own instructions to you come first and override the defaults below, as long as they do not ask you to invent anything.
+- Sentences in the notes that speak to you directly ("scribe, note that...", "make a note...", "remind me to...", "put down that...", "don't include...") are the family's instructions or to-dos, not things the clinician said. Follow them.${focus ? `
+The family's instructions: ${focus}` : ""}
 - Use only what the notes say. Never add advice, diagnoses or doses that were not said.
 - Keep numbers (blood pressure, weight, doses, dates) exactly as said. If a number or drug name may have been misheard, still record it as heard and add it to double_check.
 - Speech-to-text often garbles drug names; compare with her current medicines and say in double_check if a heard name probably means one of them.
@@ -533,6 +537,7 @@ Deno.serve(async (req) => {
     return json(await handle(body.mode, body));
   } catch (e) {
     if (e instanceof Anthropic.RateLimitError) return json({ error: "Busy, try again in a minute." }, 429);
+    if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) return json({ error: "The AI key was rejected (" + e.status + "). The app owner needs to put a new Anthropic API key in Supabase (ANTHROPIC_API_KEY)." }, 502);
     if (e instanceof Anthropic.APIError) return json({ error: `AI service error ${e.status}` }, 502);
     return json({ error: (e as Error).message }, 400);
   }
