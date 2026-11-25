@@ -8,7 +8,7 @@
 
 var AI_FEATURES = {
   read_photo: 'Snap it', fill_form: 'Fill from a photo', quick_log: 'Say it', scribe: 'Scribe', ask_file: 'Ask her file',
-  handoff: 'Catch me up', guidance: 'Guidance answer', schedule_draft: 'Schedule draft', meal_ideas: 'Meal ideas',
+  handoff: 'Catch me up', guidance: 'Guidance answer', schedule_draft: 'Schedule draft', timing_questions: 'Pharmacist questions', meal_ideas: 'Meal ideas',
   parse_recipe: 'Recipe reading', parse_receipt: 'Receipt reading', pantry_photo: 'Pantry photo', estimate_plate: 'Plate estimate',
   appointment_summary: 'Appointment summary', diet_swaps: 'Diet swaps', variations: 'Recipe variations'
 };

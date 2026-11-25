@@ -52,7 +52,7 @@ function openSheet(html) { if (typeof aiWrongAppend === 'function') html = aiWro
 var scanSession = 0; // bumped when the scanner opens or a sheet closes; late lookups compare against it
 function closeSheet() { scanSession++; S.sharedPhoto = null; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
 
-var TITLES = { simple: '', home: 'Today', meds: 'Daily meds', help: 'How to', timing: 'Timing review', patterns: 'Patterns', plans: 'Schedule drafts', phototest: 'Photo reader test', medcheck: 'Compare medicines', handoff: 'Catch me up', ask: 'Ask her file', reports: 'Reports', plan: 'Schedule draft',  recipes: 'Recipes', scan: 'Kitchen', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted', file: 'Patient file', kitchen: 'Kitchen' };
+var TITLES = { simple: '', home: 'Today', meds: 'Daily meds', help: 'How to', timing: 'Timing review', patterns: 'Patterns', plans: 'Pharmacist questions', phototest: 'Photo reader test', medcheck: 'Compare medicines', handoff: 'Catch me up', ask: 'Ask her file', reports: 'Reports', plan: 'Question sheet',  recipes: 'Recipes', scan: 'Kitchen', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted', file: 'Patient file', kitchen: 'Kitchen' };
 var currentScreen = 'home';
 function showScreen(name, arg) {
   if (name !== 'help') S.lastScreen = name;

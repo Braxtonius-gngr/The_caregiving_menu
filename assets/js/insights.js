@@ -94,88 +94,150 @@ function draftContext(pid) {
     timing_questions: timingQuestions(d)
   } };
 }
-function draftSchedule(pid) {
+/* ---------- questions for the pharmacist (P-007, design step-c3) ----------
+ * One sheet per visit (records kind 'plan', fields.sheet = 2). The app and the AI only suggest
+ * questions; the family records who answered and what they said. A medicine's time changes only
+ * when an owner taps Update the medicine on an answer, and its note names who said so. */
+var QSHEET_ROLES = ['Pharmacist', 'Doctor', 'Nurse practitioner', 'Physician assistant'];
+var QSHEET_SLOTS = ['morning', 'noon', 'evening', 'bedtime'];
+function qsheetOf(id) { return (State.records || []).find(function (r) { return r.id === id; }); }
+function qsheetSave(rec) { return DB.put('records', rec).then(loadAll).then(function () { if (Sync.enabled()) syncNow(); }); }
+function qsheetStart(pid) {
+  var qs = timingQuestions(timingData(pid)).map(function (q) { return { text: q, why: 'From Timing review: her real dose times compared with the label, her meals and sleep.', from: 'review', med_id: null, sources: [] }; });
+  DB.put('records', { kind: 'plan', for_profile_id: pid, title: 'Questions for the pharmacist', occurred_at: new Date().toISOString(), fields: { sheet: 2, status: 'to_ask', questions: qs } })
+    .then(function (rec) { return loadAll().then(function () { if (Sync.enabled()) syncNow(); showScreen('plan', { id: rec.id }); }); })
+    .catch(function (e) { toast(e.message); });
+}
+function qsheetResearch(id) {
   if (!Sync.enabled()) return toast('Turn on sync in Settings first');
-  if (!activeMeds(pid).length) return toast('Add her medicines first');
-  var c = draftContext(pid), box = document.getElementById('draftStatus');
-  if (box) box.innerHTML = '<p class="muted">Searching current sources and drafting. This can take a minute or two...</p>';
-  Sync.brain('schedule_draft', { context: c.context }).then(function (d) {
-    var items = (d.items || []).map(function (it) { return Object.assign({}, it, { med_id: c.refs[it.med_ref] || null }); }).filter(function (it) { return it.med_id; });
-    return DB.put('records', { kind: 'plan', for_profile_id: pid, title: 'Medicine timing draft', occurred_at: new Date().toISOString(),
-      fields: { status: 'draft', summary: d.summary, items: items, undecided: d.undecided || [], questions: d.questions_for_pharmacist || [], caveat: d.caveat, sources: d.source_list || [] } });
-  }).then(function (saved) { return loadAll().then(function () { if (Sync.enabled()) syncNow(); showScreen('plan', { id: saved.id }); }); })
-    .catch(function (e) { if (box) box.innerHTML = '<p class="muted">Could not draft: ' + esc(e.message) + '</p>'; else toast(e.message); });
+  var rec = qsheetOf(id); if (!rec) return;
+  var pid = rec.for_profile_id; if (!activeMeds(pid).length) return toast('Add her medicines first');
+  var c = draftContext(pid), box = document.getElementById('qsStatus');
+  if (box) box.innerHTML = '<p class="muted">Searching current trusted sources for questions to ask. This can take a minute or two...</p>';
+  Sync.brain('timing_questions', { context: c.context }).then(function (d) {
+    var src = d.source_list || [];
+    var add = (d.questions || []).map(function (q) {
+      return { text: q.text, why: q.why, from: 'research', med_id: c.refs[q.med_ref] || null, sources: (q.sources || []).map(function (n) { return src[n - 1]; }).filter(Boolean) };
+    });
+    var cur = qsheetOf(id); cur.fields = Object.assign({}, cur.fields, { questions: (cur.fields.questions || []).concat(add) });
+    return qsheetSave(cur).then(function () { refresh(); toast(add.length + ' question(s) added'); });
+  }).catch(function (e) { if (box) box.innerHTML = '<p class="muted">Could not find questions: ' + esc(e.message) + '</p>'; else toast(e.message); });
+}
+function qsheetAddOwn(id) {
+  var rec = qsheetOf(id); if (!rec) return;
+  openSheet('<h2 style="margin-top:0" data-nosnap>Add a question</h2><label for="qsOwn">Your question</label><textarea id="qsOwn" rows="3" maxlength="500" placeholder="Can her water pill be given earlier so she isn’t up at night?"></textarea>' +
+    '<label for="qsMed">About which medicine (optional)</label><select id="qsMed"><option value="">Several or none</option>' + activeMeds(rec.for_profile_id).map(function (m) { return '<option value="' + m.id + '">' + esc(m.title) + '</option>'; }).join('') + '</select>' +
+    '<div class="btn-row"><button class="btn" onclick="qsheetAddOwnSave(\'' + id + '\')">Add</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
+}
+function qsheetAddOwnSave(id) {
+  var text = document.getElementById('qsOwn').value.trim(); if (!text) return toast('Type the question first');
+  var cur = qsheetOf(id), med = document.getElementById('qsMed').value || null;
+  cur.fields = Object.assign({}, cur.fields, { questions: (cur.fields.questions || []).concat([{ text: text, why: '', from: 'family', med_id: med, sources: [] }]) });
+  qsheetSave(cur).then(function () { closeSheet(); refresh(); });
+}
+function qsheetRemove(id, i) {
+  if (!confirm('Remove this question from the sheet?')) return;
+  var cur = qsheetOf(id), qs = (cur.fields.questions || []).slice(); qs.splice(i, 1);
+  cur.fields = Object.assign({}, cur.fields, { questions: qs });
+  qsheetSave(cur).then(refresh);
+}
+// Saves who answered and every answer typed on the screen.
+function qsheetAnswers(id, quiet) {
+  var cur = qsheetOf(id); if (!cur) return Promise.resolve();
+  var f = Object.assign({}, cur.fields), v = function (k) { var el = document.getElementById(k); return el ? el.value.trim() : ''; };
+  f.answered_by = v('qsWho') || null; f.answerer_role = v('qsRole') || null; f.answered_on = v('qsDate') || null;
+  f.questions = (f.questions || []).map(function (q, i) {
+    var n = Object.assign({}, q); n.answer = v('qa-' + i) || null;
+    var med = v('qc-med-' + i);
+    n.change = med ? { med_id: med, slot: v('qc-slot-' + i), time: v('qc-time-' + i) } : (q.applied_on ? q.change : null);
+    return n;
+  });
+  f.status = f.answered_by && f.questions.some(function (q) { return q.answer; }) ? 'answered' : 'to_ask';
+  cur.fields = f;
+  return qsheetSave(cur).then(function () { if (!quiet) { toast('Saved'); refresh(); } });
+}
+function qsheetChange(i) { var el = document.getElementById('qc-' + i); if (el) el.classList.toggle('hidden'); }
+// Owner only: write the time the professional gave onto the medicine. History keeps the old one.
+function qsheetApply(id, i) {
+  qsheetAnswers(id, true).then(function () {
+    var cur = qsheetOf(id), f = cur.fields, q = f.questions[i], ch = q && q.change;
+    if (!f.answered_by) return toast('First type who answered (their name), then tap again.');
+    if (!ch || !ch.med_id || QSHEET_SLOTS.indexOf(ch.slot) < 0 || !/^\d{1,2}:\d{2}$/.test(ch.time || '')) return toast('Pick the medicine, the dose and the new time first.');
+    var who = f.answered_by + (f.answerer_role ? ' (' + f.answerer_role.toLowerCase() + ')' : ''), day = f.answered_on || careToday();
+    if (!confirm('Change ' + medTitle(ch.med_id) + ', ' + slotName(ch.slot).toLowerCase() + ' dose, to ' + ch.time + '? The note will say ' + who + ' said so on ' + day + '.')) return;
+    return DB.update('records', ch.med_id, function (m) {
+      if (!m || m.deleted) return null;
+      var mf = Object.assign({}, m.fields), slots = Logic.medSlots(m);
+      if (slots.indexOf(ch.slot) < 0) slots.push(ch.slot);
+      mf.slots = slots.join(','); mf.slot_times = Object.assign({}, mf.slot_times || {}); mf.slot_times[ch.slot] = ch.time;
+      mf.timing_source = 'Changed ' + day + ': ' + who + ' said so, from the question sheet';
+      m.fields = mf; return m;
+    }).then(function () {
+      var again = qsheetOf(id); again.fields.questions[i].applied_on = day;
+      return qsheetSave(again);
+    }).then(function () { refresh(); toast(medTitle(ch.med_id) + ' updated. History keeps the old time.'); });
+  }).catch(function (e) { toast('Could not save: ' + e.message); });
 }
 function renderPlans(arg) {
-  var pid = filePid(arg || {}), plans = recordsOf(pid, ['plan']).sort(byDateDesc);
-  var label = { draft: 'Waiting for approval', approved: 'Approved', declined: 'Not approved' };
-  return '<p class="muted">The app drafts medicine timing from her labels, her real dose times, meals and sleep, and current guidance, with sources. Nothing changes on Today until an owner records that her pharmacist or doctor approved it.</p>' +
-    '<div class="btn-row writer-only"><button class="btn" onclick="draftSchedule(' + pidArg(pid) + ')">Draft a schedule</button><button class="btn ghost" onclick="showScreen(\'timing\',{pid:' + pidArg(pid) + '})">Timing review</button></div><div id="draftStatus" aria-live="polite"></div>' +
-    (plans.length ? plans.map(function (p) { var f = p.fields || {}; return '<div class="card tappable" onclick="showScreen(\'plan\',{id:\'' + p.id + '\'})"><b>' + esc(fmtWhen(p.occurred_at, true)) + '</b> <span class="badge ' + (f.status === 'approved' ? 'ok' : f.status === 'declined' ? 'bad' : 'warn') + '">' + esc(label[f.status] || f.status) + '</span><div class="muted">' + esc((f.items || []).filter(function (i) { return i.change; }).length + ' change(s) proposed') + (f.approved_by ? ' · ' + esc(f.approved_by) : '') + '</div></div>'; }).join('') : '<p class="muted">No drafts yet.</p>');
+  var pid = filePid(arg || {}), all = recordsOf(pid, ['plan']).sort(byDateDesc);
+  var sheets = all.filter(function (p) { return (p.fields || {}).sheet === 2; }), old = all.filter(function (p) { return (p.fields || {}).sheet !== 2; });
+  return '<p class="muted">Questions to take to her pharmacist or doctor about when her medicines are given. The app only suggests questions; they decide. A time changes only when you write down who said so.</p>' +
+    '<div class="btn-row writer-only"><button class="btn" onclick="qsheetStart(' + pidArg(pid) + ')">Start a question sheet</button><button class="btn ghost" onclick="showScreen(\'timing\',{pid:' + pidArg(pid) + '})">Timing review</button></div>' +
+    (sheets.length ? sheets.map(function (p) { var f = p.fields || {}; return '<div class="card tappable" onclick="showScreen(\'plan\',{id:\'' + p.id + '\'})"><b>' + esc(fmtWhen(p.occurred_at, true)) + '</b> <span class="badge ' + (f.status === 'answered' ? 'ok' : 'warn') + '">' + (f.status === 'answered' ? 'Answered' : 'To ask') + '</span><div class="muted">' + (f.questions || []).length + ' question(s)' + (f.answered_by ? ' · answered by ' + esc(f.answered_by) : '') + '</div></div>'; }).join('') : '<p class="muted">No question sheets yet.</p>') +
+    (old.length ? '<h3>Older timing drafts</h3>' + old.map(function (p) { var f = p.fields || {}; return '<div class="card tappable" onclick="showScreen(\'plan\',{id:\'' + p.id + '\'})"><b>' + esc(fmtWhen(p.occurred_at, true)) + '</b> <span class="badge">' + esc(f.status === 'approved' ? 'Approved' : f.status === 'declined' ? 'Not approved' : 'Not acted on') + '</span></div>'; }).join('') : '');
 }
 function medTitle(id) { var m = (State.records || []).find(function (r) { return r.id === id; }); return m ? m.title : 'Medicine'; }
 function sourceLinks(nums, list) { return (nums || []).map(function (n) { var s = (list || [])[n - 1]; return s ? '<a href="' + esc(s.url) + '" target="_blank" rel="noopener">[' + n + ']</a>' : ''; }).join(' '); }
+function qsheetSources(list) { return (list || []).map(function (s, n) { return '<a href="' + esc(s.url) + '" target="_blank" rel="noopener" title="' + esc(s.title || '') + '">[' + (n + 1) + ']</a>'; }).join(' '); }
 function renderPlan(arg) {
-  var p = (State.records || []).find(function (r) { return r.id === (arg && arg.id); }); if (!p) return '<p class="muted">Draft not found.</p>';
-  var f = p.fields || {}, owner = State.role === 'owner' || State.role == null;
-  var html = '<p class="muted">' + esc(fmtWhen(p.occurred_at, true)) + '</p>' +
-    (f.status === 'approved' ? '<div class="note ok-note"><b>Approved</b> by ' + esc(f.approved_by || '') + (f.approver_role ? ' (' + esc(f.approver_role) + ')' : '') + ' on ' + esc(f.approved_on || '') + (f.approval_note ? '. ' + esc(f.approval_note) : '') + '. Recorded by ' + esc(whoName(p.edited_by || p.user_id)) + '.</div>'
-      : f.status === 'declined' ? '<div class="note">Not approved' + (f.approval_note ? ': ' + esc(f.approval_note) : '') + '.</div>'
-      : '<div class="note"><b>Draft.</b> Nothing has changed. Take this to her pharmacist or doctor; an owner records their answer below.</div>') +
-    '<p>' + esc(f.summary || '') + '</p>' +
-    (f.items || []).map(function (it, i) {
-      var accepted = (f.accepted || []).indexOf(i) >= 0;
-      return '<div class="card' + (it.change ? '' : ' faded') + '"><div class="row between"><b>' + esc(medTitle(it.med_id)) + '</b><span class="badge">' + esc(it.confidence) + ' confidence</span></div>' +
-        '<div>' + esc(slotName(it.slot)) + ' ' + esc(it.current_time) + (it.change ? ' &rarr; <b>' + esc(slotName(it.proposed_slot)) + ' ' + esc(it.proposed_time) + '</b>' : ' &middot; keep') + (accepted ? ' <span class="badge ok">applied</span>' : '') + '</div>' +
-        '<p class="muted">' + esc(it.reason) + ' ' + sourceLinks(it.sources, f.sources) + '</p>' + (it.ask_pharmacist ? '<div class="muted"><b>Ask:</b> ' + esc(it.ask_pharmacist) + '</div>' : '') + '</div>';
+  var p = (State.records || []).find(function (r) { return r.id === (arg && arg.id); }); if (!p) return '<p class="muted">Sheet not found.</p>';
+  return (p.fields || {}).sheet === 2 ? renderQSheet(p) : renderOldDraft(p);
+}
+function renderQSheet(p) {
+  var f = p.fields || {}, owner = State.role === 'owner' || State.role == null, meds = activeMeds(p.for_profile_id);
+  var from = { review: 'Timing review', research: 'Researched', family: 'Family' };
+  return '<p class="muted">' + esc(fmtWhen(p.occurred_at, true)) + ' · ' + (f.status === 'answered' ? 'Answered' : 'To ask') + '</p>' +
+    '<div class="btn-row writer-only"><button class="btn sm" onclick="qsheetResearch(\'' + p.id + '\')">Add researched questions</button><button class="btn sm ghost" onclick="qsheetAddOwn(\'' + p.id + '\')">Add my own question</button><button class="btn sm ghost" onclick="qsheetPrint(\'' + p.id + '\')">Print for the visit</button></div><div id="qsStatus" aria-live="polite"></div>' +
+    ((f.questions || []).length ? '' : '<p class="muted">No questions yet. Nothing stood out in Timing review; add researched questions or your own.</p>') +
+    (f.questions || []).map(function (q, i) {
+      var c = q.change || {};
+      return '<div class="card"><div class="row between"><b>' + (i + 1) + '. ' + esc(q.text) + '</b><span class="badge">' + esc(from[q.from] || q.from) + '</span></div>' +
+        (q.why ? '<div class="muted">' + esc(q.why) + ' ' + qsheetSources(q.sources) + '</div>' : '') +
+        '<label for="qa-' + i + '">What they said</label><textarea id="qa-' + i + '" rows="2">' + esc(q.answer || '') + '</textarea>' +
+        (q.applied_on ? '<div class="ok-note">' + esc(medTitle(c.med_id)) + ', ' + esc(slotName(c.slot).toLowerCase()) + ' dose changed to ' + esc(c.time) + ' on ' + esc(q.applied_on) + '.</div>'
+          : '<div class="writer-only"><button class="linkish" onclick="qsheetChange(' + i + ')">They said to change the time</button>' +
+            '<div id="qc-' + i + '" class="' + (c.med_id ? '' : 'hidden') + '"><div class="row"><select id="qc-med-' + i + '" aria-label="Medicine"><option value="">Medicine</option>' + meds.map(function (m) { return '<option value="' + m.id + '"' + (m.id === (c.med_id || q.med_id) && c.med_id ? ' selected' : '') + '>' + esc(m.title) + '</option>'; }).join('') + '</select>' +
+            '<select id="qc-slot-' + i + '" aria-label="Which dose">' + QSHEET_SLOTS.map(function (s) { return '<option value="' + s + '"' + (s === c.slot ? ' selected' : '') + '>' + esc(slotName(s)) + '</option>'; }).join('') + '</select>' +
+            '<input id="qc-time-' + i + '" type="time" aria-label="New time" value="' + esc(c.time || '') + '"></div>' +
+            (owner ? '<div class="btn-row"><button class="btn sm" onclick="qsheetApply(\'' + p.id + '\',' + i + ')">Update the medicine</button></div>' : '<p class="muted">An owner updates the medicine.</p>') + '</div></div>') +
+        '<p><button class="linkish writer-only" onclick="qsheetRemove(\'' + p.id + '\',' + i + ')">Remove question</button></p></div>';
     }).join('') +
-    ((f.undecided || []).length ? '<h3>Left for her clinicians</h3><ul>' + f.undecided.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '') +
-    ((f.questions || []).length ? '<h3>Questions for the pharmacist</h3><ol class="q-list">' + f.questions.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ol>' : '') +
-    ((f.sources || []).length ? '<h3>Sources</h3><ol class="src-list">' + f.sources.map(function (s) { return '<li><a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.title) + '</a>' + (s.age ? ' <span class="muted">' + esc(s.age) + '</span>' : '') + '</li>'; }).join('') + '</ol>' : '') +
-    '<p class="muted">' + esc(f.caveat || 'A draft for her pharmacist or doctor to approve.') + '</p>' +
-    '<div class="btn-row"><button class="btn ghost" onclick="printPlan(\'' + p.id + '\')">Print for the pharmacist</button><button class="btn ghost" onclick="showHistory(\'records\',\'' + p.id + '\')">History</button>' +
-    (f.status === 'draft' && owner ? '<button class="btn writer-only" onclick="approvePlan(\'' + p.id + '\')">Record approval</button>' : '') + '</div>' +
-    (f.status === 'draft' && !owner ? '<p class="muted">Only an owner of the family can record an approval.</p>' : '');
-  return html;
+    '<h3>Who answered</h3><div class="card"><label for="qsWho">Name</label><input id="qsWho" value="' + esc(f.answered_by || '') + '" placeholder="e.g. Dr. Lee">' +
+    '<label for="qsRole">Role</label><select id="qsRole">' + QSHEET_ROLES.map(function (r) { return '<option' + (r === f.answerer_role ? ' selected' : '') + '>' + r + '</option>'; }).join('') + '</select>' +
+    '<label for="qsDate">Date</label><input id="qsDate" type="date" value="' + esc(f.answered_on || careToday()) + '">' +
+    '<div class="btn-row writer-only"><button class="btn" onclick="qsheetAnswers(\'' + p.id + '\')">Save answers</button><button class="btn ghost" onclick="showHistory(\'records\',\'' + p.id + '\')">History</button></div></div>' +
+    '<p class="muted">Questions only. Her pharmacist or doctor decides; nothing here is advice.</p>';
 }
-function approvePlan(id) {
-  var p = (State.records || []).find(function (r) { return r.id === id; }); if (!p) return;
-  var f = p.fields || {}, changes = (f.items || []).map(function (it, i) { return [it, i]; }).filter(function (x) { return x[0].change; });
-  openSheet('<h2 style="margin-top:0">Record the approval</h2><p class="muted">Only record what her pharmacist or doctor actually said.</p>' +
-    '<div class="chips" id="apStatus"><button type="button" class="chip on" data-v="approved" onclick="pickChip(\'apStatus\',this)">Approved</button><button type="button" class="chip" data-v="declined" onclick="pickChip(\'apStatus\',this)">Not approved</button></div>' +
-    '<label for="apWho">Who approved it</label><input id="apWho" placeholder="Name">' +
-    '<label for="apRole">Their role</label><select id="apRole"><option>Pharmacist</option><option>Doctor</option><option>Nurse practitioner</option><option>Physician assistant</option></select>' +
-    '<label for="apDate">Date</label><input id="apDate" type="date" value="' + careToday() + '">' +
-    (changes.length ? '<label>Changes they approved</label>' + changes.map(function (x) { return '<label class="check"><input type="checkbox" class="apItem" value="' + x[1] + '" checked> ' + esc(medTitle(x[0].med_id) + ': ' + slotName(x[0].slot) + ' ' + x[0].current_time + ' → ' + slotName(x[0].proposed_slot) + ' ' + x[0].proposed_time) + '</label>'; }).join('') : '<p class="muted">This draft proposes no changes.</p>') +
-    '<label for="apNote">What they said</label><textarea id="apNote" rows="2" placeholder="OK except keep the water pill in the morning..."></textarea>' +
-    '<div class="btn-row"><button class="btn" onclick="saveApproval(\'' + id + '\')">Save</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
+function renderOldDraft(p) {
+  var f = p.fields || {};
+  return '<p class="muted">' + esc(fmtWhen(p.occurred_at, true)) + ' · an older timing draft, kept for the record. New visits use question sheets.</p>' +
+    (f.status === 'approved' ? '<div class="note ok-note"><b>Approved</b> by ' + esc(f.approved_by || '') + (f.approver_role ? ' (' + esc(f.approver_role) + ')' : '') + ' on ' + esc(f.approved_on || '') + (f.approval_note ? '. ' + esc(f.approval_note) : '') + '.</div>'
+      : f.status === 'declined' ? '<div class="note">Not approved' + (f.approval_note ? ': ' + esc(f.approval_note) : '') + '.</div>' : '<div class="note">Not acted on. Nothing changed.</div>') +
+    '<p>' + esc(f.summary || '') + '</p>' +
+    (f.items || []).map(function (it) {
+      return '<div class="card faded"><b>' + esc(medTitle(it.med_id)) + '</b><div>' + esc(slotName(it.slot)) + ' ' + esc(it.current_time) + (it.change ? ' &rarr; ' + esc(slotName(it.proposed_slot)) + ' ' + esc(it.proposed_time) : '') + '</div><p class="muted">' + esc(it.reason) + ' ' + sourceLinks(it.sources, f.sources) + '</p></div>';
+    }).join('') +
+    ((f.questions || []).length ? '<h3>Questions it listed</h3><ol class="q-list">' + f.questions.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ol>' : '') +
+    '<div class="btn-row"><button class="btn ghost" onclick="printPlan(\'' + p.id + '\')">Print</button><button class="btn ghost" onclick="showHistory(\'records\',\'' + p.id + '\')">History</button></div>';
 }
-function saveApproval(id) {
-  var status = chipValue('apStatus') || 'approved', who = document.getElementById('apWho').value.trim();
-  if (status === 'approved' && !who) return toast('Type who approved it');
-  var accepted = status === 'approved' ? Array.prototype.map.call(document.querySelectorAll('.apItem:checked'), function (c) { return +c.value; }) : [];
-  var p = (State.records || []).find(function (r) { return r.id === id; }), items = ((p && p.fields) || {}).items || [];
-  var meta = { status: status, approved_by: who || null, approver_role: document.getElementById('apRole').value, approved_on: document.getElementById('apDate').value, approval_note: document.getElementById('apNote').value.trim() || null, accepted: accepted };
-  DB.update('records', id, function (cur) { if (!cur) return null; cur.fields = Object.assign({}, cur.fields, meta); return cur; })
-    .then(function () {
-      // Write each accepted change onto its medicine; History keeps the old slots and times.
-      return accepted.reduce(function (chain, i) {
-        var it = items[i]; if (!it || !it.med_id) return chain;
-        return chain.then(function () {
-          return DB.update('records', it.med_id, function (m) {
-            if (!m || m.deleted) return null;
-            var f = Object.assign({}, m.fields), slots = Logic.medSlots(m).filter(function (s) { return s !== it.slot; });
-            if (slots.indexOf(it.proposed_slot) < 0) slots.push(it.proposed_slot);
-            var times = Object.assign({}, f.slot_times || {}); delete times[it.slot];
-            if (it.proposed_slot !== 'prn' && /^\d{1,2}:\d{2}$/.test(it.proposed_time || '')) times[it.proposed_slot] = it.proposed_time;
-            f.slots = slots.join(','); f.slot_times = times; f.timing_source = 'Plan approved ' + meta.approved_on + ' by ' + meta.approved_by;
-            m.fields = f; return m;
-          });
-        });
-      }, Promise.resolve());
-    })
-    .then(function () { closeSheet(); return loadAll(); }).then(function () { refresh(); if (Sync.enabled()) syncNow(); toast(status === 'approved' ? 'Approved. ' + accepted.length + ' change(s) applied.' : 'Recorded as not approved'); })
-    .catch(function (e) { toast('Could not save: ' + e.message); });
+function qsheetPrint(id) {
+  var p = qsheetOf(id); if (!p) return;
+  var f = p.fields || {}, prof = State.profiles.find(function (x) { return x.id === p.for_profile_id; }) || {};
+  var meds = activeMeds(p.for_profile_id).map(function (m) { var mf = m.fields || {}; return '<li><b>' + esc(m.title) + '</b> ' + esc([mf.dose, slotsText(m)].filter(Boolean).join(', ')) + '</li>'; }).join('');
+  printHtml('<h2>Questions for the pharmacist: ' + esc(prof.person_name || '') + '</h2><p class="muted">Prepared ' + esc(careToday()) + ' by the family. Questions only; you decide.</p>' +
+    '<h3>Her medicines and when they are given now</h3><ul>' + meds + '</ul><h3>Questions</h3><ol>' +
+    (f.questions || []).map(function (q) { return '<li><b>' + esc(q.text) + '</b>' + (q.why ? '<br><span class="muted">' + esc(q.why) + '</span>' : '') + '<br>Answer: ______________________________________________</li>'; }).join('') +
+    '</ol><p>Answered by: ____________________ Role: ____________ Date: __________</p>');
 }
 function printHtml(html) {
   var holder = document.getElementById('printArea');

@@ -222,7 +222,7 @@ Return only what the schema asks for. Use generic, lowercase, singular ingredien
 Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
 Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
 
-type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance" | "read_vitals" | "read_photo" | "fill_form" | "scribe" | "handoff" | "quick_log" | "ask_file";
+type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "timing_questions" | "guidance" | "read_vitals" | "read_photo" | "fill_form" | "scribe" | "handoff" | "quick_log" | "ask_file";
 
 /* ---------- current guidance: search trusted sites first, then answer in a fixed shape ---------- */
 // Web search stays on public health sources; the answer step cites them by number.
@@ -261,33 +261,26 @@ async function research(question: string): Promise<{ notes: string; sources: Sou
 }
 function numbered(sources: Source[]) { return sources.map((s, i) => `[${i + 1}] ${s.title} (${s.url})${s.age ? ", " + s.age : ""}`).join("\n"); }
 
-const draftSchema = {
+// Medicine timing: questions for the pharmacist only (P-007). Never times, doses or advice.
+const timingQSchema = {
   type: "object", additionalProperties: false,
-  required: ["summary", "items", "undecided", "questions_for_pharmacist", "caveat"],
+  required: ["summary", "questions", "caveat"],
   properties: {
-    summary: { type: "string", description: "Two or three plain sentences: what the draft changes and why" },
-    items: {
+    summary: { type: "string", description: "One or two plain sentences: what the questions are about. No advice." },
+    questions: {
       type: "array",
       items: {
         type: "object", additionalProperties: false,
-        required: ["med_ref", "slot", "current_time", "proposed_slot", "proposed_time", "change", "reason", "sources", "confidence", "ask_pharmacist"],
+        required: ["text", "why", "med_ref", "sources"],
         properties: {
-          med_ref: { type: "string", description: "The medicine's ref from the input, e.g. m1" },
-          slot: { type: "string", enum: ["morning", "noon", "evening", "bedtime", "prn"] },
-          current_time: { type: "string", description: "HH:MM now scheduled" },
-          proposed_slot: { type: "string", enum: ["morning", "noon", "evening", "bedtime", "prn"] },
-          proposed_time: { type: "string", description: "HH:MM 24-hour; the same as current_time when no change" },
-          change: { type: "boolean" },
-          reason: { type: "string", description: "Why, in plain words, tied to the label, her meals/sleep or her readings" },
+          text: { type: "string", description: "One question the family can read out to the pharmacist, e.g. 'Is it OK that her amlodipine is given at breakfast?' or 'Does her gabapentin need to be spaced from her antacid?'. A question, never an instruction, never a proposed time" },
+          why: { type: "string", description: "Why it is worth asking, tied to the label text, her day, her real dose times or what the sources say. Plain words, no 'should'" },
+          med_ref: { type: "string", description: "The medicine's ref from the input (e.g. m1), or empty when it is about several or none" },
           sources: { type: "array", items: { type: "integer" }, description: "Numbers of the sources used, from the numbered list" },
-          confidence: { type: "string", enum: ["low", "medium", "high"] },
-          ask_pharmacist: { type: "string", description: "The one question to confirm with the pharmacist for this item, or empty" },
         },
       },
     },
-    undecided: strList("Things that need a clinician's judgement (doses, interactions, kidney adjustments) that this draft does not change"),
-    questions_for_pharmacist: strList("3-6 overall questions"),
-    caveat: { type: "string", description: "One sentence: a draft for her pharmacist or doctor to approve" },
+    caveat: { type: "string", description: "One sentence: these are questions to ask, and only her pharmacist or doctor decides" },
   },
 };
 const vitalsSchema = {
@@ -622,12 +615,26 @@ Daily targets: ${JSON.stringify(body.profile?.targets ?? {})}
 Fluid left today (oz): ${body.fluid_left_oz ?? "no limit set"}
 Eaten so far today: ${JSON.stringify(body.today ?? [])}
 On hand: ${(body.pantry ?? []).join(", ")}` }], "low");
-    case "schedule_draft": {
+    case "timing_questions": {
       // body.context: meds (with refs, slots, times, label timing text), actual timings,
-      // meals, wake/bed times, conditions, kidney labs, patterns. No names.
+      // meals, wake/bed times, conditions, kidney labs, patterns, the app's own timing questions. No names.
       const ctx = JSON.stringify(body.context ?? {}).slice(0, 40000);
       const found = await research(`Find current guidance on WHEN to take each of these medicines (time of day, with or without food, spacing from other medicines or binders, bedtime vs morning) for an older adult with: ${(body.context?.conditions ?? []).join(", ") || "chronic illness"}. Note anything about kidney disease. Medicines: ${(body.context?.meds ?? []).map((m: { name: string }) => m.name).join(", ")}.`);
-      const out = await ask(draftSchema, [{ type: "text", text: `Draft a medicine TIMING schedule for a family caregiver to take to her pharmacist. Change only times and slots, never doses or which medicines. Fit times to her day (wake, meals, bed) and her real dose times; keep a time when there is no clear reason to move it. Use the research notes and cite the numbered sources. If the research does not support a change, do not make it.\n\nHer data:\n${ctx}\n\nResearch notes:\n${found.notes}\n\nNumbered sources:\n${numbered(found.sources)}` }], "high");
+      const out = await ask(timingQSchema, [{ type: "text", text: `A family caregiver is preparing for a visit with her pharmacist. Write the QUESTIONS worth asking about the timing of her medicines: time of day, food, spacing from other medicines, and how her real day (wake, meals, bed, actual dose times) fits the labels.
+Rules:
+- Only questions. Never propose a time, a slot, a dose or a change; never write "should", "recommend" or "best"; never tell the family what to do. The pharmacist or doctor decides.
+- 3 to 8 questions, most useful first. Skip anything already covered by timing_questions in her data unless the sources add something.
+- Each question gets a short "why", tied to the label text, her day or the numbered sources, and cites the source numbers it relies on. If nothing supports a question, leave it out.
+- Never ask about stopping a medicine or changing a dose.
+
+Her data:
+${ctx}
+
+Research notes:
+${found.notes}
+
+Numbered sources:
+${numbered(found.sources)}` }], "high");
       return { ...out, source_list: found.sources };
     }
     case "read_vitals":
