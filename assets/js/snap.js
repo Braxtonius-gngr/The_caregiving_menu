@@ -99,6 +99,8 @@ function snapNote(d) {
     (d.uncertain && d.uncertain.length ? ' Left blank (not clear): ' + esc(d.uncertain.join(', ')) + '.' : '') + '</div>';
   var body = document.getElementById('sheetBody'), h2 = body && body.querySelector('h2');
   if (h2) h2.insertAdjacentHTML('afterend', h);
+  // If this fills a record form, its Save attaches the photo and keeps any doubt as a flag.
+  S.snapPending = { check: d.uncertain && d.uncertain.length ? 'Not clear in the photo: ' + d.uncertain.join(', ') : null, photos: true };
 }
 function snapSet(id, v) { var el = document.getElementById(id); if (el && v != null && v !== '') el.value = v; }
 function snapFill(d) {
@@ -122,15 +124,13 @@ function snapFill(d) {
     });
   }
   if (d.kind === 'med_label') {
-    var m = d.medication || {};
-    editRecord(null, 'medication', pid);
-    snapSet('rTitle', [m.name, m.strength].filter(Boolean).join(' '));
-    var stock = [m.quantity ? 'Qty ' + m.quantity : '', m.refills ? 'Refills: ' + m.refills : '', m.filled_on ? 'Filled ' + m.filled_on : ''].filter(Boolean).join(' · ');
-    snapSet('rf-instructions', [m.directions ? 'Label: ' + m.directions : '', m.warnings && m.warnings.length ? 'Label warnings: ' + m.warnings.join('; ') : '', stock].filter(Boolean).join('\n'));
-    snapSet('rf-prescriber', m.prescriber); snapSet('rf-pharmacy', m.pharmacy);
-    snapNote(d);
-    var hint = document.getElementById('labelHint'); if (hint) hint.textContent = 'Set the dose and when to give it. "Fill from the FDA label" adds the official warnings.';
-    return;
+    // Same medicine already saved (from a list, or an earlier bottle)? Offer to merge instead of a duplicate.
+    var mm = d.medication || {}, o = document.getElementById('snapOut');
+    if (o) o.innerHTML = '<p>Checking her medicines for this one...</p>';
+    return snapGeneric(mm.name).then(function (g) {
+      var ex = snapFindMed(pid, mm.name, g);
+      if (ex) snapMergeBottle(d, ex, g); else snapNewBottle(d, g);
+    });
   }
   if (d.kind === 'lab_report') return snapLabs(d);
   if (d.kind === 'care_team' || d.kind === 'document') return snapTeam(d);
@@ -183,7 +183,7 @@ function snapTeam(d) {
   var sn = S.snap, pid = sn.pid, doc = d.document || {}, facts = (doc.fields || []).filter(function (f) { return f && f.label && f.value; });
   var have = {}; recordsOf(pid, ['contact']).forEach(function (r) { have[snapNameKey(r.title)] = true; });
   var rows = (d.contacts || []).filter(function (c) { return c && c.name; });
-  S.snapTeam = { rows: rows, doc: doc, summary: d.summary || '' };
+  S.snapTeam = { rows: rows, doc: doc, summary: d.summary || '', uncertain: d.uncertain || [] };
   openSheet('<h2 style="margin-top:0">&#128247; From the photo</h2>' +
     '<p class="muted">' + esc(d.summary || '') + '</p>' +
     (rows.length ? '<h3>Add to the Care team</h3><p class="muted">Untick anything that looks wrong; you can edit each one later.' + (d.uncertain && d.uncertain.length ? ' Not clear: ' + esc(d.uncertain.join(', ')) + '.' : '') + '</p>' +
@@ -205,12 +205,14 @@ function saveSnapTeam() {
   var keepDoc = document.getElementById('stDoc').checked, title = document.getElementById('stTitle').value.trim() || 'Document', details = document.getElementById('stDetails').value.trim();
   if (!picks.length && !keepDoc) return toast('Nothing checked');
   var chain = picks.reduce(function (p, c) {
-    return p.then(function () { return DB.put('records', { kind: 'contact', for_profile_id: pid, title: c.name, occurred_at: null, fields: { role: c.role || null, phone: c.phone || null, fax: c.fax || null, address: c.address || null, notes: [c.notes, 'From a photo'].filter(Boolean).join('; ') } }); });
+    // Flag a contact the AI was unsure about (its name appears in the "not clear" list).
+    var key = snapNameKey(c.name), doubt = (st.uncertain || []).filter(function (u) { var k = snapNameKey(u); return key && k && (k.indexOf(key) >= 0 || key.indexOf(k) >= 0); });
+    return p.then(function () { return DB.put('records', { kind: 'contact', for_profile_id: pid, title: c.name, occurred_at: null, fields: { role: c.role || null, phone: c.phone || null, fax: c.fax || null, address: c.address || null, notes: [c.notes, 'From a photo'].filter(Boolean).join('; '), check: doubt.length ? 'Not clear in the photo: ' + doubt.join(', ') + '. Check the name and number.' : (c.phone ? null : 'No phone number could be read.') } }); });
   }, Promise.resolve());
   if (keepDoc) chain = chain.then(function () {
     var dt = st.doc.date ? new Date(st.doc.date + 'T12:00:00').toISOString() : new Date().toISOString();
     var extra = (st.doc.fields || []).filter(function (f) { return f && f.label && f.value; }).map(function (f) { return { label: f.label, value: f.value }; });
-    return DB.put('records', { kind: 'document', for_profile_id: pid, title: title, occurred_at: dt, fields: { doc_type: st.doc.doc_type || 'Other', notes: details || null, extra: extra.length ? extra : null } }).then(function (rec) { return snapKeepPhotos(rec); });
+    return DB.put('records', { kind: 'document', for_profile_id: pid, title: title, occurred_at: dt, fields: { doc_type: st.doc.doc_type || 'Other', notes: details || null, extra: extra.length ? extra : null, check: st.uncertain && st.uncertain.length ? 'Not clear in the photo: ' + st.uncertain.join(', ') : null } }).then(function (rec) { return snapKeepPhotos(rec); });
   });
   chain.then(function () { closeSheet(); return loadAll(); })
     .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast((picks.length ? picks.length + ' contact(s) added' : '') + (picks.length && keepDoc ? ', ' : '') + (keepDoc ? 'page saved to Documents' : '')); })
@@ -224,55 +226,184 @@ function snapKeepPhotos(rec) {
   return imgs.reduce(function (p, img, i) { return p.then(function () { return DB.put('entry_photos', { entry_id: rec.id, entry_store: 'records', photo_data: img, photo_path: null, pos: i, caption: null, mime: 'image/jpeg', file_name: null }); }); }, Promise.resolve());
 }
 
+/* ---------- Medicines: one entry per medicine, whatever the source ----------
+ * A handwritten list and a pill bottle can describe the same medicine. Names are matched by
+ * the first word or by the FDA generic name (Lasix = furosemide), so the second source is
+ * added to the existing medicine instead of making a duplicate. Both photos are attached to it,
+ * and a mismatch (list says 20 mg, bottle says 40 mg) is flagged for someone to check. */
+function snapMedKey(n) { return String(n || '').toLowerCase().split(/[\s,(]/)[0].replace(/[^a-z]/g, ''); }
+function snapGeneric(name) {
+  if (!name) return Promise.resolve(null);
+  return Sync.lookup('drug_label', name).then(function (r) { return r && r.found ? { generic: (r.generic || '').toLowerCase() || null, brand: (r.brand || '').toLowerCase() || null } : null; }, function () { return null; });
+}
+function snapFindMed(pid, name, g) {
+  var keys = [snapMedKey(name)];
+  if (g) { if (g.generic) keys.push(snapMedKey(g.generic)); if (g.brand) keys.push(snapMedKey(g.brand)); }
+  keys = keys.filter(Boolean);
+  return recordsOf(pid, ['medication']).find(function (r) {
+    var fl = r.fields || {};
+    return [snapMedKey(r.title), snapMedKey(fl.generic)].some(function (k) { return k && keys.indexOf(k) >= 0; });
+  }) || null;
+}
+// "40 mg", "0.5mg" -> "40mg"; null when no strength is written.
+function snapStrength(t) { var m = String(t || '').toLowerCase().replace(/,/g, '').match(/(\d+(?:\.\d+)?)\s*(mcg|mg|g|ml|units?|iu|%)/); return m ? (+m[1]) + m[2].replace(/s$/, '') : null; }
+function snapAddCheck(old, add) { add = (add || []).filter(Boolean); if (!add.length) return old || null; return [old].concat(add).filter(Boolean).join('\n'); }
+
+// A new medicine from a bottle: the usual form, with the photo attached and any doubts flagged on save.
+function snapNewBottle(d, g) {
+  var m = d.medication || {}, pid = S.snap.pid;
+  editRecord(null, 'medication', pid);
+  snapSet('rTitle', [m.name, m.strength].filter(Boolean).join(' '));
+  var stock = [m.quantity ? 'Qty ' + m.quantity : '', m.refills ? 'Refills: ' + m.refills : '', m.filled_on ? 'Filled ' + m.filled_on : ''].filter(Boolean).join(' · ');
+  snapSet('rf-instructions', [m.directions ? 'Label: ' + m.directions : '', m.warnings && m.warnings.length ? 'Label warnings: ' + m.warnings.join('; ') : '', stock].filter(Boolean).join('\n'));
+  snapSet('rf-prescriber', m.prescriber); snapSet('rf-pharmacy', m.pharmacy); snapSet('rf-generic', g && g.generic);
+  snapNote(d);
+  S.snapPending.check = d.uncertain && d.uncertain.length ? 'Not clear on the bottle: ' + d.uncertain.join(', ') : null;
+  var hint = document.getElementById('labelHint'); if (hint) hint.textContent = 'Set the dose and when to give it. "Fill from the FDA label" adds the official warnings.';
+}
+// The bottle matches a medicine already saved: show both side by side and add the bottle to it.
+function snapMergeBottle(d, ex, g) {
+  var m = d.medication || {}, fl = ex.fields || {};
+  var savedStr = snapStrength(ex.title) || snapStrength(fl.dose), bottleStr = snapStrength(m.strength) || snapStrength(m.name);
+  var clash = savedStr && bottleStr && savedStr !== bottleStr;
+  var row = function (label, a, b, bad) { return '<tr' + (bad ? ' class="flag-text"' : '') + '><th>' + label + '</th><td>' + esc(a || '—') + '</td><td>' + esc(b || '—') + '</td></tr>'; };
+  S.snapMerge = { d: d, id: ex.id, g: g, clash: clash ? 'Strength differs: saved ' + savedStr + ', bottle ' + bottleStr + '. Check with the pharmacist which is right.' : null };
+  openSheet('<h2 style="margin-top:0">&#128138; Same medicine as one already saved?</h2>' +
+    '<p>This bottle looks like <b>' + esc(ex.title) + '</b>, already in her medicines' + (fl.instructions && /medicine list/.test(fl.instructions) ? ' (from the medicine list)' : '') + '.</p>' +
+    (clash ? '<div class="card attention"><p><b>&#9888; ' + esc(S.snapMerge.clash) + '</b></p></div>' : '') +
+    '<table class="cmp"><tr><th></th><th>Saved</th><th>Bottle</th></tr>' +
+    row('Strength', savedStr || '', m.strength || '', clash) +
+    row('Directions', [fl.dose, fl.when].filter(Boolean).join(', '), m.directions) +
+    row('Prescriber', fl.prescriber, m.prescriber, fl.prescriber && m.prescriber && fl.prescriber.toLowerCase() !== m.prescriber.toLowerCase()) +
+    row('Pharmacy', fl.pharmacy, m.pharmacy) + '</table>' +
+    (d.uncertain && d.uncertain.length ? '<p class="flag-text">Not clear on the bottle: ' + esc(d.uncertain.join(', ')) + '</p>' : '') +
+    '<p class="muted">Adding fills in what is missing, keeps the label wording in Instructions, attaches the bottle photo, and flags anything that does not match.</p>' +
+    '<div class="btn-row"><button class="btn" onclick="saveMergeBottle()">Add to ' + esc(ex.title) + '</button><button class="btn ghost" onclick="snapNewBottle(S.snapMerge.d, S.snapMerge.g)">It&rsquo;s a different medicine</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
+}
+function saveMergeBottle() {
+  var mg = S.snapMerge; if (!mg) return;
+  var m = mg.d.medication || {}, unc = mg.d.uncertain || [];
+  var stock = [m.quantity ? 'Qty ' + m.quantity : '', m.refills ? 'Refills: ' + m.refills : '', m.filled_on ? 'Filled ' + m.filled_on : ''].filter(Boolean).join(' · ');
+  var label = ['Bottle label' + (m.filled_on ? ' (filled ' + m.filled_on + ')' : '') + ': ' + (m.directions || ''), m.warnings && m.warnings.length ? 'Label warnings: ' + m.warnings.join('; ') : '', stock].filter(Boolean).join('\n');
+  DB.update('records', mg.id, function (cur) {
+    if (!cur || cur.deleted) return null;
+    var f = cur.fields = cur.fields || {};
+    if (!f.prescriber && m.prescriber) f.prescriber = m.prescriber;
+    if (!f.pharmacy && m.pharmacy) f.pharmacy = m.pharmacy;
+    if (!f.generic && mg.g && mg.g.generic) f.generic = mg.g.generic;
+    if (!snapStrength(cur.title) && m.strength) cur.title = cur.title + ' ' + m.strength;
+    f.instructions = [f.instructions, label].filter(Boolean).join('\n');
+    var pres = f.prescriber && m.prescriber && f.prescriber.toLowerCase() !== m.prescriber.toLowerCase() ? 'Prescriber differs: saved ' + f.prescriber + ', bottle ' + m.prescriber + '.' : null;
+    f.check = snapAddCheck(f.check, [mg.clash, pres, unc.length ? 'Not clear on the bottle: ' + unc.join(', ') : null]);
+    return cur;
+  }).then(function (rec) { return snapKeepPhotos(rec); })
+    .then(function () { closeSheet(); return loadAll(); })
+    .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast('Added to the saved medicine, with the bottle photo' + (mg.clash ? '. Flagged: strength differs' : '')); })
+    .catch(function (e) { toast('Could not save: ' + e.message); });
+}
+
 /* A list of medicines (handwritten or printed). Every name is checked against the FDA label
  * database; anything the AI was unsure of, or that is not found, starts unticked with the name
- * editable, so nothing is added as a medicine without a person agreeing. */
-function snapMedKey(n) { return String(n || '').toLowerCase().replace(/[^a-z]/g, ''); }
+ * editable, so nothing is added as a medicine without a person agreeing. Lines that match a
+ * medicine already saved are added to it, not duplicated. */
 function snapMeds(d) {
   var sn = S.snap, pid = sn.pid, rows = (d.med_list || []).filter(function (m) { return m && (m.name || m.written); });
   if (!rows.length) return snapResult({ decision: 'retake', retake_reason: 'No medicine lines could be read.', retake_tip: 'Lay the list flat in good light and fill the frame with it.', summary: d.summary });
-  var have = {}; recordsOf(pid, ['medication']).forEach(function (r) { have[snapMedKey((r.title || '').split(' ')[0])] = true; });
-  S.snapMeds = rows;
+  S.snapMeds = rows; S.snapMedInfo = rows.map(function (m) { var ex = snapFindMed(pid, m.name, null); return { match: ex ? ex.id : null, g: null, found: null }; });
   openSheet('<h2 style="margin-top:0">&#128138; Medicine list from the photo</h2>' +
-    '<p class="muted">' + esc(d.summary || '') + ' Each name is checked against the FDA list. Ticked ones are added to her medicines; you then set when each is given.</p>' +
+    '<p class="muted">' + esc(d.summary || '') + ' Each name is checked against the FDA list. Ticked lines become her medicines, or are added to the one already saved; you then set when each is given.</p>' +
     rows.map(function (m, i) {
-      var unsure = m.is_medicine !== 'yes', dup = have[snapMedKey((m.name || '').split(' ')[0])];
-      return '<div class="card' + (unsure ? ' attention' : '') + '"><label class="check"><input type="checkbox" id="sm' + i + '"' + (unsure || dup ? '' : ' checked') + '> <b>Add</b></label>' +
-        '<input id="smName' + i + '" value="' + esc(m.name || '') + '" aria-label="Medicine name">' +
+      var unsure = m.is_medicine !== 'yes';
+      return '<div class="card' + (unsure ? ' attention' : '') + '"><label class="check"><input type="checkbox" id="sm' + i + '"' + (unsure ? '' : ' checked') + '> <b>Add</b></label>' +
+        '<input id="smName' + i + '" value="' + esc(m.name || '') + '" aria-label="Medicine name" onchange="snapCheckMed(' + i + ')">' +
         '<div class="muted">' + esc([m.strength, m.dose, m.when, m.notes].filter(Boolean).join(' · ')) + '</div>' +
         '<div class="muted">Written: &ldquo;' + esc(m.written || '') + '&rdquo;</div>' +
         (unsure ? '<p class="flag-text">' + (m.is_medicine === 'no' ? 'This may not be a medicine. ' : 'Not sure this is right. ') + esc(m.doubt || '') + '</p>' : '') +
-        (dup ? '<p class="muted">Already in her medicines.</p>' : '') +
+        '<p class="muted" id="smMatch' + i + '"></p>' +
         '<div class="row"><span class="muted grow" id="smChk' + i + '">Checking the FDA list...</span><button type="button" class="btn sm ghost" onclick="snapCheckMed(' + i + ')">Check again</button></div></div>';
     }).join('') +
+    '<label class="check"><input type="checkbox" id="smDoc" checked> Also keep the list under Documents</label>' +
     snapMorePagesRow() +
-    '<div class="btn-row"><button class="btn" onclick="saveSnapMeds()">Add ticked medicines</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
-  rows.forEach(function (m, i) { snapCheckMed(i); });
+    '<div class="btn-row"><button class="btn" onclick="saveSnapMeds()">Save ticked medicines</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
+  rows.forEach(function (m, i) { snapShowMatch(i); snapCheckMed(i); });
+}
+function snapShowMatch(i) {
+  var info = S.snapMedInfo[i], el = document.getElementById('smMatch' + i); if (!el) return;
+  var ex = info.match && (State.records || []).find(function (r) { return r.id === info.match; });
+  el.innerHTML = ex ? '&#128279; Matches <b>' + esc(ex.title) + '</b>, already saved: this line and the list photo will be added to it.' : '';
 }
 function snapCheckMed(i) {
-  var el = document.getElementById('smChk' + i), nm = document.getElementById('smName' + i), name = nm && nm.value.trim();
+  var el = document.getElementById('smChk' + i), nm = document.getElementById('smName' + i), name = nm && nm.value.trim(), info = S.snapMedInfo[i];
   if (!el) return;
   if (!name) { el.textContent = 'Type the name to check it.'; return; }
   el.textContent = 'Checking the FDA list...';
-  Sync.lookup('drug_label', name).then(function (r) {
+  snapGeneric(name).then(function (g) {
     var e2 = document.getElementById('smChk' + i); if (!e2) return;
-    if (r && r.found) e2.innerHTML = '&#10003; Found: ' + esc(((r.generic || r.brand || name) + '').toLowerCase());
+    info.g = g; info.found = !!g;
+    var ex = snapFindMed(S.snap && S.snap.pid, name, g); info.match = ex ? ex.id : null; snapShowMatch(i);
+    if (g) e2.innerHTML = '&#10003; Found: ' + esc(g.generic || g.brand || name.toLowerCase());
     else { e2.innerHTML = '<span class="flag-text">&#9888; Not found in the FDA list. Check the spelling, or ask the pharmacist.</span>'; var c = document.getElementById('sm' + i); if (c) c.checked = false; }
-  }).catch(function () { var e3 = document.getElementById('smChk' + i); if (e3) e3.textContent = 'Could not check right now.'; });
+  });
 }
 function saveSnapMeds() {
   var rows = S.snapMeds || [], pid = S.snap && S.snap.pid, picks = [];
-  rows.forEach(function (m, i) { var c = document.getElementById('sm' + i), n = document.getElementById('smName' + i); if (c && c.checked && n && n.value.trim()) picks.push({ m: m, name: n.value.trim() }); });
-  if (!picks.length) return toast('Nothing ticked');
-  picks.reduce(function (p, x) {
+  rows.forEach(function (m, i) { var c = document.getElementById('sm' + i), n = document.getElementById('smName' + i); if (c && c.checked && n && n.value.trim()) picks.push({ m: m, name: n.value.trim(), info: S.snapMedInfo[i] }); });
+  var keepDoc = document.getElementById('smDoc').checked;
+  if (!picks.length && !keepDoc) return toast('Nothing ticked');
+  var added = 0, merged = 0, flagged = 0;
+  var chain = picks.reduce(function (p, x) {
     return p.then(function () {
-      var m = x.m;
+      var m = x.m, info = x.info || {}, line = 'From the medicine list: "' + (m.written || x.name) + '"';
+      var doubts = [m.is_medicine !== 'yes' ? 'The list was hard to read here' + (m.doubt ? ': ' + m.doubt : '') + '. Confirm it is ' + x.name + '.' : null,
+        info.found === false ? x.name + ' was not found in the FDA list. Check the spelling with the pharmacist.' : null];
+      if (info.match) {
+        return DB.update('records', info.match, function (cur) {
+          if (!cur || cur.deleted) return null;
+          var f = cur.fields = cur.fields || {}, savedStr = snapStrength(cur.title) || snapStrength(f.dose), listStr = snapStrength(m.strength);
+          if (!f.dose && m.dose) f.dose = m.dose;
+          if (!f.when && m.when) f.when = m.when;
+          if (!f.generic && info.g && info.g.generic) f.generic = info.g.generic;
+          if (!savedStr && m.strength) cur.title = cur.title + ' ' + m.strength;
+          f.instructions = [f.instructions, line].filter(Boolean).join('\n');
+          f.check = snapAddCheck(f.check, doubts.concat([savedStr && listStr && savedStr !== listStr ? 'Strength differs: saved ' + savedStr + ', the list says ' + listStr + '. Check with the pharmacist which is right.' : null]));
+          if (f.check) flagged++;
+          return cur;
+        }).then(function (rec) { merged++; return snapKeepPhotos(rec); });
+      }
+      var check = snapAddCheck(null, doubts); if (check) flagged++;
       return DB.put('records', { kind: 'medication', for_profile_id: pid, title: x.name + (m.strength ? ' ' + m.strength : ''), occurred_at: null,
-        fields: { dose: m.dose || null, when: m.when || null, notes: null, instructions: ['From a medicine list photo: "' + (m.written || '') + '"', m.notes].filter(Boolean).join('\n') } });
+        fields: { dose: m.dose || null, when: m.when || null, generic: info.g && info.g.generic || null, instructions: [line, m.notes].filter(Boolean).join('\n'), check: check } })
+        .then(function (rec) { added++; return snapKeepPhotos(rec); });
     });
-  }, Promise.resolve()).then(function () { closeSheet(); return loadAll(); })
-    .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast(picks.length + ' medicine(s) added. Set when each is given in File → Summary.'); })
+  }, Promise.resolve());
+  if (keepDoc) chain = chain.then(function () {
+    return DB.put('records', { kind: 'document', for_profile_id: pid, title: 'Medicine list', occurred_at: new Date().toISOString(), fields: { doc_type: 'Other', notes: rows.map(function (m) { return m.written; }).filter(Boolean).join('\n') } }).then(snapKeepPhotos);
+  });
+  chain.then(function () { closeSheet(); return loadAll(); })
+    .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast([added ? added + ' added' : '', merged ? merged + ' added to ones already saved' : '', flagged ? flagged + ' flagged to double-check' : ''].filter(Boolean).join(', ') || 'Saved'); })
     .catch(function (e) { toast('Could not save: ' + e.message); });
+}
+
+/* ---------- Flags: anything uncertain waits for a person to confirm it ---------- */
+// After a record form filled from a photo is saved: attach the photos and keep any doubt as a flag.
+function snapAfterSave(rec) {
+  var p = S.snapPending; S.snapPending = null;
+  if (!p || !rec) return Promise.resolve();
+  var chain = p.photos ? snapKeepPhotos(rec) : Promise.resolve();
+  if (p.check) chain = chain.then(function () { return DB.update('records', rec.id, function (cur) { if (!cur) return null; cur.fields = cur.fields || {}; cur.fields.check = snapAddCheck(cur.fields.check, [p.check]); return cur; }); });
+  return chain;
+}
+var _snapCloseSheet = closeSheet;
+closeSheet = function () { var pend = S.snapPending; _snapCloseSheet(); if (pend === S.snapPending) S.snapPending = null; };
+function checksFor(pid) { return (State.records || []).filter(function (r) { return !r.deleted && (r.for_profile_id || null) === (pid || null) && r.fields && r.fields.check; }); }
+function todayChecks(pid) {
+  var rs = checksFor(pid); if (!rs.length) return '';
+  return '<div class="card"><h3>&#10067; To double-check</h3><p class="muted">Read from photos or lists, but not certain. Tap one to check it and mark it done.</p>' +
+    rs.map(function (r) { return '<div class="list-item tappable" onclick="editRecord(\'' + r.id + '\')"><div class="grow"><b>' + esc(r.title || (RECORD_KINDS[r.kind] || {}).label || '') + '</b><div class="muted">' + esc(String(r.fields.check).split('\n')[0]) + '</div></div></div>'; }).join('') + '</div>';
+}
+function clearCheck(id) {
+  DB.update('records', id, function (cur) { if (!cur) return null; cur.fields = cur.fields || {}; cur.fields.check = null; return cur; })
+    .then(loadAll).then(function () { refresh(); if (Sync.enabled()) syncNow(); editRecord(id); toast('Marked as checked'); });
 }
 
 /* A therapy home exercise sheet: tick exercises to keep under File -> Therapy, and keep the pages. */

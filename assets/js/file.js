@@ -10,7 +10,7 @@ var LAB_UNITS = { eGFR: 'mL/min/1.73m²', Creatinine: 'mg/dL', BUN: 'mg/dL', Pot
 var RECORD_KINDS = {
   condition: { label: 'Condition', title: 'Condition', fields: [['since', 'Since', 'text'], ['notes', 'Notes', 'textarea']] },
   allergy: { label: 'Allergy', title: 'Allergic to', fields: [['reaction', 'Reaction', 'text'], ['severity', 'Severity', 'select:Mild|Moderate|Severe|Unknown']] },
-  medication: { label: 'Medicine', title: 'Medicine', fields: [['dose', 'Dose (e.g. 40 mg, 1 tablet)', 'text'], ['slots', 'When to give it', 'slots'], ['with_food', 'Food', 'select:With food|Without food|Either'], ['when', 'Other timing notes', 'text'], ['purpose', 'What it is for', 'text'], ['prescriber', 'Prescribed by', 'text'], ['pharmacy', 'Pharmacy', 'text'], ['start', 'Started', 'date'], ['stop', 'Stop on (leave blank if ongoing)', 'date'], ['refill_on', 'Next refill due', 'date'], ['instructions', 'Instructions from the doctor or pharmacist', 'textarea'],
+  medication: { label: 'Medicine', title: 'Medicine', fields: [['dose', 'Dose (e.g. 40 mg, 1 tablet)', 'text'], ['slots', 'When to give it', 'slots'], ['with_food', 'Food', 'select:With food|Without food|Either'], ['when', 'Other timing notes', 'text'], ['purpose', 'What it is for', 'text'], ['prescriber', 'Prescribed by', 'text'], ['pharmacy', 'Pharmacy', 'text'], ['start', 'Started', 'date'], ['stop', 'Stop on (leave blank if ongoing)', 'date'], ['refill_on', 'Next refill due', 'date'], ['instructions', 'Instructions from the doctor or pharmacist', 'textarea'], ['generic', '', 'hidden'],
     ['label_head', 'From the label', 'heading'], ['label_boxed', 'Boxed warning', 'textarea'], ['label_how', 'How to take it', 'textarea'], ['label_side', 'Side effects to watch for', 'textarea'], ['label_warn', 'Warnings', 'textarea'], ['label_patients', 'For patients and families', 'textarea'], ['label_older', 'Older adults', 'textarea'], ['label_source', '', 'hidden'], ['label_date', '', 'hidden']] },
   directive: { label: 'Directive', title: 'Document (e.g. DNR, POLST, living will, power of attorney)', fields: [['kept', 'Where the original is kept', 'text'], ['notes', 'Notes', 'textarea']] },
   contact: { label: 'Care team', title: 'Name', fields: [['role', 'Role (kidney doctor, hospice nurse, pharmacy...)', 'text'], ['phone', 'Phone', 'tel'], ['fax', 'Fax', 'text'], ['address', 'Address', 'text'], ['portal', 'Patient portal link', 'text'], ['notes', 'Notes', 'textarea']] },
@@ -189,7 +189,8 @@ function editRecord(id, kind, pid) {
   if (!r && (kind === 'medication' || kind === 'lab' || kind === 'visit' || kind === 'exercise')) titleField = '<div class="btn-row writer-only"><button type="button" class="btn sm ghost" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ',\'' + kind + '\')">&#128247; From a photo</button></div>' + titleField;
   if (!r && kind === 'visit') titleField = titleField.replace('</button></div>', '</button><button type="button" class="btn sm ghost" onclick="scribeIt(' + (pid ? '\'' + pid + '\'' : 'null') + ')">&#127897; Scribe it</button></div>');
   if (kind === 'medication') titleField += '<div class="btn-row writer-only"><button type="button" class="btn sm ghost" onclick="fillFromLabel()">Fill from the FDA label</button></div><div class="muted" id="labelHint" aria-live="polite"></div>';
-  openSheet('<h2 style="margin-top:0">' + (r ? '' : 'Add ') + esc(K.label) + '</h2>' + titleField +
+  var checkBox = r && fl.check ? '<div class="card attention"><p><b>&#10067; Please double-check</b></p><div class="prewrap">' + esc(fl.check) + '</div><div class="btn-row"><button class="btn sm writer-only" onclick="clearCheck(\'' + r.id + '\')">Checked, all good</button></div></div>' : '';
+  openSheet('<h2 style="margin-top:0">' + (r ? '' : 'Add ') + esc(K.label) + '</h2>' + checkBox + titleField +
     (dateType ? '<label for="rWhen">' + (kind === 'lab' ? 'Date of the test' : 'When') + '</label><input id="rWhen" type="' + (dateType === 'date' ? 'date' : 'datetime-local') + '" value="' + dateVal + '">' : '') +
     K.fields.map(field).join('') + extraFieldsHtml(fl.extra) +
     (r && Sync.enabled() ? extraPhotosSection(r.id, 'records') : (r ? '' : '<p class="muted">Save first, then attach photos or PDFs.</p>')) +
@@ -240,7 +241,7 @@ function saveRecord(id, kind, pid) {
   write.then(function (saved) {
     S.phoneCheck = null; toast(saved ? 'Saved' : 'This was deleted elsewhere');
     if (saved && kind === 'visit' && S.scribe && S.scribe.pendingClear) { scribeClear(); S.scribe = null; }
-    return loadAll().then(function () {
+    return (!id && saved ? snapAfterSave(saved) : Promise.resolve()).then(loadAll).then(function () {
       if (!id && saved && Sync.enabled() && (kind === 'visit' || kind === 'document' || kind === 'lab')) { editRecord(saved.id); toast('Saved. Attach photos or PDFs below.'); }
       else closeSheet();
       refresh(); if (Sync.enabled()) syncNow();
