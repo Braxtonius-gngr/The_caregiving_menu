@@ -356,6 +356,47 @@ function imageBlock(dataUrl: string): Anthropic.ImageBlockParam {
   return { type: "image", source: { type: "base64", media_type: m[1] as "image/jpeg", data: m[2] } };
 }
 
+/* Anthropic allows at most 16 union-typed ("may be null") fields per schema. relax() keeps the
+ * schemas readable here and rewrites them before sending: nullable strings become plain strings
+ * ("" = unknown), nullable enums gain "", and nullable numbers stay nullable until the budget runs
+ * out, after which they use -1 for unknown. restore() turns ""/-1 back into null in the answer, so
+ * the app sees the same shape as before. */
+const UNION_BUDGET = 14;
+// deno-lint-ignore no-explicit-any
+type J = any;
+function nullableOf(n: J): "string" | "number" | "enum" | null {
+  if (!n || typeof n !== "object") return null;
+  if (Array.isArray(n.type) && n.type.includes("null")) { const t = n.type.find((x: string) => x !== "null"); return t === "string" ? "string" : (t === "number" || t === "integer") ? "number" : null; }
+  if (Array.isArray(n.anyOf) && n.anyOf.length === 2 && n.anyOf.some((x: J) => x.type === "null") && n.anyOf.some((x: J) => x.type === "string" && Array.isArray(x.enum))) return "enum";
+  return null;
+}
+function relax(n: J, budget = { left: UNION_BUDGET }): J {
+  if (!n || typeof n !== "object" || Array.isArray(n)) return n;
+  const kind = nullableOf(n);
+  const note = (d: string | undefined, add: string) => (d ? d + " " : "") + add;
+  if (kind === "string") { const { type: _t, ...rest } = n; return { ...rest, type: "string", description: note(n.description, "Empty string if unknown.") }; }
+  if (kind === "enum") { const e = n.anyOf.find((x: J) => x.type === "string"); return { type: "string", enum: [...e.enum, ""], description: note(n.description ?? e.description, "Empty string if unknown.") }; }
+  if (kind === "number") {
+    if (budget.left > 0) { budget.left--; return n; }
+    const base = n.type.find((x: string) => x !== "null"); const { type: _t, ...rest } = n;
+    return { ...rest, type: base, description: note(n.description, "Use -1 if unknown or not shown.") };
+  }
+  const out: J = { ...n };
+  if (n.properties) { out.properties = {}; for (const k of Object.keys(n.properties)) out.properties[k] = relax(n.properties[k], budget); }
+  if (n.items) out.items = relax(n.items, budget);
+  if (n.anyOf) out.anyOf = n.anyOf.map((x: J) => relax(x, budget));
+  return out;
+}
+function restore(orig: J, v: J): J {
+  if (v == null || !orig || typeof orig !== "object") return v;
+  const kind = nullableOf(orig);
+  if ((kind === "string" || kind === "enum") && v === "") return null;
+  if (kind === "number" && v === -1) return null;
+  if (Array.isArray(v) && orig.items) return v.map((x) => restore(orig.items, x));
+  if (typeof v === "object" && !Array.isArray(v) && orig.properties) { const o: J = {}; for (const k of Object.keys(v)) o[k] = restore(orig.properties[k], v[k]); return o; }
+  return v;
+}
+
 async function ask(schema: object, content: Anthropic.ContentBlockParam[], effort: "low" | "medium" | "high") {
   // fallbacks:"default" re-runs a request on Anthropic's recommended model if a safety
   // classifier declines it, instead of returning a bare refusal.
@@ -365,7 +406,7 @@ async function ask(schema: object, content: Anthropic.ContentBlockParam[], effor
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
     system: SYSTEM,
-    output_config: { effort, format: { type: "json_schema", schema } },
+    output_config: { effort, format: { type: "json_schema", schema: relax(schema) } },
     messages: [{ role: "user", content }],
   };
   // deno-lint-ignore no-explicit-any
@@ -374,7 +415,7 @@ async function ask(schema: object, content: Anthropic.ContentBlockParam[], effor
   if (res.stop_reason === "max_tokens") throw new Error("Response was cut off; try a smaller input.");
   const text = res.content.find((b) => b.type === "text");
   if (!text || text.type !== "text") throw new Error("No structured output returned.");
-  return JSON.parse(text.text);
+  return restore(schema, JSON.parse(text.text));
 }
 
 // Most recipe sites embed schema.org/Recipe as JSON-LD; read it directly when present.
