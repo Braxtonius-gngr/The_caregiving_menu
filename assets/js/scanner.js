@@ -3,7 +3,7 @@
  * desktop Linux/Windows). One frame loop drives both so the camera lifecycle
  * lives in one place. */
 var Scanner = (function () {
-  var ZXING_URL = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+  var ZXING_URL = 'assets/vendor/zxing-0.21.3.min.js'; // served from the app itself
   var FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'];
   var stream = null, timer = null, decoder = null, zxingP = null;
   var gen = 0; // bumped by stop(); any async step from an older start() sees a mismatch and backs out

@@ -4,7 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1b1f24">
-  <meta name="description" content="Household recipe, pantry and food diary tracker with diet profiles.">
+  <meta name="description" content="A shared care record for families caring for someone at home.">
+  <!-- Only this site, the app's Supabase project and Open Food Facts may be reached; no third-party scripts. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://qhfjbdtakeagwtnhqmzk.supabase.co https://*.openfoodfacts.org; connect-src 'self' https://qhfjbdtakeagwtnhqmzk.supabase.co wss://qhfjbdtakeagwtnhqmzk.supabase.co https://world.openfoodfacts.org; media-src 'self' blob:; worker-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'">
   <title>The Caregiving Menu</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
@@ -36,7 +38,7 @@
   </div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js" crossorigin="anonymous" defer></script>
+  <script src="assets/vendor/supabase-2.49.4.js" defer></script>
   <script src="assets/js/config.js"></script>
   <script src="assets/js/units.js"></script>
   <script src="assets/js/db.js"></script>
