@@ -8,5 +8,5 @@ var TCM_CONFIG = {
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoZmpiZHRha2VhZ3d0bmhxbXprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU1ODIxODEsImV4cCI6MjExMTE1ODE4MX0.hZzN0s470duHbheNvJT1QY0Oj1L7PdrVgPt1buYuJ9w',
   GOOGLE_SIGNIN: false, // turn on once the Google provider is set up in Supabase
   TURNSTILE_SITE_KEY: '', // Cloudflare Turnstile (public site key); empty = no bot check yet
-  APP_VERSION: '0.9.23'
+  APP_VERSION: '0.9.24'
 };

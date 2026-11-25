@@ -285,6 +285,15 @@ function snapWhenSlots(w) {
   if (/\b(prn|as needed|when needed|if needed)\b/.test(s)) out.push('prn');
   return out.join(',');
 }
+// The name is the medicine; the strength goes in Dose ("100 mg", or "100 mg, 1 tablet").
+function snapCap(n) { n = String(n || '').trim(); return n ? n.charAt(0).toUpperCase() + n.slice(1) : n; }
+function snapDoseText(strength, dose) { return [String(strength || '').trim(), String(dose || '').trim()].filter(Boolean).join(', ') || null; }
+// Adds the strength to a saved medicine's Dose when neither its name nor its dose has one.
+function snapAddStrength(cur, strength) {
+  var f = cur.fields = cur.fields || {};
+  if (!strength || snapStrength(cur.title) || snapStrength(f.dose)) return;
+  f.dose = snapDoseText(strength, f.dose);
+}
 function snapJoin(a, b, sep) { if (!b) return a || b || ''; if (!a) return b; return a.split(sep).indexOf(b) >= 0 ? a : a + sep + b; }
 function snapUnionSlots(a, b) { var out = String(a || '').split(',').filter(Boolean); String(b || '').split(',').filter(Boolean).forEach(function (s) { if (out.indexOf(s) < 0) out.push(s); }); return out.join(','); }
 // The same medicine and strength written in more than one place (an AM column and a PM column)
@@ -322,7 +331,7 @@ function snapAddCheck(old, add) { add = (add || []).filter(Boolean); if (!add.le
 function snapNewBottle(d, g) {
   var m = d.medication || {}, pid = S.snap.pid;
   editRecord(null, 'medication', pid);
-  snapSet('rTitle', [m.name, m.strength].filter(Boolean).join(' '));
+  snapSet('rTitle', snapCap(m.name)); snapSet('rf-dose', snapDoseText(m.strength, null));
   var stock = [m.quantity ? 'Qty ' + m.quantity : '', m.refills ? 'Refills: ' + m.refills : '', m.filled_on ? 'Filled ' + m.filled_on : ''].filter(Boolean).join(' · ');
   snapSet('rf-instructions', [m.directions ? 'Label: ' + m.directions : '', m.warnings && m.warnings.length ? 'Label warnings: ' + m.warnings.join('; ') : '', stock].filter(Boolean).join('\n'));
   snapSet('rf-prescriber', m.prescriber); snapSet('rf-pharmacy', m.pharmacy); snapSet('rf-generic', g && g.generic);
@@ -362,7 +371,7 @@ function saveMergeBottle() {
     if (!f.prescriber && m.prescriber) f.prescriber = m.prescriber;
     if (!f.pharmacy && m.pharmacy) f.pharmacy = m.pharmacy;
     if (!f.generic && mg.g && mg.g.generic) f.generic = mg.g.generic;
-    if (!snapStrength(cur.title) && m.strength) cur.title = cur.title + ' ' + m.strength;
+    snapAddStrength(cur, m.strength);
     f.instructions = [f.instructions, label].filter(Boolean).join('\n');
     f.sources = (f.sources || []).concat([snapBottleSource(m)]);
     var pres = f.prescriber && m.prescriber && f.prescriber.toLowerCase() !== m.prescriber.toLowerCase() ? 'Prescriber differs: saved ' + f.prescriber + ', bottle ' + m.prescriber + '.' : null;
@@ -447,10 +456,10 @@ function saveSnapMeds() {
           if (!cur || cur.deleted) return null;
           var f = cur.fields = cur.fields || {}, savedStr = snapStrength(cur.title) || snapStrength(f.dose), listStr = snapStrength(m.strength);
           if (!f.dose && m.dose) f.dose = m.dose;
+          if (!savedStr) snapAddStrength(cur, m.strength);
           if (!f.when && m.when) f.when = m.when;
           if (!f.slots && slots) { f.slots = slots; f.timing_source = 'From the ' + ls; }
           if (!f.generic && info.g && info.g.generic) f.generic = info.g.generic;
-          if (!savedStr && m.strength) cur.title = cur.title + ' ' + m.strength;
           f.instructions = [f.instructions, line].filter(Boolean).join('\n');
           f.sources = (f.sources || []).concat([srcOf(m)]);
           f.check = snapAddCheck(f.check, doubts.concat([savedStr && listStr && savedStr !== listStr ? 'Strength differs: saved ' + savedStr + ', ' + (ls === 'discharge papers' ? 'the discharge papers say ' : 'the list says ') + listStr + '. Check with the pharmacist which is right.' : null]));
@@ -459,8 +468,8 @@ function saveSnapMeds() {
         }).then(function (rec) { merged++; if (rec && snapMedKey(x.name)) made[key] = rec.id; return snapKeepPhotos(rec); });
       }
       var check = snapAddCheck(null, doubts); if (check) flagged++;
-      return DB.put('records', { kind: 'medication', for_profile_id: pid, title: x.name + (m.strength ? ' ' + m.strength : ''), occurred_at: null,
-        fields: { dose: m.dose || null, when: m.when || null, slots: slots || null, timing_source: slots ? 'From the ' + ls : null, generic: info.g && info.g.generic || null, instructions: [line, m.notes].filter(Boolean).join('\n'), check: check, sources: [srcOf(m)], from_photo: { title: (m.name || '') + (m.strength ? ' ' + m.strength : ''), dose: m.dose || '', when: m.when || '' } } })
+      return DB.put('records', { kind: 'medication', for_profile_id: pid, title: snapCap(x.name), occurred_at: null,
+        fields: { dose: snapDoseText(m.strength, m.dose), when: m.when || null, slots: slots || null, timing_source: slots ? 'From the ' + ls : null, generic: info.g && info.g.generic || null, instructions: [line, m.notes].filter(Boolean).join('\n'), check: check, sources: [srcOf(m)], from_photo: { title: snapCap(m.name), dose: snapDoseText(m.strength, m.dose) || '', when: m.when || '' } } })
         .then(function (rec) { added++; if (rec && snapMedKey(x.name)) made[key] = rec.id; return snapKeepPhotos(rec); });
     });
   }, Promise.resolve());
