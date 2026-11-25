@@ -59,7 +59,7 @@ function todayExercises(pid) {
   }).filter(Boolean);
   var unscheduled = ex.filter(function (r) { return !wkSlots(r).length; }).length;
   return '<div class="card"><div class="row between"><h3>&#129336; Exercises</h3><button class="btn sm ghost writer-only" onclick="openWorkoutSchedule(' + a + ')">' + (rows.length || unscheduled < ex.length ? 'Edit schedule' : 'Make a schedule') + '</button></div>' +
-    (rows.length ? rows.join('') : (ex.some(function (r) { return wkSlots(r).length; }) ? '<p class="muted">No workout scheduled today.</p>' : '<p>' + ex.length + ' exercise' + (ex.length === 1 ? '' : 's') + ' from her therapy sheet. <b>Make a schedule</b> to group them into workouts (morning, evening...) on the days she does them.</p>')) +
+    (rows.length ? scrollList(rows, 3) : (ex.some(function (r) { return wkSlots(r).length; }) ? '<p class="muted">No workout scheduled today.</p>' : '<p>' + ex.length + ' exercise' + (ex.length === 1 ? '' : 's') + ' from her therapy sheet. <b>Make a schedule</b> to group them into workouts (morning, evening...) on the days she does them.</p>')) +
     (rows.length && unscheduled ? '<p class="muted">' + unscheduled + ' exercise' + (unscheduled === 1 ? ' is' : 's are') + ' not in the schedule.</p>' : '') + '</div>';
 }
 
@@ -73,12 +73,12 @@ function openWorkoutSchedule(pid) {
     '<p class="muted">Tick when she does each exercise. Exercises ticked for the same time become one workout on Today.</p>' +
     '<label>Days</label><div class="chips" id="wkDays">' + WK_DAYS.map(function (d) { var on = !anyDays || days[d[0]]; return '<button type="button" class="chip' + (on ? ' on' : '') + '" data-v="' + d[0] + '" aria-pressed="' + on + '" onclick="toggleChip(this)">' + d[1] + '</button>'; }).join('') + '</div>' +
     '<div class="btn-row"><button type="button" class="btn sm ghost" onclick="wkSetAll(\'morning\')">All in the morning</button><button type="button" class="btn sm ghost" onclick="wkSetAll(\'morning,evening\')">Morning and evening</button><button type="button" class="btn sm ghost" onclick="wkSetAll(\'\')">Clear</button></div>' +
-    ex.map(function (r) {
+    scrollList(ex.map(function (r) {
       var on = wkSlots(r), f = r.fields || {}, hint = Logic.exerciseTarget(f.how_often);
       return '<div class="wk-row"><b>' + esc(r.title) + '</b>' + (f.how_often ? ' <span class="muted">(' + esc(f.how_often) + ')</span>' : '') +
         '<div class="chips" data-ex="' + r.id + '">' + WK_SLOTS.map(function (s) { var sel = on.indexOf(s[0]) >= 0; return '<button type="button" class="chip' + (sel ? ' on' : '') + '" data-v="' + s[0] + '" aria-pressed="' + sel + '" onclick="toggleChip(this)">' + s[1] + '</button>'; }).join('') + '</div>' +
         (hint > 1 && on.length < hint ? '<div class="muted">The sheet says ' + hint + ' times a day.</div>' : '') + '</div>';
-    }).join('') +
+    }), 6, true) +
     '<div class="btn-row"><button class="btn" onclick="saveWorkoutSchedule(' + a + ')">Save schedule</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
 }
 function wkSetAll(slots) {

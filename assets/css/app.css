@@ -245,3 +245,10 @@ label.check input { width: auto; margin: 0; }
 .wk-name { font-size: 1.6em; margin: 6px 0; }
 .wk-how { font-size: 1.15em; }
 .wk-btns .btn { flex: 1 1 40%; padding: 16px; font-size: 1.15em; }
+/* Long lists scroll inside their card or window (scrollList) */
+.scroll-box { max-height: 300px; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); box-shadow: inset 0 -10px 8px -8px rgba(0,0,0,.25); }
+.scroll-box.tall { max-height: 42vh; }
+.scroll-hint { font-size: .82em; text-align: center; margin: 2px 0 6px; }
+.help-btn { width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid currentColor !important; font-size: 17px !important; font-weight: 700; line-height: 1; padding: 0 !important; opacity: .85; }
+/* A window's last row of buttons (Save, Cancel...) stays pinned at the bottom while its content scrolls. */
+#sheetBody > .btn-row:last-child { position: sticky; bottom: calc(-18px - env(safe-area-inset-bottom)); background: var(--panel); margin: 8px -16px calc(-18px - env(safe-area-inset-bottom)); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); box-shadow: 0 -8px 10px -8px rgba(0,0,0,.25); z-index: 2; }

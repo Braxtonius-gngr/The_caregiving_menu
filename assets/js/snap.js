@@ -157,10 +157,10 @@ function snapLabs(d) {
   openSheet('<h2 style="margin-top:0">Lab results from the photo</h2>' +
     '<p class="muted">' + esc(d.summary || '') + ' Untick anything that looks wrong; you can edit each one later.' + (d.uncertain && d.uncertain.length ? ' Not clear enough to read: ' + esc(d.uncertain.join(', ')) + '.' : '') + '</p>' +
     '<label for="slDate">Date of the test</label><input id="slDate" type="date" value="' + esc(rows[0].date || today) + '">' +
-    rows.map(function (r, i) {
+    scrollList(rows.map(function (r, i) {
       var range = r.low != null && r.high != null ? r.low + '–' + r.high : r.low != null ? 'over ' + r.low : r.high != null ? 'under ' + r.high : (r.range_text || '');
       return '<label class="check"><input type="checkbox" id="sl' + i + '" checked> <b>' + esc(r.test) + '</b> ' + esc(r.value != null ? r.value : r.value_text) + ' ' + esc(r.unit || '') + (range ? ' <span class="muted">(range ' + esc(range) + ')</span>' : '') + (r.flag ? ' <span class="flag-text">' + esc(r.flag) + '</span>' : '') + '</label>';
-    }).join('') +
+    }), 6, true) +
     '<div class="btn-row"><button class="btn" onclick="saveSnapLabs()">Save checked results</button><button class="btn ghost" onclick="snapIt(S.snap && S.snap.pid,\'lab\')">Retake</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
 }
 function saveSnapLabs() {
@@ -191,12 +191,12 @@ function snapTeam(d) {
     '<p class="muted">' + esc(d.summary || '') + '</p>' +
     (rows.length ? '<h3>Add to the Care team</h3><p class="muted">Fix anything it misread right here, and untick old or wrong entries. What the photo said is kept with each one, so a change can be traced later.</p>' +
       (d.uncertain && d.uncertain.length ? '<div class="card attention"><p><b>Not clear in the photo</b></p><ul>' + d.uncertain.map(function (u) { return '<li>' + esc(u) + '</li>'; }).join('') + '</ul></div>' : '') +
-      rows.map(function (c, i) {
+      scrollList(rows.map(function (c, i) {
         var dup = have[snapNameKey(c.name)];
         return '<div class="card snap-row"><label class="check"><input type="checkbox" id="st' + i + '"' + (dup ? '' : ' checked') + '> <b>Add</b>' + (dup ? ' <span class="muted">(already in the Care team)</span>' : '') + '</label>' +
           box('stN' + i, 'Name', c.name) + box('stR' + i, 'Role', c.role) + box('stP' + i, 'Phone', c.phone) +
           (c.fax ? box('stF' + i, 'Fax', c.fax) : '') + '</div>';
-      }).join('') : '') +
+      }), 6, true) : '') +
     '<h3>Keep the page</h3><label class="check"><input type="checkbox" id="stDoc" checked> Save it as a Document with the photo</label>' +
     '<label for="stTitle">Title</label><input id="stTitle" value="' + esc(doc.title || (d.kind === 'care_team' ? 'Care team sheet' : 'Document')) + '">' +
     (facts.length ? '<h3>Details it found</h3>' + facts.map(function (f, i) { return '<label for="sfV' + i + '">' + esc(f.label) + '</label>' + box('sfV' + i, f.label, f.value); }).join('') : '') +
@@ -339,7 +339,7 @@ function snapMeds(d) {
   S.snapMeds = rows; S.snapListSource = d.list_source || 'handwritten list'; S.snapMedInfo = rows.map(function (m) { var ex = snapFindMed(pid, m.name, null); return { match: ex ? ex.id : null, g: null, found: null }; });
   openSheet('<h2 style="margin-top:0">&#128138; Medicine list from the photo</h2>' +
     '<p class="muted">' + esc(d.summary || '') + ' Each name is checked against the FDA list. Ticked lines become her medicines, or are added to the one already saved; you then set when each is given.</p>' +
-    rows.map(function (m, i) {
+    scrollList(rows.map(function (m, i) {
       var unsure = m.is_medicine !== 'yes';
       return '<div class="card' + (unsure ? ' attention' : '') + '"><label class="check"><input type="checkbox" id="sm' + i + '"' + (unsure ? '' : ' checked') + '> <b>Add</b></label>' +
         '<input id="smName' + i + '" value="' + esc(m.name || '') + '" aria-label="Medicine name" onchange="snapCheckMed(' + i + ')">' +
@@ -348,7 +348,7 @@ function snapMeds(d) {
         (unsure ? '<p class="flag-text">' + (m.is_medicine === 'no' ? 'This may not be a medicine. ' : 'Not sure this is right. ') + esc(m.doubt || '') + '</p>' : '') +
         '<p class="muted" id="smMatch' + i + '"></p>' +
         '<div class="row"><span class="muted grow" id="smChk' + i + '">Checking the FDA list...</span><button type="button" class="btn sm ghost" onclick="snapCheckMed(' + i + ')">Check again</button></div></div>';
-    }).join('') +
+    }), 6, true) +
     '<label class="check"><input type="checkbox" id="smDoc" checked> Also keep the list under Documents</label>' +
     snapMorePagesRow() +
     '<div class="btn-row"><button class="btn" onclick="saveSnapMeds()">Save ticked medicines</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
@@ -430,7 +430,7 @@ function checksFor(pid) { return (State.records || []).filter(function (r) { ret
 function todayChecks(pid) {
   var rs = checksFor(pid); if (!rs.length) return '';
   return '<div class="card"><h3>&#10067; To double-check</h3><p class="muted">Read from photos or lists, but not certain. Tap one to check it and mark it done.</p>' +
-    rs.map(function (r) { return '<div class="list-item tappable" onclick="editRecord(\'' + r.id + '\')"><div class="grow"><b>' + esc(r.title || (RECORD_KINDS[r.kind] || {}).label || '') + '</b><div class="muted">' + esc(checkLine(r)) + '</div></div></div>'; }).join('') + '</div>';
+    scrollList(rs.map(function (r) { return '<div class="list-item tappable" onclick="editRecord(\'' + r.id + '\')"><div class="grow"><b>' + esc(r.title || (RECORD_KINDS[r.kind] || {}).label || '') + '</b><div class="muted">' + esc(checkLine(r)) + '</div></div></div>'; }), 4) + '</div>';
 }
 /* Answering a flag: confirm what you can, keep the rest as a "maybe" that still needs approval.
  * fields.check_answer = { confirmed, maybe, at }. With nothing left unsure, the flag is cleared;
@@ -474,9 +474,9 @@ function snapExercises(d) {
   S.snapEx = { rows: rows, doc: doc };
   openSheet('<h2 style="margin-top:0">&#129336; Therapy exercises from the photo</h2>' +
     '<p class="muted">' + esc(d.summary || '') + ' Ticked exercises go to File &rarr; Therapy.</p>' +
-    (rows.length ? rows.map(function (x, i) {
+    (rows.length ? scrollList(rows.map(function (x, i) {
       return '<label class="check"><input type="checkbox" id="sx' + i + '" checked> <b>' + esc(x.name) + '</b> <span class="muted">' + esc([x.how, x.how_often].filter(Boolean).join(' · ')) + '</span>' + (x.notes ? '<div class="muted">' + esc(x.notes) + '</div>' : '') + '</label>';
-    }).join('') : '<p>No exercises could be read clearly.</p>') +
+    }), 6, true) : '<p>No exercises could be read clearly.</p>') +
     '<label for="sxFrom">From (therapist or clinic)</label><input id="sxFrom" value="' + esc(doc.title || '') + '">' +
     '<label class="check"><input type="checkbox" id="sxDoc" checked> Also keep the pages under Documents</label>' +
     snapMorePagesRow() +

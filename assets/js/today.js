@@ -33,7 +33,6 @@ function renderHome(arg) {
   html += todayComing(pid, day);
   html += todayInsights(pid);
   html += todayMeals(pid, prof, entries);
-  html += '<div class="btn-row"><button class="btn ghost sm" onclick="showScreen(\'help\')">&#10067; How to use this app</button></div>';
   return html;
 }
 
@@ -78,7 +77,7 @@ function todayMeds(pid, day, plan) {
   var show = open.concat(next.filter(function (p) { return p.hour === nextHour && !open.length; }));
   var done = plan.filter(function (p) { return p.dose; }).length;
   return '<div class="card"><div class="row between"><h3>&#128138; Meds</h3><span class="muted">' + done + ' of ' + plan.length + ' marked today</span></div>' +
-    (show.length ? (open.length ? '' : '<div class="muted">Next: ' + esc(slotName(show[0].slot).toLowerCase()) + '</div>') + show.map(function (p) { return doseRow(p, pid); }).join('')
+    (show.length ? (open.length ? '' : '<div class="muted">Next: ' + esc(slotName(show[0].slot).toLowerCase()) + '</div>') + scrollList(show.map(function (p) { return doseRow(p, pid); }), 4)
       : '<p class="muted">' + (plan.length ? 'Nothing due right now.' : 'No scheduled doses today.') + '</p>') +
     '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'meds\',{pid:' + pidArg(pid) + '})">All meds today</button></div></div>';
 }

@@ -42,6 +42,12 @@ function toast(msg, actionLabel, actionFn) {
   t.classList.remove('hidden'); clearTimeout(t._h);
   t._h = setTimeout(function () { t.classList.add('hidden'); }, actionLabel ? 6000 : 2200);
 }
+// Lists longer than `limit` rows scroll inside their own box so a card or window stays short.
+function scrollList(rows, limit, tall) {
+  rows = rows.filter(Boolean);
+  if (rows.length <= (limit || 4)) return rows.join('');
+  return '<div class="scroll-box' + (tall ? ' tall' : '') + '" tabindex="0" role="region" aria-label="List, scrolls">' + rows.join('') + '</div><div class="scroll-hint muted">' + rows.length + ' in all &middot; scroll for more</div>';
+}
 function openSheet(html) { document.getElementById('sheetBody').innerHTML = html; document.getElementById('sheet').classList.remove('hidden'); }
 var scanSession = 0; // bumped when the scanner opens or a sheet closes; late lookups compare against it
 function closeSheet() { scanSession++; S.sharedPhoto = null; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
