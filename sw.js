@@ -1,11 +1,12 @@
 /* Service worker: cache the app shell, network-first for everything else. */
-var CACHE = 'tcm-shell-v52';
+var CACHE = 'tcm-shell-v53';
 var CDN = 'https://cdn.jsdelivr.net/npm/';
 var SHELL = [
   './',
   './index.html',
   './manifest.webmanifest',
   './assets/vendor/supabase-2.49.4.js',
+  './assets/css/tokens.css',
   './assets/css/app.css',
   './assets/js/config.js',
   './assets/js/units.js',

@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#1b1f24">
+  <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0c1110" media="(prefers-color-scheme: dark)">
   <meta name="description" content="A shared care record for families caring for someone at home.">
   <!-- Only this site, the app's Supabase project and Open Food Facts may be reached; no third-party scripts. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://qhfjbdtakeagwtnhqmzk.supabase.co https://*.openfoodfacts.org; connect-src 'self' https://qhfjbdtakeagwtnhqmzk.supabase.co wss://qhfjbdtakeagwtnhqmzk.supabase.co https://world.openfoodfacts.org; media-src 'self' blob:; worker-src 'self'; object-src 'none'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self'">
@@ -11,6 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+  <link rel="stylesheet" href="assets/css/tokens.css">
   <link rel="stylesheet" href="assets/css/app.css">
 </head>
 <body>
@@ -18,19 +20,19 @@
     <h1 id="screenTitle">Today</h1>
     <div class="topbar-actions">
       <span id="syncDot" class="sync-dot" title="Local only"></span>
-      <button class="icon-btn help-btn" onclick="showScreen('help')" aria-label="How to use this app" title="How to use this app">?</button>
-      <button class="icon-btn" onclick="showScreen('settings')" aria-label="Settings">&#9881;</button>
+      <button class="icon-btn round-btn" onclick="showScreen('help')" aria-label="How to use this app" title="How to use this app"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/></svg></button>
+      <button class="icon-btn round-btn" onclick="showScreen('settings')" aria-label="Settings" title="Settings"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
     </div>
   </header>
 
   <main id="screen" class="screen"></main>
 
   <nav class="tabbar" aria-label="Main">
-    <button data-tab="home" class="tab active" onclick="showScreen('home')"><span class="tab-ico">&#9728;</span>Today</button>
-    <button data-tab="diary" class="tab" onclick="showScreen('diary')"><span class="tab-ico">&#9998;</span>Diary</button>
-    <button data-tab="scan" class="tab tab-scan" onclick="openCapture()" aria-label="Log something"><span class="tab-ico">&#10010;</span>Log</button>
-    <button data-tab="file" class="tab" onclick="showScreen('file')"><span class="tab-ico">&#128193;</span>File</button>
-    <button data-tab="kitchen" class="tab" onclick="showScreen('kitchen')"><span class="tab-ico">&#127859;</span>Kitchen</button>
+    <button data-tab="home" class="tab active" onclick="showScreen('home')"><span class="tab-ico"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span>Today</button>
+    <button data-tab="diary" class="tab" onclick="showScreen('diary')"><span class="tab-ico"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></span>Diary</button>
+    <button data-tab="scan" class="tab tab-scan" onclick="openCapture()" aria-label="Log something"><span class="tab-ico"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span>Log</button>
+    <button data-tab="file" class="tab" onclick="showScreen('file')"><span class="tab-ico"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>File</button>
+    <button data-tab="kitchen" class="tab" onclick="showScreen('kitchen')"><span class="tab-ico"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v8M5 3v4a2 2 0 0 0 4 0V3M7 11v10M17 3c-2 0-3 2-3 5s1 4 3 4v9"/></svg></span>Kitchen</button>
   </nav>
 
   <div id="sheet" class="sheet hidden" onclick="if (event.target === this) dismissSheet()">

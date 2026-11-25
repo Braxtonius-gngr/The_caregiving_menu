@@ -67,7 +67,7 @@ function fluidCardFor(pid, entries, day) {
   var limit = +cs.fluid_limit_ml || 0, pct = limit ? Math.min(100, Math.round(b.inMl / limit * 100)) : 0;
   var flags = b.flags.map(function (f) { return localTime(f.entry.eaten_at) + ' ' + (OUTPUT_TYPES[f.entry.output_type] || 'output').toLowerCase() + ': ' + f.reasons.join(', '); }).concat(wFlags.map(function (x) { return 'weight ' + x; }));
   return '<div class="card fluid-card">' +
-    '<div class="row between"><b>&#128167; Fluid balance' + (prof ? ' · ' + esc(prof.person_name) : '') + '</b><span class="muted">' + dayStartLabel() + ' to ' + dayStartLabel() + '</span></div>' +
+    '<div class="row between"><h3>Fluid balance' + (prof ? ' · ' + esc(prof.person_name) : '') + '</h3><span class="muted">' + dayStartLabel() + ' to ' + dayStartLabel() + '</span></div>' +
     '<div class="fluid-nums"><div><span class="muted">In</span><b>' + shortOz(b.inMl) + '</b>' + (b.foodMl ? '<span class="muted">' + shortOz(b.foodMl) + ' from food</span>' : '') + '</div>' +
     '<div><span class="muted">Out</span><b>' + shortOz(b.outMl) + '</b></div>' +
     '<div><span class="muted">Difference</span><b>' + (b.netMl >= 0 ? '+' : '&minus;') + shortOz(Math.abs(b.netMl)) + '</b><span class="muted">' + (b.netMl >= 0 ? 'more in' : 'more out') + '</span></div></div>' +

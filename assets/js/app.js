@@ -463,6 +463,12 @@ document.addEventListener('DOMContentLoaded', function () {
     handleShareTarget();
     startAutoSync();
     dropExpiredTrash().catch(function () {});
+    // One-time note for families who knew the old look (P-020). New phones with no data skip it.
+    DB.meta('seen_look').then(function (seen) {
+      if (seen === 'teal') return;
+      DB.meta('seen_look', 'teal');
+      if (State.profiles.length) setTimeout(function () { toast('New look: same app, easier to read.'); }, 900);
+    });
   });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js');
 });

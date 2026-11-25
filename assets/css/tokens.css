@@ -1,0 +1,77 @@
+/* Design tokens (P-020). Three layers: primitives (raw values), semantic (what a value is for),
+ * component (sizes parts share). Screens use the semantic and component layers only, so dark mode
+ * swaps one block. Mock-up and reasoning: docs/private/product/design/ui-direction-sleek.html. */
+:root {
+  /* primitives: teal */
+  --teal-50: #eaf6f4; --teal-100: #d3ede8; --teal-300: #7fcfc4; --teal-400: #4fc2b6; --teal-600: #137b72; --teal-700: #0f6b66; --teal-900: #08302d;
+  /* primitives: warm grey */
+  --grey-0: #ffffff; --grey-25: #f8f7f4; --grey-50: #f1f0ec; --grey-100: #e7e5e0; --grey-200: #d6d3cc; --grey-600: #56615e; --grey-900: #1b2120;
+  --grey-d0: #0c1110; --grey-d1: #141b1a; --grey-d2: #1b2322; --grey-d3: #252e2d; --grey-d4: #34403e;
+  /* primitives: status */
+  --green-bg: #e2f3e8; --green-fg: #17603c; --green-mid: #1f8a55;
+  --amber-bg: #fcefcf; --amber-fg: #7a4e00; --amber-mid: #b07a12;
+  --red-bg: #fbe2df; --red-fg: #9d2419; --red-mid: #b3261e;
+  /* primitives: type */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --fs-tab: 13px; --fs-caption: 15px; --fs-body: 17px; --fs-title: 20px; --fs-stat: 26px; --fs-display: 30px;
+  --lh-body: 1.5;
+  /* primitives: space and shape */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px; --space-7: 40px;
+  --radius-s: 14px; --radius-m: 20px; --radius-l: 28px; --radius-full: 999px;
+  /* primitives: motion. One easing for everything, so movement feels like one hand. */
+  --ease-settle: cubic-bezier(.22, 1, .36, 1);
+  --dur-tap: 160ms; --dur-enter: 560ms; --dur-check: 380ms; --stagger: 70ms; --dur-drift: 14s;
+
+  /* semantic: light */
+  --surface-page: var(--grey-25);
+  --surface-card: var(--grey-0);
+  --surface-sunken: var(--grey-50);
+  --surface-accent: var(--teal-50);
+  --surface-accent-2: var(--teal-100);
+  --text: var(--grey-900);
+  --text-muted: var(--grey-600);
+  --text-on-action: #ffffff;
+  --action: var(--teal-700);
+  --action-text: var(--teal-700);
+  --border: var(--grey-200);
+  --divider: color-mix(in srgb, var(--teal-700) 12%, transparent);
+  --elevation-1: 0 1px 2px rgba(16, 24, 22, .04), 0 8px 24px rgba(16, 24, 22, .05);
+  --elevation-2: 0 10px 32px rgba(16, 24, 22, .10);
+  --glass: rgba(255, 255, 255, .78);
+  --glass-solid: var(--grey-0);
+  --scrim: rgba(8, 20, 18, .42);
+  --status-ok-bg: var(--green-bg); --status-ok-fg: var(--green-fg); --status-ok: var(--green-mid);
+  --status-warn-bg: var(--amber-bg); --status-warn-fg: var(--amber-fg); --status-warn: var(--amber-mid);
+  --status-bad-bg: var(--red-bg); --status-bad-fg: var(--red-fg); --status-bad: var(--red-mid);
+  --on-status: #ffffff;
+
+  /* component */
+  --tap-min: 52px; --btn-h: 48px; --btn-h-sm: 40px; --check-size: 32px; --tabbar-h: 66px; --icon-stroke: 1.6;
+  --card-pad: 20px; --section-gap: var(--space-6); --page-x: 20px;
+}
+@media (min-width: 400px) { :root { --page-x: var(--space-5); --card-pad: var(--space-5); } }
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-page: var(--grey-d0);
+    --surface-card: var(--grey-d1);
+    --surface-sunken: var(--grey-d2);
+    --surface-accent: #0f2523;
+    --surface-accent-2: #133230;
+    --text: #edf3f1;
+    --text-muted: #a6b4b0;
+    --text-on-action: var(--teal-900);
+    --action: var(--teal-400);
+    --action-text: var(--teal-300);
+    --border: var(--grey-d4);
+    --divider: rgba(255, 255, 255, .07);
+    --elevation-1: 0 0 0 1px rgba(255, 255, 255, .045);
+    --elevation-2: 0 10px 32px rgba(0, 0, 0, .5), 0 0 0 1px rgba(255, 255, 255, .06);
+    --glass: rgba(20, 27, 26, .8);
+    --glass-solid: var(--grey-d1);
+    --scrim: rgba(0, 0, 0, .6);
+    --status-ok-bg: #173b28; --status-ok-fg: #9fe3bb; --status-ok: #5cc48a;
+    --status-warn-bg: #3d3010; --status-warn-fg: #f6d58a; --status-warn: #e3b04b;
+    --status-bad-bg: #44201c; --status-bad-fg: #ffb4aa; --status-bad: #f08a7e;
+    --on-status: #10100e;
+  }
+}

@@ -12,6 +12,18 @@ function localTime(iso) { var d = new Date(iso); return pad2(d.getHours()) + ':'
 function todayISO() { return localDay(); }
 function shiftDay(day, n) { var d = new Date(day + 'T12:00:00'); d.setDate(d.getDate() + n); return localDay(d.toISOString()); }
 
+// Line icons drawn on one 24px grid (P-020). icon('camera') returns inline SVG that follows the text colour.
+var ICONS = {
+  camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  tick: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  alert: '<path d="M12 4L2.5 20h19z"/><path d="M12 10v4M12 17h.01"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+  wave: '<path d="M7 11V6a1.5 1.5 0 0 1 3 0v4M10 10V4.5a1.5 1.5 0 0 1 3 0V10M13 10V5.5a1.5 1.5 0 0 1 3 0V12M16 9.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-12.5 4.3L4 14.5a1.6 1.6 0 0 1 2.4-2L8 14V8.5"/>',
+  note: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/>'
+};
+function icon(name) { return '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>'; }
+
 function rebuildIndexes() {
   S.ingById = {}; State.ingredients.forEach(function (i) { S.ingById[i.id] = i; });
   S.pantryByIng = {}; State.pantry.forEach(function (p) { (S.pantryByIng[p.ingredient_id] = S.pantryByIng[p.ingredient_id] || []).push(p); });
@@ -56,12 +68,16 @@ var TITLES = { simple: '', home: 'Today', meds: 'Daily meds', help: 'How to', ti
 var currentScreen = 'home';
 function showScreen(name, arg) {
   if (name !== 'help') S.lastScreen = name;
+  var entering = name !== currentScreen || !S.shownOnce; S.shownOnce = true;
   currentScreen = name;
   document.getElementById('screenTitle').textContent = TITLES[name] || name;
   var tab = { scan: 'kitchen', ask: 'home', handoff: 'home', medcheck: 'file', phototest: 'settings', recipes: 'kitchen', pantry: 'kitchen', recipe: 'kitchen', fluids: 'diary', trash: 'diary', meds: 'home', help: 'home', timing: 'home', patterns: 'home', plans: 'home', plan: 'home', reports: 'settings' }[name] || name;
   document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === tab); });
   var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe, fluids: renderFluids, trash: renderTrash, file: renderFile, kitchen: renderKitchen, meds: renderMeds, help: renderHelp, timing: renderTiming, patterns: renderPatterns, plans: renderPlans, plan: renderPlan, phototest: renderPhotoTest, medcheck: renderMedCheck, handoff: renderHandoff, ask: renderAsk, reports: renderReports }[name];
-  document.getElementById('screen').innerHTML = fn ? fn(arg) : '';
+  var el = document.getElementById('screen');
+  el.innerHTML = fn ? fn(arg) : '';
+  // A new screen settles in once; a re-render of the same screen (after a save) stays still.
+  if (entering) { el.classList.remove('entering'); void el.offsetWidth; el.classList.add('entering'); clearTimeout(S.enterTimer); S.enterTimer = setTimeout(function () { el.classList.remove('entering'); }, 1200); }
   window.scrollTo(0, 0);
 }
 function refresh() { rebuildIndexes(); showScreen(currentScreen, S.lastArg); }
