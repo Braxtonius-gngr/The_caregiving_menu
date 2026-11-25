@@ -19,7 +19,12 @@ function signInEmail(inputId, boxId) {
   var go = function (token) {
     var c = Sync.getClient();
     c.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: location.href.split('#')[0].split('?')[0], captchaToken: token || undefined } })
-      .then(function (r) { if (r.error) throw r.error; toast('Check your email for the sign-in link'); }).catch(function (e) { toast(e.message); });
+      .then(function (r) {
+        if (r.error) throw r.error;
+        try { localStorage.setItem('tcm-signin-email', email.trim()); } catch (e) { /* blocked */ }
+        S.codeFor = email.trim(); refresh(); if (currentScreen === 'settings') renderAuthBox();
+        toast('We emailed you a sign-in code');
+      }).catch(function (e) { toast(/rate|limit|seconds/i.test(e.message) ? 'Too many emails just now. Wait a few minutes, then try again.' : e.message); });
   };
   if (!TCM_CONFIG.TURNSTILE_SITE_KEY) return go(null);
   var box = document.getElementById(boxId); if (!box) return go(null);
@@ -27,16 +32,37 @@ function signInEmail(inputId, boxId) {
     box.innerHTML = ''; ts.render(box, { sitekey: TCM_CONFIG.TURNSTILE_SITE_KEY, callback: go, 'error-callback': function () { toast('Could not check you are a person. Try again.'); } });
   }).catch(function () { toast('Could not load the sign-in check. Try again.'); });
 }
+// The code from the email, typed into the app. On iPhone the link opens Safari, which is a separate
+// sign-in from the home-screen app, so the code is the dependable way in.
+function codeEmail() { if (S.codeFor) return S.codeFor; try { return localStorage.getItem('tcm-signin-email') || ''; } catch (e) { return ''; } }
+function verifyCode(id) {
+  var email = codeEmail(), code = ((document.getElementById(id) || {}).value || '').replace(/\D/g, '');
+  if (code.length < 6) return toast('Type the code from the email');
+  Sync.getClient().auth.verifyOtp({ email: email, token: code, type: 'email' }).then(function (r) {
+    if (r.error) throw r.error;
+    try { localStorage.removeItem('tcm-signin-email'); } catch (e) { /* blocked */ }
+    S.codeFor = null; State.signedIn = true; toast('Signed in');
+    return syncNow();
+  }).then(function () { refresh(); if (currentScreen === 'settings') renderAuthBox(); })
+    .catch(function (e) { toast(/expired|invalid/i.test(e.message) ? 'That code didn\u2019t work or has expired. Send a new one.' : e.message); });
+}
+function cancelCode() { try { localStorage.removeItem('tcm-signin-email'); } catch (e) { /* blocked */ } S.codeFor = null; refresh(); if (currentScreen === 'settings') renderAuthBox(); }
 var _tsP = null;
 function loadTurnstile() {
   if (window.turnstile) return Promise.resolve(window.turnstile);
   return _tsP || (_tsP = new Promise(function (ok, bad) { var s = document.createElement('script'); s.src = TS_URL; s.async = true; s.onload = function () { ok(window.turnstile); }; s.onerror = bad; document.head.appendChild(s); }));
 }
 function signInBlock(id) {
-  var g = TCM_CONFIG.GOOGLE_SIGNIN;
+  var g = TCM_CONFIG.GOOGLE_SIGNIN, waiting = codeEmail();
+  if (waiting) {
+    return '<div class="code-box"><p>We emailed a sign-in code to <b>' + esc(waiting) + '</b>. Type it here:</p>' +
+      '<input id="' + id + 'Code" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="12345678">' +
+      '<div class="btn-row"><button class="btn" onclick="verifyCode(\'' + id + 'Code\')">Sign in</button><button class="btn ghost" onclick="cancelCode()">Use a different email</button></div>' +
+      '<p class="muted small">No email? Check spam, or wait a minute and use a different email to send again. You can also tap the link in the email on this phone.</p></div>';
+  }
   return (g ? '<div class="btn-row"><button class="btn google-btn" onclick="signInGoogle()"><span class="g-logo">G</span> Continue with Google</button></div>' : '') +
-    '<details class="email-signin"' + (g ? '' : ' open') + '><summary class="muted">' + (g ? 'Or use your email' : 'Sign in with your email') + '</summary><div class="row"><input id="' + id + 'Email" type="email" class="grow" placeholder="you@example.com" autocomplete="email">' +
-    '<button class="btn ghost" onclick="signInEmail(\'' + id + 'Email\',\'' + id + 'Ts\')">Send link</button></div><div id="' + id + 'Ts"></div></details>' +
+    '<details class="email-signin"' + (g ? '' : ' open') + '><summary class="muted">' + (g ? 'Or use your email' : 'Sign in with your email') + '</summary><div class="row"><input id="' + id + 'Email" type="email" class="grow" placeholder="you@example.com" autocomplete="email" autocapitalize="none" spellcheck="false" inputmode="email">' +
+    '<button class="btn" onclick="signInEmail(\'' + id + 'Email\',\'' + id + 'Ts\')">Send code</button></div><div id="' + id + 'Ts"></div></details>' +
     '<p class="muted small">By continuing you agree to the <a href="#" onclick="event.preventDefault();showScreen(\'help\',{topic:\'privacy\'})">privacy policy and terms</a> and confirm you are 18 or older.</p>';
 }
 

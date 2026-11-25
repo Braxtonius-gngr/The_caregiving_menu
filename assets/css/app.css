@@ -262,3 +262,5 @@ label.check input { width: auto; margin: 0; }
 .chips.col .chip { text-align: left; }
 .gs-done { opacity: .6; }
 .welcome h2 { font-size: 1.3em; }
+.code-box { margin: 8px 0; }
+.code-input { font-size: 1.6em; letter-spacing: .2em; text-align: center; }

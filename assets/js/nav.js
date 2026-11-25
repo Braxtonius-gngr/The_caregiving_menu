@@ -47,6 +47,11 @@ function bgRefresh() {
   var scr = document.getElementById('screen'), a = document.activeElement;
   if (scr && navIsField(a) && scr.contains(a)) { Nav.refreshPending = true; return; }
   var keep = Nav.screenDirty, y = window.scrollY;
+  Array.prototype.forEach.call(scr.querySelectorAll('input[id], textarea[id], select[id]'), function (el) {
+    if (el.type === 'file' || el.type === 'hidden' || keep[el.id] !== undefined) return;
+    if (el.type === 'checkbox' || el.type === 'radio') { if (el.checked !== el.defaultChecked) keep[el.id] = el.checked; }
+    else if (el.value && el.value !== el.defaultValue) keep[el.id] = el.value;
+  });
   Nav.noPush = true; try { _navRefresh(); } finally { Nav.noPush = false; }
   Object.keys(keep).forEach(function (id) {
     var el = document.getElementById(id); if (!el || !scr.contains(el)) return;
