@@ -13,6 +13,7 @@ function renderAsk(arg) {
     '<p class="muted">Answers come only from what is saved in the app, with the entries they came from. If it is not in her file, it says so. It does not give medical advice.</p>' +
     '<textarea id="askQ" data-autosave rows="2" placeholder="Ask anything about her care, medicines, visits, numbers..."></textarea>' +
     '<div class="btn-row"><button class="btn" onclick="askRun()">Ask</button>' + ((window.SpeechRecognition || window.webkitSpeechRecognition) ? '<button class="btn ghost" onclick="askListen()">&#127908; Say it</button>' : '') + '</div>' +
+    '<label class="muted" for="askCmp">Compare models (for testing)</label><select id="askCmp" onchange="S.askCmp=this.value"><option value="">Off</option><option value="sonnet"' + (S.askCmp === 'sonnet' ? ' selected' : '') + '>Opus vs Sonnet</option><option value="haiku"' + (S.askCmp === 'haiku' ? ' selected' : '') + '>Opus vs Haiku</option></select>' +
     '<div class="chips">' + ASK_SUGGEST.map(function (q) { return '<button class="chip" onclick="document.getElementById(\'askQ\').value=this.textContent;askRun()">' + esc(q) + '</button>'; }).join('') + '</div></div>' +
     '<div id="askOut" aria-live="polite"></div>' +
     S.askLog.filter(function (x) { return x.pid === pid; }).slice().reverse().map(askCard).join('');
@@ -68,16 +69,18 @@ function askRun() {
   if (!facts.length) return toast('Her file is empty so far');
   if (out) out.innerHTML = '<div class="card"><p><b>' + esc(q) + '</b></p><p class="muted">Looking through her file...</p></div>';
   var lines = facts.map(function (x, i) { return '[' + (i + 1) + '] ' + x.text; }).join('\n').slice(0, 90000);
-  Sync.brain('ask_file', { question: q.slice(0, 500), facts: lines, today: careToday() }).then(function (d) {
-    var item = { pid: pid, q: q, d: d, facts: facts, at: new Date().toISOString() };
-    S.askLog.push(item); if (S.askLog.length > 20) S.askLog.shift();
+  var cmp = S.askCmp, payload = { question: q.slice(0, 500), facts: lines, today: careToday() };
+  var call = function (model) { return Sync.brain('ask_file', Object.assign({ try_model: model }, payload)); };
+  (cmp ? Promise.all([call('opus'), call(cmp)]) : call(undefined).then(function (d) { return [d]; })).then(function (ds) {
+    var at = new Date().toISOString(), items = ds.map(function (d, i) { return { pid: pid, q: q, d: d, facts: facts, at: at, label: cmp ? (i ? (cmp === 'sonnet' ? 'Sonnet' : 'Haiku') : 'Opus') : '' }; });
+    items.forEach(function (it) { S.askLog.push(it); }); while (S.askLog.length > 20) S.askLog.shift();
     if (ta) ta.value = '';
-    var o = document.getElementById('askOut'); if (o) o.innerHTML = askCard(item);
+    var o = document.getElementById('askOut'); if (o) o.innerHTML = items.map(askCard).join('');
   }).catch(function (e) { var o = document.getElementById('askOut'); if (o) o.innerHTML = '<p class="flag-text">Could not answer: ' + esc(e.message) + '</p>'; });
 }
 function askCard(x) {
   var d = x.d || {}, srcs = (d.sources || []).filter(function (n) { return x.facts[n - 1]; });
-  return '<div class="card' + (d.found === false ? '' : ' ok-note') + '"><p><b>' + esc(x.q) + '</b> <span class="muted">' + esc(localTime(x.at)) + '</span></p>' +
+  return '<div class="card' + (d.found === false ? '' : ' ok-note') + '">' + (x.label ? '<p class="muted"><b>' + esc(x.label) + '</b>' + (d._cost_cents != null ? ' &middot; ' + (d._cost_cents / 100).toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 3 }) : '') + '</p>' : '') + '<p><b>' + esc(x.q) + '</b> <span class="muted">' + esc(localTime(x.at)) + '</span></p>' +
     '<p class="prewrap">' + esc(d.answer || '') + '</p>' +
     (d.found === false ? '<p class="muted">Not found in her file. Add it once you know (Snap it, Say it or a form), and it can be found next time.</p>' : '') +
     (d.ask_care_team && d.ask_care_team.length ? '<p><b>Ask her care team:</b></p><ul>' + d.ask_care_team.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>' : '') +

@@ -253,3 +253,4 @@ label.check input { width: auto; margin: 0; }
 /* A window's last row of buttons (Save, Cancel...) stays pinned at the bottom while its content scrolls. */
 #sheetBody > .btn-row:last-child { position: sticky; bottom: calc(-18px - env(safe-area-inset-bottom)); background: var(--panel); margin: 8px -16px calc(-18px - env(safe-area-inset-bottom)); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); box-shadow: 0 -8px 10px -8px rgba(0,0,0,.25); z-index: 2; }
 .ai-who { margin: 4px 0; padding-left: 18px; }
+.pt-alt { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); }

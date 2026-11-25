@@ -22,6 +22,10 @@ const PRICES: Record<string, { in: number; out: number; cacheRead: number; cache
 const WEB_SEARCH_CENTS = 1; // $10 per 1,000 searches
 type Use = { model: string; input: number; cacheRead: number; cacheWrite: number; output: number; searches: number };
 const meter = new AsyncLocalStorage<Use[]>();
+// Model comparison (Photo reader test, Ask her file): a request may ask for one of these instead of the default.
+const TRY_MODELS: Record<string, string> = { opus: "claude-opus-5-5", sonnet: "claude-sonnet-5-5", haiku: "claude-haiku-5-5" };
+const modelCtx = new AsyncLocalStorage<string>();
+function currentModel() { return modelCtx.getStore() ?? MODEL; }
 // deno-lint-ignore no-explicit-any
 function meterAdd(res: any) {
   const u = res?.usage ?? {}, list = meter.getStore();
@@ -235,7 +239,7 @@ async function research(question: string): Promise<{ notes: string; sources: Sou
   let notes = "";
   for (let turn = 0; turn < 4; turn++) {
     const params = {
-      model: MODEL, max_tokens: 16000, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
+      model: currentModel(), max_tokens: 16000, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
       system: RESEARCH_SYSTEM, output_config: { effort: "medium" },
       tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 6, allowed_domains: TRUSTED }],
       messages,
@@ -522,7 +526,7 @@ async function ask(schema: object, content: Anthropic.ContentBlockParam[], effor
   // fallbacks:"default" re-runs a request on Anthropic's recommended model if a safety
   // classifier declines it, instead of returning a bare refusal.
   const params = {
-    model: MODEL,
+    model: currentModel(),
     max_tokens: 16000,
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
@@ -765,7 +769,11 @@ Deno.serve(async (req) => {
     if (hh && hh.ai_allowance_cents != null && spent >= hh.ai_allowance_cents) return json({ error: "Your family has used this month's AI allowance. Everything can still be typed in by hand; the allowance resets on the 1st.", limit: true }, 402);
     const uses: Use[] = [];
     try {
-      return json(await meter.run(uses, () => handle(body.mode, body)));
+      const tryModel = TRY_MODELS[String(body.try_model ?? "")];
+      const out = await meter.run(uses, () => tryModel ? modelCtx.run(tryModel, () => handle(body.mode, body)) : handle(body.mode, body));
+      // For comparisons, say which model answered and what it cost.
+      if (tryModel && out && typeof out === "object") Object.assign(out, { _model: uses.map((u) => u.model).join(", "), _cost_cents: +uses.reduce((t, u) => t + costCents(u), 0).toFixed(3) });
+      return json(out);
     } finally {
       // Record what was spent, even when the request failed part-way.
       if (uses.length) {
