@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#1b1f24">
   <meta name="description" content="A shared care record for families caring for someone at home.">
   <!-- Only this site, the app's Supabase project and Open Food Facts may be reached; no third-party scripts. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://qhfjbdtakeagwtnhqmzk.supabase.co https://*.openfoodfacts.org; connect-src 'self' https://qhfjbdtakeagwtnhqmzk.supabase.co wss://qhfjbdtakeagwtnhqmzk.supabase.co https://world.openfoodfacts.org; media-src 'self' blob:; worker-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://qhfjbdtakeagwtnhqmzk.supabase.co https://*.openfoodfacts.org; connect-src 'self' https://qhfjbdtakeagwtnhqmzk.supabase.co wss://qhfjbdtakeagwtnhqmzk.supabase.co https://world.openfoodfacts.org; media-src 'self' blob:; worker-src 'self'; object-src 'none'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self'">
   <title>The Caregiving Menu</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
@@ -60,6 +60,7 @@
   <script src="assets/js/voice.js"></script>
   <script src="assets/js/ask.js"></script>
   <script src="assets/js/capture.js"></script>
+  <script src="assets/js/onboarding.js"></script>
   <script src="assets/js/simple.js"></script>
   <script src="assets/js/app.js"></script>
   <script src="assets/js/nav.js"></script>

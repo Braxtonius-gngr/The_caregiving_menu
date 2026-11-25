@@ -28,7 +28,8 @@ function scribeSheet() {
   openSheet('<h2 style="margin-top:0" data-nosnap>&#127897; Scribe a visit</h2>' +
     '<p>Tell it what happened at the visit, or let it listen to the whole visit. Then it pulls out what matters (what they said, what changed, medicine changes, tests, next appointment, questions) and fills in the Visit form for you to check.</p>' +
     (can
-      ? '<div class="btn-row"><button class="btn" id="scribeListenBtn" onclick="scribeToggle()">' + (sc.listening ? '&#9208; Pause listening' : '&#127897; Listen to the visit') + '</button></div>' +
+      ? '<label class="check"><input type="checkbox" id="scribeOk"' + (sc.consented ? ' checked' : '') + '> Everyone in the room agrees to this visit being turned into notes. <span class="muted">(Say: &ldquo;Is it OK if my phone takes notes of this visit for the family?&rdquo;)</span></label>' +
+        '<div class="btn-row"><button class="btn" id="scribeListenBtn" onclick="scribeToggle()">' + (sc.listening ? '&#9208; Pause listening' : '&#127897; Listen to the visit') + '</button></div>' +
         '<p class="muted">Ask first: tell the nurse or doctor you are taking notes with your phone. Some states require everyone&rsquo;s OK to record. No sound is saved, only the words. Keep the phone face up, near whoever is talking, with the app open.</p>'
       : '<p class="muted">Listening is not available in this browser. Type below, or tap the microphone on your keyboard to talk instead of typing.</p>') +
     '<div id="scribeLive" class="muted" aria-live="polite">' + (sc.listening ? 'Listening...' : '') + '</div>' +
@@ -56,6 +57,9 @@ function scribeDiscard() {
 function scribeToggle() { if (S.scribe && S.scribe.listening) scribeStop(); else scribeStart(); }
 function scribeStart() {
   var sc = S.scribe, Rec = window.SpeechRecognition || window.webkitSpeechRecognition; if (!sc || !Rec) return;
+  var ok = document.getElementById('scribeOk');
+  if (ok && !ok.checked) return toast('First tick that everyone in the room agrees');
+  if (!sc.consented) { sc.consented = true; recordConsent('scribe_visit', { started: sc.started }); }
   scribeSave();
   var rec = new Rec();
   rec.continuous = true; rec.interimResults = true; rec.lang = navigator.language || 'en-US';

@@ -160,7 +160,7 @@ function renderAuthBox() {
     box.innerHTML = s ? '<p>Signed in as <b>' + esc(s.user.email) + '</b></p><p id="syncError" class="note' + (lastSyncError ? '' : ' hidden') + '">' + (lastSyncError ? 'Last sync failed: ' + esc(lastSyncError) : '') + '</p>' +
         '<div class="btn-row"><button class="btn sm" onclick="syncNow()">Sync now</button><button class="btn sm ghost" onclick="Sync.signOut().then(function(){renderSettingsAgain()})">Sign out</button></div>' +
         '<details><summary class="muted">Have an invite code instead of a link?</summary><div class="row"><input id="joinCode" placeholder="Invite code" class="grow" autocomplete="off"><button class="btn sm" onclick="joinWithCode()">Join</button></div></details>'
-      : '<label>Email for a sign-in link</label><input id="authEmail" type="email"><div class="btn-row"><button class="btn sm" onclick="Sync.signIn(document.getElementById(\'authEmail\').value).then(function(){toast(\'Check your email\')}).catch(function(e){toast(e.message)})">Send link</button></div>';
+      : signInBlock('s');
     var fam = document.getElementById('familyBox');
     if (fam) { if (s) renderFamilyBox(); else fam.innerHTML = '<p class="muted">Sign in above to see and invite your family.</p>'; }
   });
@@ -306,6 +306,7 @@ function syncNow() {
   return Sync.joinPendingInvite().then(function (joined) { if (joined) { justJoined = true; toast('You joined the family'); } }, function (e) { toast('Could not join: ' + e.message); })
     .then(function () { return Sync.run(); }).then(function (r) {
     dot.classList.toggle('on', r.signedIn); dot.title = r.signedIn ? 'Synced' : 'Local only';
+    if (State.signedIn !== r.signedIn) { State.signedIn = r.signedIn; if (!State.profiles.length && currentScreen === 'home') refresh(); }
     if (!r.signedIn) return;
     var roleBefore = State.role;
     return Promise.all([Sync.members().then(cacheMembers, function () {}), Sync.refreshDayStart()]).then(function () {

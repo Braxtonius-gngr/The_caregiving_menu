@@ -271,7 +271,10 @@ for (const { t } of tables) {
   if ((await db.query(`select count(*)::int c from ${t} where household_id = $1`, [hid])).rows[0].c) continue;
   const sample = { uuid: 'gen_random_uuid()', text: `'x'`, numeric: '1', integer: '1', bigint: '1', 'double precision': '1', real: '1', boolean: 'false', jsonb: `'{}'`, json: `'{}'`, date: 'current_date', 'timestamp with time zone': 'now()', ARRAY: `'{}'` };
   const need = cols.filter(c => c.n === 'NO' && c.def == null && c.c !== 'household_id');
-  const names = ['household_id'].concat(need.map(c => c.c)), vals = [`'${hid}'`].concat(need.map(c => sample[c.d] || `'x'`));
+  // Text columns limited by a check ("type in ('a', 'b')") get the first allowed value.
+  const checks = (await db.query(`select pg_get_constraintdef(oid) d from pg_constraint where conrelid = $1::regclass and contype = 'c'`, [t])).rows.map(r => r.d);
+  const allowed = (col) => { const d = checks.find(x => x.includes(col)); const m = d && d.match(/'([^']+)'/); return m ? `'${m[1]}'` : null; };
+  const names = ['household_id'].concat(need.map(c => c.c)), vals = [`'${hid}'`].concat(need.map(c => (c.d === 'text' && allowed(c.c)) || sample[c.d] || `'x'`));
   try { await db.exec(`insert into ${t} (${names.join(',')}) values (${vals.join(',')})`); }
   catch (e) { assert.fail(`could not seed ${t} for the sweep: ${e.message}`); }
 }

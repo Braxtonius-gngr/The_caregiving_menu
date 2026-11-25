@@ -254,3 +254,11 @@ label.check input { width: auto; margin: 0; }
 #sheetBody > .btn-row:last-child { position: sticky; bottom: calc(-18px - env(safe-area-inset-bottom)); background: var(--panel); margin: 8px -16px calc(-18px - env(safe-area-inset-bottom)); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); box-shadow: 0 -8px 10px -8px rgba(0,0,0,.25); z-index: 2; }
 .ai-who { margin: 4px 0; padding-left: 18px; }
 .pt-alt { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.google-btn { background: #fff; color: #1f1f1f; border: 1px solid #c7c7c7; font-weight: 600; display: inline-flex; align-items: center; gap: 10px; }
+.google-btn .g-logo { font-weight: 800; color: #4285f4; font-size: 1.1em; }
+.email-signin summary { cursor: pointer; margin: 6px 0; }
+.small { font-size: .85em; }
+.chips.col { flex-direction: column; align-items: stretch; }
+.chips.col .chip { text-align: left; }
+.gs-done { opacity: .6; }
+.welcome h2 { font-size: 1.3em; }

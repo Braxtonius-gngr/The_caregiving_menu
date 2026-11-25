@@ -532,6 +532,11 @@ function addFormSnap() {
   if (h2) h2.insertAdjacentHTML('afterend', box); else body.insertAdjacentHTML('afterbegin', box);
 }
 function formSnapFile(input) {
+  if (!aiNoticeSeen()) {
+    if (!confirm('Photos are sent to our AI service (Anthropic) to fill in this form. Nothing is saved until you check it, and it is not medical advice. Continue?')) { input.value = ''; return; }
+    try { localStorage.setItem('tcm-ai-notice', '1'); } catch (e) { /* blocked */ }
+    recordConsent('ai_notice', { via: 'fill_from_photo' });
+  }
   var f = input.files[0]; input.value = ''; if (!f) return;
   if (!Sync.enabled()) return toast('Turn on sync in Settings to read photos');
   var out = document.getElementById('fsOut'), h2 = document.querySelector('#sheetBody h2');
