@@ -287,7 +287,7 @@ const photoSchema = {
     uncertain: strList("Fields you left empty because they were not clearly readable"),
     vitals: { type: "object", additionalProperties: false, required: ["systolic", "diastolic", "pulse", "value", "unit", "irregular_symbol", "afib_symbol", "time_shown"],
       properties: { systolic: num, diastolic: num, pulse: num, value: { ...num, description: "Glucose, oxygen % or temperature" }, unit: nstr, irregular_symbol: { type: "boolean" }, afib_symbol: { type: "boolean" }, time_shown: nstr } },
-    weight: { type: "object", additionalProperties: false, required: ["value", "unit"], properties: { value: num, unit: { type: ["string", "null"], enum: ["lb", "kg", null] } } },
+    weight: { type: "object", additionalProperties: false, required: ["value", "unit"], properties: { value: num, unit: { anyOf: [{ type: "string", enum: ["lb", "kg"] }, { type: "null" }] } } },
     medication: { type: "object", additionalProperties: false, required: ["name", "strength", "directions", "prescriber", "pharmacy", "filled_on", "refills", "quantity", "warnings"],
       properties: { name: nstr, strength: nstr, directions: { ...nstr, description: "Directions exactly as printed" }, prescriber: nstr, pharmacy: nstr, filled_on: { ...nstr, description: "YYYY-MM-DD" }, refills: nstr, quantity: nstr, warnings: strList("Warning stickers, as printed") } },
     labs: { type: "array", items: { type: "object", additionalProperties: false, required: ["test", "value", "value_text", "unit", "low", "high", "range_text", "flag", "date"],
