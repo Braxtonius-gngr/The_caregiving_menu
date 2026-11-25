@@ -9,9 +9,12 @@ var Sync = (function () {
   var LS_CONFIG = 'tcm_cloud', LS_INVITE = 'tcm_pending_invite';
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+  function movedHost(u) { try { return (TCM_CONFIG.MOVED_FROM || []).indexOf(new URL(String(u)).host) >= 0; } catch (e) { return false; } }
   function config() {
     var saved = null;
     try { saved = JSON.parse(lsGet(LS_CONFIG) || 'null'); } catch (e) {}
+    // The app moved to its own project: forget the old address so the built-in one is used.
+    if (saved && movedHost(saved.url)) { lsSet(LS_CONFIG, null); saved = null; client = null; }
     if (saved && saved.url && saved.key) return { url: saved.url, key: saved.key, source: 'device' };
     return { url: TCM_CONFIG.SUPABASE_URL, key: TCM_CONFIG.SUPABASE_ANON_KEY, source: 'file' };
   }
@@ -40,8 +43,10 @@ var Sync = (function () {
   function applySetupLink() {
     var m = location.hash.match(/^#connect=([A-Za-z0-9_-]+)$/);
     if (!m) return false;
-    history.replaceState(null, '', location.pathname + location.search);
+    window.history.replaceState(null, '', location.pathname + location.search);
     var data = JSON.parse(atob(m[1].replace(/-/g, '+').replace(/_/g, '/')));
+    // Links made before the move point at the old project: use the app's own project instead.
+    if (movedHost(data.u)) { data.u = TCM_CONFIG.SUPABASE_URL; data.k = TCM_CONFIG.SUPABASE_ANON_KEY; }
     var host = new URL(String(data.u)).host, current = configured() ? new URL(config().url).host : null;
     if (host !== current) {
       var official = /\.supabase\.co$/.test(host) || /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host);
