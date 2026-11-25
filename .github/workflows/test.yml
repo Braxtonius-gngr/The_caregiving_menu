@@ -33,7 +33,7 @@ jobs:
       - run: |
           mkdir -p /tmp/fn && cp -r supabase/functions /tmp/fn/
           echo '{"nodeModulesDir":"auto"}' > /tmp/fn/deno.json
-          cd /tmp/fn && deno check functions/brain/index.ts functions/lookup/index.ts
+          cd /tmp/fn && deno check functions/brain/index.ts functions/lookup/index.ts functions/account/index.ts
 
   database:
     runs-on: ubuntu-latest

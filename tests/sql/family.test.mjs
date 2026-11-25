@@ -61,7 +61,15 @@ const hid = (await as(U.me, 'select ensure_household() as h')).rows[0].h;
 const oldCode = (await db.query('select invite_code from households where id = $1', [hid])).rows[0].invite_code;
 await as(U.mom, 'select join_household($1)', [oldCode]);
 
-for (const f of after) await db.exec(readFileSync(dir + f, 'utf8'));
+// The scheduler and HTTP extensions exist only on Supabase; stand-ins record what is scheduled.
+await db.exec(`
+  create schema cron; create table cron.job (jobid serial primary key, jobname text, schedule text, command text);
+  create function cron.schedule(n text, s text, c text) returns int language sql as $$ insert into cron.job (jobname, schedule, command) values (n, s, c) returning jobid $$;
+  create function cron.unschedule(id int) returns boolean language sql as $$ delete from cron.job where jobid = id returning true $$;
+  create schema net;
+`);
+const SUPABASE_ONLY = /create extension if not exists pg_(cron|net);/g;
+for (const f of after) await db.exec(readFileSync(dir + f, 'utf8').replace(SUPABASE_ONLY, ''));
 
 const roleOf = async (u) => (await db.query('select role from members where household_id = $1 and user_id = $2', [hid, u])).rows[0]?.role;
 assert.equal(await roleOf(U.me), 'owner'); assert.equal(await roleOf(U.mom), 'caregiver');
@@ -264,13 +272,13 @@ const hidB = (await as(U.stranger, 'select ensure_household() as h')).rows[0].h;
 assert.notEqual(hidB, hid);
 const withHid = [];
 for (const { t } of tables) {
-  const cols = (await db.query(`select column_name c, data_type d, is_nullable n, column_default def from information_schema.columns where table_schema = 'public' and table_name = $1`, [t])).rows;
+  const cols = (await db.query(`select column_name c, data_type d, is_nullable n, column_default def, is_identity i from information_schema.columns where table_schema = 'public' and table_name = $1`, [t])).rows;
   if (!cols.some(c => c.c === 'household_id')) continue;
   withHid.push(t);
   // Make sure family A has at least one row here (inserted as the database owner, past the policies).
   if ((await db.query(`select count(*)::int c from ${t} where household_id = $1`, [hid])).rows[0].c) continue;
   const sample = { uuid: 'gen_random_uuid()', text: `'x'`, numeric: '1', integer: '1', bigint: '1', 'double precision': '1', real: '1', boolean: 'false', jsonb: `'{}'`, json: `'{}'`, date: 'current_date', 'timestamp with time zone': 'now()', ARRAY: `'{}'` };
-  const need = cols.filter(c => c.n === 'NO' && c.def == null && c.c !== 'household_id');
+  const need = cols.filter(c => c.n === 'NO' && c.def == null && c.i !== 'YES' && c.c !== 'household_id');
   // Text columns limited by a check ("type in ('a', 'b')") get the first allowed value.
   const checks = (await db.query(`select pg_get_constraintdef(oid) d from pg_constraint where conrelid = $1::regclass and contype = 'c'`, [t])).rows.map(r => r.d);
   const allowed = (col) => { const d = checks.find(x => x.includes(col)); const m = d && d.match(/'([^']+)'/); return m ? `'${m[1]}'` : null; };
@@ -316,5 +324,46 @@ await as(ownerNow, 'select remove_member($1, $2)', [hid, U.aunt]);
 for (const t of withHid) assert.equal((await as(U.aunt, `select * from ${t} where household_id = $1`, [hid])).rows.length, 0, `removed member still reads ${t}`);
 assert.equal((await as(U.aunt, `select name from storage.objects where bucket_id = 'photos' and name like $1`, [hid + '/%'])).rows.length, 0);
 ok('a removed member sees nothing of the family any more');
+
+// ---------- Step C: export, delete, leave, reports (0021, 0023, 0024) ----------
+// A family waiting to be erased is read-only for everyone, owners included.
+await db.query(`update households set erase_after = now() + interval '7 days' where id = $1`, [hid]);
+await fails(ownerNow, `insert into records (id, household_id, kind, title) values (gen_random_uuid(), $1, 'allergy', 'x')`, [hid], 'writing to a family set to be erased');
+assert.ok((await as(U.mom, 'select id from records where household_id = $1', [hid])).rows.length > 0, 'a locked family can still be read');
+await db.query(`update households set erase_after = null where id = $1`, [hid]);
+await as(U.mom, `insert into records (id, household_id, kind, title) values (gen_random_uuid(), $1, 'allergy', 'after cancel')`, [hid]);
+ok('a family set to be erased is read-only; cancelling makes it writable again');
+
+// Reports: members send; owners read all; a sender reads their own only while in the family;
+// nobody but the app maker sets status or replies.
+const rep = (await as(U.mom, `insert into reports (household_id, user_id, kind, feature, comment) values ($1, $2, 'ai', 'read_photo', 'misread') returning id`, [hid, U.mom])).rows[0].id;
+await fails(U.mom, `insert into reports (household_id, user_id, kind, status) values ($1, $2, 'app', 'fixed')`, [hid, U.mom], 'a sender marking their own report fixed');
+await fails(U.mom, `insert into reports (household_id, user_id, kind) values ($1, $2, 'app')`, [hid, U.me], 'sending a report in someone else\'s name');
+assert.equal((await as(ownerNow, 'select id from reports where id = $1', [rep])).rows.length, 1, 'owner reads the family\'s report');
+assert.equal((await as(U.mom, `update reports set status = 'fixed' where id = $1 returning id`, [rep])).rows.length, 0, 'sender changes status');
+assert.equal((await as(ownerNow, `update reports set reply = 'hi' where id = $1 returning id`, [rep])).rows.length, 0, 'owner replies as app maker');
+assert.equal((await as(U.stranger, 'select id from reports where id = $1', [rep])).rows.length, 0, 'stranger reads the report');
+const admin = '55555555-5555-4555-8555-555555555555';
+await db.query(`insert into auth.users values ($1, 'maker@example.com')`, [admin]);
+await db.query('insert into app_admins values ($1)', [admin]);
+assert.equal((await as(admin, `update reports set status = 'fixed', reply = 'Fixed' where id = $1 returning id`, [rep])).rows.length, 1, 'app maker marks fixed');
+assert.equal((await as(ownerNow, 'select reply from reports where id = $1', [rep])).rows[0].reply, 'Fixed');
+ok('reports: members send, owners read, only the app maker sets status and replies');
+
+// Leaving as "Former member": the id is replaced on entries, history and reports.
+const momRecs = (await db.query('select count(*)::int c from records where household_id = $1 and (user_id = $2 or edited_by = $2)', [hid, U.mom])).rows[0].c;
+assert.ok(momRecs > 0, 'mom has entries to redact');
+await db.query('select redact_member($1, $2)', [hid, U.mom]);
+for (const [t, cols] of [['records', ['user_id', 'edited_by']], ['reports', ['user_id']], ['audit_log', ['changed_by']]]) {
+  const where = cols.map(c => `${c} = $2`).join(' or ');
+  assert.equal((await db.query(`select count(*)::int c from ${t} where household_id = $1 and (${where})`, [hid, U.mom])).rows[0].c, 0, `mom's id left in ${t}`);
+}
+assert.equal((await db.query(`select count(*)::int c from audit_log where household_id = $1 and (old_row::text like $2 or new_row::text like $2)`, [hid, '%' + U.mom + '%'])).rows[0].c, 0, 'mom\'s id left inside the history rows');
+await fails(U.mom, 'select redact_member($1, $2)', [hid, U.me], 'a member calling the redaction directly');
+ok('leaving as Former member removes the id from entries, reports and the whole edit history; only the server can do it');
+
+// The daily erase job is scheduled.
+assert.ok((await db.query(`select 1 from cron.job where jobname = 'erase-due-families'`)).rows.length, 'erase job scheduled');
+ok('the daily erase job is scheduled');
 
 console.log(`\nAll ${n} family checks passed.`);
