@@ -78,14 +78,28 @@ function clip(v: unknown, n = 700) {
   const t = (Array.isArray(v) ? v.join(" ") : String(v ?? "")).replace(/\s+/g, " ").trim();
   return t.length > n ? t.slice(0, n).replace(/\s\S*$/, "") + "…" : t;
 }
+// The search's first hit can be another product that merely mentions the name ("ezetimibe" finds
+// "ezetimibe and simvastatin", "probiotic" finds a sunscreen). Pick a label that is this medicine:
+// its brand is the name, or every word of its generic name (salt words aside) is in the name.
+const SALT = /^(hydrochloride|hcl|besylate|calcium|sodium|potassium|magnesium|hemihydrate|monohydrate|dihydrate|tartrate|succinate|maleate|mesylate|citrate|sulfate|acetate|phosphate|bromide|fumarate|er|xr|sr|extended|release)$/;
+// deno-lint-ignore no-explicit-any
+function fits(name: string, l: any) {
+  const q = name.toLowerCase();
+  const names: string[] = (l.openfda?.brand_name ?? []).concat(l.openfda?.generic_name ?? []);
+  return names.some((g) => {
+    const words = g.toLowerCase().split(/[\s,/]+/).filter((w) => w && !SALT.test(w));
+    return words.length > 0 && words.every((w) => w === "and" ? / and |\/|\+/.test(q) : q.includes(w));
+  });
+}
 async function drugLabel(q: string) {
   const name = String(q ?? "").trim().replace(/["\\]/g, "").split(/\s+\d/)[0].trim();
   if (name.length < 3) return { found: false };
   const search = `openfda.generic_name:"${name}"+openfda.brand_name:"${name}"`;
-  const r = await fetch(`https://api.fda.gov/drug/label.json?search=${encodeURIComponent(search).replace(/%2B/g, "+")}&limit=1`);
+  const r = await fetch(`https://api.fda.gov/drug/label.json?search=${encodeURIComponent(search).replace(/%2B/g, "+")}&limit=10`);
   if (r.status === 404) return { found: false };
   const d = await r.json().catch(() => ({}));
-  const l = d.results?.[0];
+  // deno-lint-ignore no-explicit-any
+  const l = (d.results ?? []).find((x: any) => fits(name, x));
   if (!l) return { found: false };
   const eff = String(l.effective_time ?? "");
   return {
