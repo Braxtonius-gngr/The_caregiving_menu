@@ -192,7 +192,7 @@ Return only what the schema asks for. Use generic, lowercase, singular ingredien
 Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
 Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
 
-type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance" | "read_vitals" | "read_photo" | "fill_form" | "scribe" | "handoff" | "quick_log";
+type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance" | "read_vitals" | "read_photo" | "fill_form" | "scribe" | "handoff" | "quick_log" | "ask_file";
 
 /* ---------- current guidance: search trusted sites first, then answer in a fixed shape ---------- */
 // Web search stays on public health sources; the answer step cites them by number.
@@ -399,6 +399,15 @@ const quickItem = {
 const quickSchema = {
   type: "object", additionalProperties: false, required: ["items", "unclear"],
   properties: { items: { type: "array", items: quickItem }, unclear: strList("Parts of what was said that could not be turned into an entry") },
+};
+const askSchema = {
+  type: "object", additionalProperties: false, required: ["answer", "found", "sources", "ask_care_team"],
+  properties: {
+    answer: { type: "string", description: "A short plain answer (1-5 sentences, or a short list), with dates. If the facts do not answer it, say what is missing" },
+    found: { type: "boolean", description: "False if the facts do not contain the answer" },
+    sources: { type: "array", items: { type: "integer" }, description: "Numbers of every fact the answer relies on" },
+    ask_care_team: strList("If the question needs a clinician's judgement (should she, is it safe, what does it mean), 1-3 questions to ask her care team; else empty"),
+  },
 };
 const handoffSchema = {
   type: "object", additionalProperties: false, required: ["summary", "watch", "to_do"],
@@ -649,6 +658,22 @@ ${meds || "(none saved)"}
 
 What was said:
 ${text}` }], "low");
+    }
+    case "ask_file": {
+      // body.facts: numbered lines built by the app from saved entries (her and family names replaced).
+      const q = String(body.question ?? "").slice(0, 500), facts = String(body.facts ?? "").slice(0, 90000);
+      if (!q.trim() || !facts.trim()) throw new Error("Nothing to look through.");
+      return await ask(askSchema, [{ type: "text", text: `A family caregiver is asking about the elderly relative they care for. Answer ONLY from the numbered facts below, which are everything saved in the family's app.
+- Never use outside knowledge to fill gaps, never guess, and never invent dates, numbers or names. If the facts do not answer it, set found false and say plainly what is not in the file.
+- Cite every fact you use in sources. Prefer the newest fact when they differ, and say when sources disagree (e.g. list says 20 mg, bottle says 40 mg).
+- Do not give medical advice or tell them to change treatment. For questions that need a clinician, give what the file says and put the questions for her care team in ask_care_team.
+- "Her" is the relative; "a family member" is one of the caregivers.
+Today is ${String(body.today ?? "").slice(0, 10)}.
+
+Question: ${q}
+
+Facts:
+${facts}` }], "medium");
     }
     case "handoff": {
       // body.facts: plain lines from the app's own entries, without anyone's name.

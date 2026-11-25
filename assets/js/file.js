@@ -43,6 +43,7 @@ function renderFile(arg) {
     (prof ? '' : '<p class="muted">Add the person you care for in Settings first.</p>') +
     '<div class="seg" role="tablist">' + FILE_SECTIONS.map(function (s) { return '<button role="tab" aria-selected="' + (s[0] === section) + '" class="seg-btn' + (s[0] === section ? ' on' : '') + '" onclick="' + go({ pid: pid, section: s[0] }) + '">' + s[1] + '</button>'; }).join('') + '</div>';
   if (!prof) return head;
+  head += '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'ask\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">&#128172; Ask her file</button></div>';
   var body = { summary: fileSummary, team: fileTeam, labs: fileLabs, visits: fileVisits, therapy: fileTherapy, documents: fileDocuments, updates: fileUpdates, export: fileExport }[section] || fileSummary;
   return head + body(pid, prof);
 }

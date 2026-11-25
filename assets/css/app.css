@@ -234,3 +234,4 @@ label.check input { width: auto; margin: 0; }
 .snap-row input:not([type=checkbox]) { margin: 4px 0 0; }
 .snap-row { padding: 10px 12px; }
 .mc-issues { margin: 6px 0; padding-left: 18px; }
+.ask-src { margin: 4px 0; padding-left: 18px; font-size: .92em; }
