@@ -27,7 +27,7 @@ function eraseBanner() {
 
 /* ---------- Settings: Your data ---------- */
 function renderYourData() {
-  return '<h2>Your data</h2><div class="card" id="yourDataBox">' + (Sync.enabled() ? '<p class="muted">Sign in to export or delete.</p>' : '<p class="muted">Everything is on this phone only.</p>') + '</div>' +
+  return (Sync.enabled() ? '<h2>Reports</h2><div class="card" id="reportsBox"><p class="muted">Sign in to see reports.</p></div>' : '') + '<h2>Your data</h2><div class="card" id="yourDataBox">' + (Sync.enabled() ? '<p class="muted">Sign in to export or delete.</p>' : '<p class="muted">Everything is on this phone only.</p>') + '</div>' +
     '<h2>This phone only</h2><div class="card"><p class="muted">A backup of what is on this phone, and tools for this phone. They don’t change the family’s data in the cloud.</p><div class="btn-row"><button class="btn ghost" onclick="exportJSON()">Save a phone backup</button><button class="btn ghost" onclick="document.getElementById(\'importFile\').click()">Restore from backup</button><input id="importFile" type="file" accept="application/json,.json" class="hidden" onchange="importJSON(this)"><button class="btn ghost" onclick="loadSample()">Load sample data</button><button class="btn danger" onclick="if(confirm(\'Erase everything on this phone? The family’s data in the cloud stays.\'))DB.wipe().then(function(){location.reload()})">Erase this phone</button></div><p class="muted">v' + TCM_CONFIG.APP_VERSION + '</p></div>';
 }
 function fillYourData(s) {
@@ -59,7 +59,7 @@ function needFresh(then) {
     freshThen = then;
     Sync.session().then(function (s) {
       var google = s && s.user && (s.user.app_metadata || {}).provider === 'google';
-      openSheet('<h2 style="margin-top:0">Confirm it’s you</h2><p>For safety, this needs a fresh sign-in, so nobody can do it from a phone left unlocked.</p>' +
+      openSheet('<h2 style="margin-top:0" data-nosnap>Confirm it’s you</h2><p>For safety, this needs a fresh sign-in, so nobody can do it from a phone left unlocked.</p>' +
         (google ? '<div class="btn-row"><button class="btn" onclick="signInGoogle()">Continue with Google</button></div><p class="muted">After Google brings you back, tap the same button again.</p><p class="muted">Or use an email code:</p>' : '') +
         '<div class="btn-row"><button class="btn' + (google ? ' ghost' : '') + '" onclick="freshSendCode()">Email me a code</button></div><div id="freshTs"></div>' +
         '<div id="freshCodeRow" class="hidden"><label for="freshCode">Code from the email to ' + esc(s.user.email) + '</label><div class="row"><input id="freshCode" class="grow" inputmode="numeric" autocomplete="one-time-code" maxlength="10"><button class="btn sm" onclick="freshVerify()">Confirm</button></div></div>' +
@@ -104,14 +104,14 @@ function withFresh(fn) {
 var exportReady = null;
 function exportStart(scope) {
   var go = function () {
-    openSheet('<h2 style="margin-top:0">Preparing your copy</h2><p id="expStep" class="muted">Starting...</p>');
+    openSheet('<h2 style="margin-top:0" data-nosnap>Preparing your copy</h2><p id="expStep" class="muted">Starting...</p>');
     var step = function (t) { var el = document.getElementById('expStep'); if (el) el.textContent = t; };
     var run = Sync.run().catch(function () {}).then(function () { return Sync.exportAll(scope, step); });
     run.then(function (out) {
       out.who_has_had_your_data = DATA_PROCESSORS.map(function (p) { return { service: p[0], what: p[1] }; });
       exportReady = out;
       var miss = out.photos_missing.length;
-      openSheet('<h2 style="margin-top:0">Your copy is ready</h2>' +
+      openSheet('<h2 style="margin-top:0" data-nosnap>Your copy is ready</h2>' +
         '<p>' + Object.keys(out.photos).length + ' photos' + (out.records ? ', ' + out.records.length + ' records' : '') + (out.audit_log ? ', ' + out.audit_log.length + ' edit history entries' : '') + '.</p>' +
         (miss ? '<p class="flag-text">' + miss + ' photo(s) could not be downloaded. Try again on a better connection.</p>' : '') +
         '<div class="btn-row"><button class="btn" onclick="exportSave(\'json\')">Save the data file</button>' + (scope === 'family' ? '<button class="btn ghost" onclick="exportSave(\'html\')">Save the printout</button>' : '') + '</div>' +
@@ -148,7 +148,7 @@ function exportPrintout(out) {
 function deleteFamilyStart() {
   needFresh(function () {
     Sync.householdName().then(function (name) {
-      openSheet('<h2 style="margin-top:0">Delete the family?</h2>' +
+      openSheet('<h2 style="margin-top:0" data-nosnap>Delete the family?</h2>' +
         '<p>Everything (every record, photo, the edit history, invites) and the sign-ins of people in no other family will be <b>erased for good after 7 days</b>.</p>' +
         '<p>From now until then the family is locked: everyone can read and export, nobody can add or change anything, and the AI is off. Every member sees the date. Any owner can cancel during the 7 days.</p>' +
         '<p>Export the family file first if you want a copy.</p>' +
@@ -176,7 +176,7 @@ function cancelErase() {
 
 /* ---------- leave / delete my account ---------- */
 function leaveStart(deleteAccount) {
-  openSheet('<h2 style="margin-top:0">' + (deleteAccount ? 'Delete your account?' : 'Leave this family?') + '</h2>' +
+  openSheet('<h2 style="margin-top:0" data-nosnap>' + (deleteAccount ? 'Delete your account?' : 'Leave this family?') + '</h2>' +
     (deleteAccount ? '<p>You leave every family you’re in and your sign-in is erased. This can’t be undone.</p>' : '<p>You lose access straight away. An owner can invite you back.</p>') +
     '<p>What you entered stays with the family, because it’s part of the patient’s record.</p>' +
     '<p><b>Your name on what you wrote:</b></p>' +

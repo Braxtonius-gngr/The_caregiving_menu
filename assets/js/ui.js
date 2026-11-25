@@ -48,18 +48,19 @@ function scrollList(rows, limit, tall) {
   if (rows.length <= (limit || 4)) return rows.join('');
   return '<div class="scroll-box' + (tall ? ' tall' : '') + '" tabindex="0" role="region" aria-label="List, scrolls">' + rows.join('') + '</div><div class="scroll-hint muted">' + rows.length + ' in all &middot; scroll for more</div>';
 }
-function openSheet(html) { document.getElementById('sheetBody').innerHTML = html; document.getElementById('sheet').classList.remove('hidden'); }
+function openSheet(html) { if (typeof aiWrongAppend === 'function') html = aiWrongAppend(html); document.getElementById('sheetBody').innerHTML = html; document.getElementById('sheet').classList.remove('hidden'); }
 var scanSession = 0; // bumped when the scanner opens or a sheet closes; late lookups compare against it
 function closeSheet() { scanSession++; S.sharedPhoto = null; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
 
-var TITLES = { simple: '', home: 'Today', meds: 'Daily meds', help: 'How to', timing: 'Timing review', patterns: 'Patterns', plans: 'Schedule drafts', phototest: 'Photo reader test', medcheck: 'Compare medicines', handoff: 'Catch me up', ask: 'Ask her file', plan: 'Schedule draft',  recipes: 'Recipes', scan: 'Kitchen', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted', file: 'Patient file', kitchen: 'Kitchen' };
+var TITLES = { simple: '', home: 'Today', meds: 'Daily meds', help: 'How to', timing: 'Timing review', patterns: 'Patterns', plans: 'Schedule drafts', phototest: 'Photo reader test', medcheck: 'Compare medicines', handoff: 'Catch me up', ask: 'Ask her file', reports: 'Reports', plan: 'Schedule draft',  recipes: 'Recipes', scan: 'Kitchen', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted', file: 'Patient file', kitchen: 'Kitchen' };
 var currentScreen = 'home';
 function showScreen(name, arg) {
+  if (name !== 'help') S.lastScreen = name;
   currentScreen = name;
   document.getElementById('screenTitle').textContent = TITLES[name] || name;
-  var tab = { scan: 'kitchen', ask: 'home', handoff: 'home', medcheck: 'file', phototest: 'settings', recipes: 'kitchen', pantry: 'kitchen', recipe: 'kitchen', fluids: 'diary', trash: 'diary', meds: 'home', help: 'home', timing: 'home', patterns: 'home', plans: 'home', plan: 'home' }[name] || name;
+  var tab = { scan: 'kitchen', ask: 'home', handoff: 'home', medcheck: 'file', phototest: 'settings', recipes: 'kitchen', pantry: 'kitchen', recipe: 'kitchen', fluids: 'diary', trash: 'diary', meds: 'home', help: 'home', timing: 'home', patterns: 'home', plans: 'home', plan: 'home', reports: 'settings' }[name] || name;
   document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === tab); });
-  var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe, fluids: renderFluids, trash: renderTrash, file: renderFile, kitchen: renderKitchen, meds: renderMeds, help: renderHelp, timing: renderTiming, patterns: renderPatterns, plans: renderPlans, plan: renderPlan, phototest: renderPhotoTest, medcheck: renderMedCheck, handoff: renderHandoff, ask: renderAsk }[name];
+  var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe, fluids: renderFluids, trash: renderTrash, file: renderFile, kitchen: renderKitchen, meds: renderMeds, help: renderHelp, timing: renderTiming, patterns: renderPatterns, plans: renderPlans, plan: renderPlan, phototest: renderPhotoTest, medcheck: renderMedCheck, handoff: renderHandoff, ask: renderAsk, reports: renderReports }[name];
   document.getElementById('screen').innerHTML = fn ? fn(arg) : '';
   window.scrollTo(0, 0);
 }

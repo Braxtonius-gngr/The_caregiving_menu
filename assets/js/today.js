@@ -289,7 +289,7 @@ function moreMealIdeas(pid) {
     pantry: State.pantry.map(function (p) { return (S.ingById[p.ingredient_id] || {}).name; }).filter(Boolean)
   }).then(function (d) {
     box.innerHTML = (d.ideas || []).map(function (i) { return '<div class="list-item"><div class="grow"><b>' + esc(i.name) + '</b><div class="muted">' + esc([i.why, i.sodium_mg != null ? '~' + i.sodium_mg + ' mg sodium' : '', i.fluid_oz ? '~' + i.fluid_oz + ' oz fluid' : ''].filter(Boolean).join(' · ')) + '</div></div></div>'; }).join('') +
-      '<p class="muted">AI ideas to check against her diet plan. ' + esc(d.caveat || '') + '</p>';
+      '<p class="muted">AI ideas to check against her diet plan. ' + esc(d.caveat || '') + '</p>' + aiWrongLink('meal_ideas');
   }).catch(function (e) { box.innerHTML = '<p class="muted">Could not get ideas: ' + esc(e.message) + '</p>'; });
 }
 
@@ -323,6 +323,7 @@ var HELP = [
 function renderHelp(arg) {
   var topic = arg && arg.topic;
   setTimeout(function () { var el = topic && document.getElementById('help-' + topic); if (el) el.scrollIntoView({ block: 'start' }); }, 30);
-  return '<p class="muted">Short how-tos for everyone helping. Button names are in <b>bold</b>.</p>' +
+  return '<div class="card row between"><div class="grow"><b>Something&rsquo;s wrong?</b><div class="muted">A bug, confusing words, sync trouble, something missing.</div></div><button class="btn sm" onclick="reportStart(\'app\')">Tell us</button></div>' +
+    '<p class="muted">Short how-tos for everyone helping. Button names are in <b>bold</b>.</p>' +
     HELP.map(function (h) { return '<details class="card help-card" id="help-' + h[0] + '"' + (!topic || topic === h[0] ? ' open' : '') + '><summary><b>' + h[1] + '</b></summary><ol>' + h[2].map(function (t) { return '<li>' + t + '</li>'; }).join('') + '</ol></details>'; }).join('');
 }

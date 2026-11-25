@@ -75,7 +75,7 @@ function askRun() {
     var at = new Date().toISOString(), items = ds.map(function (d, i) { return { pid: pid, q: q, d: d, facts: facts, at: at, label: cmp ? (i ? (cmp === 'sonnet' ? 'Sonnet' : 'Haiku') : 'Opus') : '' }; });
     items.forEach(function (it) { S.askLog.push(it); }); while (S.askLog.length > 20) S.askLog.shift();
     if (ta) ta.value = '';
-    var o = document.getElementById('askOut'); if (o) o.innerHTML = items.map(askCard).join('');
+    var o = document.getElementById('askOut'); if (o) o.innerHTML = items.map(askCard).join('') + aiWrongLink('ask_file');
   }).catch(function (e) { var o = document.getElementById('askOut'); if (o) o.innerHTML = '<p class="flag-text">Could not answer: ' + esc(e.message) + '</p>'; });
 }
 function askCard(x) {

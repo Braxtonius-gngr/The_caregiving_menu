@@ -622,7 +622,7 @@ function formSnapFile(input) {
     }
     var n = formSnapApply(d.values || []);
     o.innerHTML = '<div class="ok-note">&#128247; ' + esc(d.summary || '') + ' ' + (n ? 'Filled ' + n + ' field' + (n > 1 ? 's' : '') + ' (outlined). Check them before saving.' : 'Nothing on this form could be filled from it.') +
-      (d.uncertain && d.uncertain.length ? ' Left blank (not clear): ' + esc(d.uncertain.join(', ')) + '.' : '') + '</div>';
+      (d.uncertain && d.uncertain.length ? ' Left blank (not clear): ' + esc(d.uncertain.join(', ')) + '.' : '') + '</div>' + aiWrongLink('fill_form');
   }).catch(function (e) { var o = document.getElementById('fsOut'); if (o) o.textContent = 'Could not read the photo: ' + e.message; });
 }
 function formSnapApply(values) {

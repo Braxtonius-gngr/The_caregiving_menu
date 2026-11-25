@@ -164,7 +164,7 @@ function renderAuthBox() {
       : signInBlock('s');
     var fam = document.getElementById('familyBox');
     if (fam) { if (s) renderFamilyBox(); else fam.innerHTML = '<p class="muted">Sign in above to see and invite your family.</p>'; }
-    fillYourData(s);
+    fillYourData(s); fillReports(s);
   });
 }
 function joinWithCode() {

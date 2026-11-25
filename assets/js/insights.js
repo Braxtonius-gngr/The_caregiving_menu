@@ -202,7 +202,7 @@ function runGuidance(pid) {
       ((d.key_points || []).length ? '<ul>' + d.key_points.map(function (k) { return '<li>' + esc(k.point) + ' ' + sourceLinks(k.sources, d.source_list) + '</li>'; }).join('') + '</ul>' : '') +
       ((d.questions_for_care_team || []).length ? '<b>Ask her care team</b><ol class="q-list">' + d.questions_for_care_team.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ol>' : '') +
       ((d.source_list || []).length ? '<details><summary class="muted">Sources (' + d.source_list.length + ')</summary><ol class="src-list">' + d.source_list.map(function (s) { return '<li><a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.title) + '</a>' + (s.age ? ' <span class="muted">' + esc(s.age) + '</span>' : '') + '</li>'; }).join('') + '</ol></details>' : '') +
-      '<p class="muted">' + esc(d.caveat || '') + '</p><div class="btn-row writer-only"><button class="btn sm ghost" onclick="saveGuidance(' + pidArg(pid) + ')">Save to her file</button></div></div>';
+      '<p class="muted">' + esc(d.caveat || '') + '</p><div class="btn-row writer-only"><button class="btn sm ghost" onclick="saveGuidance(' + pidArg(pid) + ')">Save to her file</button></div>' + aiWrongLink('guidance') + '</div>';
   }).catch(function (e) { out.innerHTML = '<p class="muted">Could not get an answer: ' + esc(e.message) + '</p>'; });
 }
 function saveGuidance(pid) {

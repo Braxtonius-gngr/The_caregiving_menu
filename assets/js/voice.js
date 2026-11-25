@@ -86,7 +86,7 @@ function sayShow(d) {
       (problem ? '<div class="flag-text">' + esc(problem) + '</div>' : '') + '</label>';
   }).join('') +
     ((d.unclear || []).length ? '<p class="flag-text">Not sure about: ' + esc(d.unclear.join('; ')) + '. Fix the words above and tap Make entries again.</p>' : '') +
-    '<div class="btn-row"><button class="btn" onclick="saySave()">Save ticked</button></div>';
+    '<div class="btn-row"><button class="btn" onclick="saySave()">Save ticked</button></div>' + aiWrongLink('quick_log');
 }
 // "14:30" today (or yesterday if that time has not come yet), else now.
 function sayWhen(t) {

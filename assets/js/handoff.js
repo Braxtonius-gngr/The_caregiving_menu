@@ -92,6 +92,6 @@ function handoffSay() {
     o.innerHTML = '<div class="card ok-note"><p>' + esc(d.summary || '') + '</p>' +
       (d.watch && d.watch.length ? '<p><b>Keep an eye on:</b></p><ul>' + d.watch.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '') +
       (d.to_do && d.to_do.length ? '<p><b>Still to do:</b></p><ul>' + d.to_do.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '') +
-      '<p class="muted">Written by AI from the entries below; check the details there.</p></div>';
+      '<p class="muted">Written by AI from the entries below; check the details there.</p>' + aiWrongLink('handoff') + '</div>';
   }).catch(function (e) { var o = document.getElementById('handoffSay'); if (o) o.innerHTML = '<p class="flag-text">Could not write it: ' + esc(e.message) + '</p>'; });
 }

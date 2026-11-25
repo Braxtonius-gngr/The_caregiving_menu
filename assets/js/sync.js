@@ -288,7 +288,16 @@ var Sync = (function () {
       });
     });
   }
-  function brain(mode, payload) { return invokeFn('brain', Object.assign({ mode: mode }, payload)); }
+  // The last answer per feature stays on the phone (with the photos sent), so "This was wrong?"
+  // can report exactly what the AI was given and said.
+  var lastAiBy = {}, lastAiAny = null;
+  function brain(mode, payload) {
+    return invokeFn('brain', Object.assign({ mode: mode }, payload)).then(function (d) {
+      lastAiAny = lastAiBy[mode] = { mode: mode, payload: payload, result: d, at: Date.now(), shown: false };
+      return d;
+    });
+  }
+  function lastAi(mode) { return mode ? lastAiBy[mode] || null : lastAiAny; }
   function lookup(kind, q) { return invokeFn('lookup', { kind: kind, q: q }); }
 
   // ---------- family: roles, invite links, names (migration 0010) ----------
@@ -469,8 +478,8 @@ var Sync = (function () {
   }
   // Tables a family export reads straight from the server (not from this device).
   var EXPORT_TABLES = ['records', 'entry_photos', 'measurements', 'diary_entries', 'diet_profiles', 'profile_rules', 'recipes', 'recipe_ingredients',
-    'recipe_variations', 'ingredients', 'pantry_items', 'shopping_list', 'usage_log', 'consents', 'ai_usage', 'audit_log', 'former_members', 'data_requests'];
-  var EXPORT_MINE = { records: 'user_id', entry_photos: 'user_id', measurements: 'user_id', diary_entries: 'user_id', consents: 'user_id', ai_usage: 'user_id', audit_log: 'changed_by', data_requests: 'user_id' };
+    'recipe_variations', 'ingredients', 'pantry_items', 'shopping_list', 'usage_log', 'consents', 'ai_usage', 'audit_log', 'former_members', 'data_requests', 'reports'];
+  var EXPORT_MINE = { records: 'user_id', entry_photos: 'user_id', measurements: 'user_id', diary_entries: 'user_id', consents: 'user_id', ai_usage: 'user_id', audit_log: 'changed_by', data_requests: 'user_id', reports: 'user_id' };
   function readAll(c, table, hid, col, uid) {
     var out = [];
     function page(from) {
@@ -544,5 +553,5 @@ var Sync = (function () {
     });
   }
 
-  return { authStorageKey: authStorageKey, config: config, configured: configured, saveConfig: saveConfig, clearConfig: clearConfig, setupLink: setupLink, applySetupLink: applySetupLink, joinPendingInvite: joinPendingInvite, pendingInvite: pendingInvite, photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, inviteLinks: inviteLinks, resetInviteLinks: resetInviteLinks, members: members, setMyName: setMyName, setHouseholdName: setHouseholdName, setMemberRole: setMemberRole, removeMember: removeMember, householdName: householdName, setDayStart: setDayStart, approveMember: approveMember, history: history, recentChanges: recentChanges, hardDelete: hardDelete, refreshDayStart: refreshDayStart, refreshRole: refreshRole, householdId: householdId, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup, account: account, exportAll: exportAll, eraseDate: eraseDate, formerMembers: formerMembers, dataRequests: dataRequests, signedInAgo: signedInAgo };
+  return { authStorageKey: authStorageKey, config: config, configured: configured, saveConfig: saveConfig, clearConfig: clearConfig, setupLink: setupLink, applySetupLink: applySetupLink, joinPendingInvite: joinPendingInvite, pendingInvite: pendingInvite, photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, inviteLinks: inviteLinks, resetInviteLinks: resetInviteLinks, members: members, setMyName: setMyName, setHouseholdName: setHouseholdName, setMemberRole: setMemberRole, removeMember: removeMember, householdName: householdName, setDayStart: setDayStart, approveMember: approveMember, history: history, recentChanges: recentChanges, hardDelete: hardDelete, refreshDayStart: refreshDayStart, refreshRole: refreshRole, householdId: householdId, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup, account: account, exportAll: exportAll, eraseDate: eraseDate, formerMembers: formerMembers, dataRequests: dataRequests, signedInAgo: signedInAgo, lastAi: lastAi };
 })();
