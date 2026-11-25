@@ -189,7 +189,7 @@ function editRecord(id, kind, pid) {
   if (!r && (kind === 'medication' || kind === 'lab' || kind === 'visit' || kind === 'exercise')) titleField = '<div class="btn-row writer-only"><button type="button" class="btn sm ghost" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ',\'' + kind + '\')">&#128247; From a photo</button></div>' + titleField;
   if (!r && kind === 'visit') titleField = titleField.replace('</button></div>', '</button><button type="button" class="btn sm ghost" onclick="scribeIt(' + (pid ? '\'' + pid + '\'' : 'null') + ')">&#127897; Scribe it</button></div>');
   if (kind === 'medication') titleField += '<div class="btn-row writer-only"><button type="button" class="btn sm ghost" onclick="fillFromLabel()">Fill from the FDA label</button></div><div class="muted" id="labelHint" aria-live="polite"></div>';
-  var checkBox = r && fl.check ? '<div class="card attention"><p><b>&#10067; Please double-check</b></p><div class="prewrap">' + esc(fl.check) + '</div><div class="btn-row"><button class="btn sm writer-only" onclick="clearCheck(\'' + r.id + '\')">Checked, all good</button></div></div>' : '';
+  var checkBox = r ? checkBoxHtml(r) : '';
   openSheet('<h2 style="margin-top:0">' + (r ? '' : 'Add ') + esc(K.label) + '</h2>' + checkBox + titleField +
     (dateType ? '<label for="rWhen">' + (kind === 'lab' ? 'Date of the test' : 'When') + '</label><input id="rWhen" type="' + (dateType === 'date' ? 'date' : 'datetime-local') + '" value="' + dateVal + '">' : '') +
     K.fields.map(field).join('') + extraFieldsHtml(fl.extra) +

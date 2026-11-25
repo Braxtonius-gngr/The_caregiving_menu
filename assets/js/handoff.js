@@ -55,7 +55,7 @@ function renderHandoff(arg) {
   }).join('<hr>'));
   html += section('&#128221; Updates', h.updates.length ? '<ul>' + h.updates.map(function (u) { return li(handoffTime(u.occurred_at), handoffWho(u), esc((u.title ? u.title + ': ' : '') + ((u.fields || {}).text || ''))); }).join('') + '</ul>' : '');
   html += section('&#9989; Still to do', h.todo.length ? '<ul>' + h.todo.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>' : '');
-  html += section('&#10067; To double-check', h.checks.length ? '<ul>' + h.checks.map(function (r) { return '<li class="tappable" onclick="editRecord(\'' + r.id + '\')"><b>' + esc(r.title) + '</b>: ' + esc(String(r.fields.check).split('\n')[0]) + '</li>'; }).join('') + '</ul>' : '');
+  html += section('&#10067; To double-check', h.checks.length ? '<ul>' + h.checks.map(function (r) { return '<li class="tappable" onclick="editRecord(\'' + r.id + '\')"><b>' + esc(r.title) + '</b>: ' + esc(checkLine(r)) + '</li>'; }).join('') + '</ul>' : '');
   html += section('&#128193; Added or changed in her file', h.changed.length ? '<ul>' + h.changed.map(function (r) { return li(handoffTime(r.updated_at), handoffWho(r), '<span class="tappable" onclick="editRecord(\'' + r.id + '\')">' + esc((RECORD_KINDS[r.kind] || {}).label || r.kind) + ': ' + esc(r.title) + '</span>'); }).join('') + '</ul>' : '');
   return html;
 }
@@ -78,7 +78,7 @@ function handoffText(noNames) {
   h.visits.forEach(function (v) { var f = v.fields || {}; L.push('Visit: ' + (noNames ? 'care visit' : v.title) + '. ' + [f.said, f.changed, f.meds_changed, f.tests].filter(Boolean).join(' / ')); });
   h.updates.forEach(function (u) { L.push('Update: ' + ((u.fields || {}).text || '')); });
   h.todo.forEach(function (t) { L.push('To do: ' + t); });
-  h.checks.forEach(function (r) { L.push('To double-check: ' + r.title + ': ' + String(r.fields.check).split('\n')[0]); });
+  h.checks.forEach(function (r) { L.push('To double-check: ' + r.title + ': ' + checkLine(r)); });
   return L.join('\n');
 }
 function handoffSay() {

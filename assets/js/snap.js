@@ -430,7 +430,38 @@ function checksFor(pid) { return (State.records || []).filter(function (r) { ret
 function todayChecks(pid) {
   var rs = checksFor(pid); if (!rs.length) return '';
   return '<div class="card"><h3>&#10067; To double-check</h3><p class="muted">Read from photos or lists, but not certain. Tap one to check it and mark it done.</p>' +
-    rs.map(function (r) { return '<div class="list-item tappable" onclick="editRecord(\'' + r.id + '\')"><div class="grow"><b>' + esc(r.title || (RECORD_KINDS[r.kind] || {}).label || '') + '</b><div class="muted">' + esc(String(r.fields.check).split('\n')[0]) + '</div></div></div>'; }).join('') + '</div>';
+    rs.map(function (r) { return '<div class="list-item tappable" onclick="editRecord(\'' + r.id + '\')"><div class="grow"><b>' + esc(r.title || (RECORD_KINDS[r.kind] || {}).label || '') + '</b><div class="muted">' + esc(checkLine(r)) + '</div></div></div>'; }).join('') + '</div>';
+}
+/* Answering a flag: confirm what you can, keep the rest as a "maybe" that still needs approval.
+ * fields.check_answer = { confirmed, maybe, at }. With nothing left unsure, the flag is cleared;
+ * otherwise it stays open showing "Maybe: ... (needs approval)". History records who answered. */
+function checkBoxHtml(r) {
+  var f = r.fields || {}, a = f.check_answer || null, id = r.id;
+  var ans = a && (a.confirmed || a.maybe) ? '<p>' + (a.confirmed ? '&#10003; <b>Confirmed:</b> ' + esc(a.confirmed) : '') + (a.confirmed && a.maybe ? '<br>' : '') + (a.maybe ? '&#10067; <b>Maybe:</b> ' + esc(a.maybe) + ' <span class="muted">(needs approval)</span>' : '') + (a.at ? ' <span class="muted">&middot; ' + esc(localDay(a.at)) + '</span>' : '') + '</p>' : '';
+  if (!f.check) return ans ? '<div class="card ok-note">' + ans + '</div>' : '';
+  return '<div class="card attention"><p><b>&#10067; Please double-check</b></p><div class="prewrap">' + esc(f.check) + '</div>' + ans +
+    '<details class="writer-only"><summary><b>Answer what you can</b></summary>' +
+    '<label for="ckConf">What you can confirm</label><input id="ckConf" data-autosave value="' + esc((a && a.confirmed) || '') + '" placeholder="e.g. First name is Crystal">' +
+    '<label for="ckMaybe">Still unsure (kept as a &ldquo;maybe&rdquo;)</label><input id="ckMaybe" data-autosave value="' + esc((a && a.maybe) || '') + '" placeholder="e.g. Last name, maybe Cannon">' +
+    '<div class="btn-row"><button class="btn sm" onclick="saveCheckAnswer(\'' + id + '\')">Save answer</button></div>' +
+    '<p class="muted">Leave &ldquo;still unsure&rdquo; empty when everything is confirmed; the flag then clears.</p></details>' +
+    '<div class="btn-row"><button class="btn sm writer-only" onclick="clearCheck(\'' + id + '\')">Checked, all good</button></div></div>';
+}
+function saveCheckAnswer(id) {
+  var conf = (document.getElementById('ckConf') || {}).value || '', maybe = (document.getElementById('ckMaybe') || {}).value || '';
+  conf = conf.trim(); maybe = maybe.trim();
+  if (!conf && !maybe) return toast('Type what you can confirm, or what is still unsure');
+  DB.update('records', id, function (cur) {
+    if (!cur) return null; cur.fields = cur.fields || {};
+    cur.fields.check_answer = { confirmed: conf || null, maybe: maybe || null, at: new Date().toISOString() };
+    if (!maybe) cur.fields.check = null;
+    return cur;
+  }).then(loadAll).then(function () { refresh(); if (Sync.enabled()) syncNow(); editRecord(id); toast(maybe ? 'Saved. The “maybe” stays on the To double-check list.' : 'Confirmed. Flag cleared.'); });
+}
+function checkLine(r) {
+  var a = r.fields.check_answer;
+  if (a && a.maybe) return 'Maybe: ' + a.maybe + ' (needs approval)' + (a.confirmed ? '. Confirmed: ' + a.confirmed : '');
+  return String(r.fields.check).split('\n')[0];
 }
 function clearCheck(id) {
   DB.update('records', id, function (cur) { if (!cur) return null; cur.fields = cur.fields || {}; cur.fields.check = null; return cur; })
