@@ -79,8 +79,9 @@ function showRecentChanges() {
 var TRASH_DAYS = 30;
 function trashItems() {
   var since = Date.now() - TRASH_DAYS * 864e5;
-  var fresh = function (r) { return r.deleted && new Date(r.updated_at).getTime() >= since; };
-  return (State.trash || []).filter(fresh).sort(function (a, b) { return a.updated_at < b.updated_at ? 1 : -1; });
+  var when = function (r) { return r.deleted_at || r.updated_at; };
+  var fresh = function (r) { return r.deleted && new Date(when(r)).getTime() >= since; };
+  return (State.trash || []).filter(fresh).sort(function (a, b) { return when(a) < when(b) ? 1 : -1; });
 }
 function trashLink() {
   var n = trashItems().length;
@@ -88,7 +89,7 @@ function trashLink() {
 }
 function renderTrash() {
   var items = trashItems(), owner = State.role === 'owner' || State.role == null;
-  return '<p class="muted">Deleted entries stay here for ' + TRASH_DAYS + ' days with their photos, then the photos are removed.</p>' +
+  return '<p class="muted">Deleted entries stay here for ' + TRASH_DAYS + ' days, so you can restore them. After that they are erased for good, with their photos and edit history.</p>' +
     (items.length ? items.map(function (r) {
       var label = r._store === 'records' ? esc((RECORD_KINDS[r.kind] || {}).label || 'File item') + ': ' + esc(r.title || '') : r._store === 'measurements' ? 'Weight ' + r.value + ' ' + (r.unit || '') : ((r.entry_kind === 'output' ? '&#128701; ' : r.entry_kind === 'drink' ? '&#129380; ' : '') + esc(r.free_text || 'Meal'));
       var when = r.eaten_at || r.taken_at || r.occurred_at || r.updated_at;
@@ -114,17 +115,10 @@ function deleteForever(store, id) {
   }).then(function () { return DB.purge(store, id); }).then(function () { toast('Deleted forever'); return loadAll(); }).then(refresh)
     .catch(function (e) { toast('Could not delete: ' + e.message); });
 }
-// After 30 days in Trash, an owner's phone removes the photos (the row stays as a tombstone).
-function purgeOldTrashPhotos() {
-  if (State.role !== 'owner' || !Sync.enabled()) return Promise.resolve();
-  var cutoff = Date.now() - TRASH_DAYS * 864e5;
-  return DB.meta('trash_photos_purged').then(function (done) {
-    done = done || [];
-    var old = (State.trash || []).filter(function (r) { return r._store === 'diary_entries' && new Date(r.updated_at).getTime() < cutoff && (r.photo_path || r.after_photo_path) && done.indexOf(r.id) < 0; });
-    if (!old.length) return;
-    return Promise.all(old.map(function (r) { return Sync.removeRecordPhotos('diary_entries', r.id); }))
-      .then(function () { return DB.meta('trash_photos_purged', done.concat(old.map(function (r) { return r.id; })).slice(-500)); });
-  });
+// After 30 days the server erases deleted entries (migration 0025); this device forgets its copies too.
+function dropExpiredTrash() {
+  return DB.dropDeletedBefore(new Date(Date.now() - TRASH_DAYS * 864e5).toISOString())
+    .then(function (n) { if (n) return loadAll().then(refresh); });
 }
 
 /* ---------- extra photos ---------- */

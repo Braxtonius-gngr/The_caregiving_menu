@@ -1,5 +1,5 @@
 // /account — export log, family delete (7-day grace), cancel, leave, delete my account, and the
-// daily erase of families past their date. Design: docs/private/product/design/step-c1-export-delete.md.
+// daily erase of families past their date and of entries deleted over 30 days ago. Design: docs/private/product/design/step-c1-export-delete.md.
 //
 // Every check is made here with the caller's own token; writes use the server key.
 // "Fresh" means the caller signed in (email code or Google) within the last 10 minutes.
@@ -9,6 +9,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 const URL_ = Deno.env.get("SUPABASE_URL")!;
 const ZERO = "00000000-0000-0000-0000-000000000000";
 const GRACE_DAYS = 7;
+const TRASH_DAYS = 30; // deleted entries are erased this long after deletion (migration 0025)
 const FRESH_SECONDS = 600;
 
 function admin(): SupabaseClient {
@@ -55,17 +56,31 @@ async function blockLeaving(db: SupabaseClient, m: Member, uid: string): Promise
   return null;
 }
 
+// Remove every Storage file a server function lists. One call returns at most 1000 names,
+// and removed files drop out of the next call, so ask again until the list comes back short.
+async function removeListed(db: SupabaseClient, fn: string, args: Record<string, unknown>): Promise<number> {
+  let removed = 0;
+  for (let round = 0; round < 50; round++) {
+    const { data, error } = await db.rpc(fn, args);
+    if (error) throw error;
+    const list: string[] = data ?? [];
+    for (let i = 0; i < list.length; i += 100) {
+      const r = await db.storage.from("photos").remove(list.slice(i, i + 100));
+      if (r.error) throw r.error;
+    }
+    removed += list.length;
+    if (list.length < 1000) return removed;
+  }
+  throw new Error(fn + ": files keep coming back");
+}
+
 // Erase every family whose date has passed: photos, rows, then sign-ins nobody else needs.
+// Then erase entries deleted more than 30 days ago in every family.
 async function purge(db: SupabaseClient) {
   const { data: due } = await db.from("households").select("id, erase_after, erase_requested_by").lt("erase_after", new Date().toISOString());
   const done = [];
   for (const h of due ?? []) {
-    const { data: paths } = await db.rpc("household_photo_paths", { hid: h.id });
-    const list: string[] = paths ?? [];
-    for (let i = 0; i < list.length; i += 100) {
-      const { error } = await db.storage.from("photos").remove(list.slice(i, i + 100));
-      if (error) throw error;
-    }
+    const photos = await removeListed(db, "household_photo_paths", { hid: h.id });
     const { data: mems } = await db.from("members").select("user_id").eq("household_id", h.id);
     const { error } = await db.rpc("erase_household_rows", { hid: h.id });
     if (error) throw error;
@@ -74,10 +89,14 @@ async function purge(db: SupabaseClient) {
       const { count } = await db.from("members").select("user_id", { count: "exact", head: true }).eq("user_id", user_id);
       if (!count) { const r = await db.auth.admin.deleteUser(user_id); if (!r.error) accounts++; }
     }
-    await db.from("erasures").upsert({ household_id: h.id, requested_by: h.erase_requested_by, requested_at: h.erase_after, photos_removed: list.length, accounts_removed: accounts });
-    done.push({ household: h.id, photos: list.length, accounts });
+    await db.from("erasures").upsert({ household_id: h.id, requested_by: h.erase_requested_by, requested_at: h.erase_after, photos_removed: photos, accounts_removed: accounts });
+    done.push({ household: h.id, photos, accounts });
   }
-  return { erased: done };
+  // Deleted entries past 30 days: their files first, then the rows and their edit history.
+  const trashPhotos = await removeListed(db, "expired_photo_paths", { days: TRASH_DAYS });
+  const { data: gone, error } = await db.rpc("erase_expired_deleted", { days: TRASH_DAYS });
+  if (error) throw error;
+  return { erased: done, trash: { photos: trashPhotos, ...(gone ?? {}) } };
 }
 
 Deno.serve(async (req) => {

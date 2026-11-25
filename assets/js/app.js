@@ -323,7 +323,7 @@ function syncNow() {
     return Promise.all([loadMemberNames(), Sync.refreshDayStart(), Sync.eraseDate().then(function (d) { State.eraseAfter = d; return DB.meta('erase_after', d); })]).then(function () {
       if (lockedBefore !== State.eraseAfter) { applyRole(State.role); bgRefresh(); }
       if (justJoined) askMyName();
-      purgeOldTrashPhotos().catch(function () {});
+      dropExpiredTrash().catch(function () {});
       return DB.meta('my_role').then(function (role) {
         if (r.pulled || r.photos || role !== roleBefore || justJoined) return loadAll().then(bgRefresh);
       });
@@ -462,6 +462,7 @@ document.addEventListener('DOMContentLoaded', function () {
     showScreen('home');
     handleShareTarget();
     startAutoSync();
+    dropExpiredTrash().catch(function () {});
   });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js');
 });

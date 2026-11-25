@@ -61,6 +61,36 @@ var DB = (function () {
       });
     });
   }
+  // Forget rows deleted before `cutoff` (ISO), and the extra photos attached to them, so this
+  // device matches the server's 30-day erase. A row still waiting to upload is kept: the
+  // server must hear about the deletion first.
+  function dropDeletedBefore(cutoff) {
+    var stores = STORES.filter(function (s) { return LOCAL_ONLY.indexOf(s) < 0; });
+    return open().then(function (d) {
+      return new Promise(function (resolve, reject) {
+        var t = d.transaction(stores.concat('outbox'), 'readwrite'), ob = t.objectStore('outbox'), gone = {}, n = 0;
+        ob.getAllKeys().onsuccess = function (ev) {
+          var pending = {};
+          (ev.target.result || []).forEach(function (k) { pending[k] = true; });
+          var left = stores.length;
+          stores.forEach(function (s) {
+            var os = t.objectStore(s);
+            os.getAll().onsuccess = function (e) {
+              (e.target.result || []).forEach(function (r) {
+                if (r.deleted && (r.deleted_at || r.updated_at) < cutoff && !pending[s + ':' + r.id]) { os.delete(r.id); gone[r.id] = true; n++; }
+              });
+              if (--left) return;
+              var ep = t.objectStore('entry_photos');
+              ep.getAll().onsuccess = function (e2) {
+                (e2.target.result || []).forEach(function (p) { if (gone[p.entry_id] && !gone[p.id] && !pending['entry_photos:' + p.id]) { ep.delete(p.id); n++; } });
+              };
+            };
+          });
+        };
+        t.oncomplete = function () { resolve(n); }; t.onerror = function () { reject(t.error); };
+      });
+    });
+  }
   function get(store, id) { return tx(store, 'readonly', function (os) { return os.get(id); }); }
   function byIndex(store, index, value) {
     return open().then(function (d) {
@@ -181,5 +211,5 @@ var DB = (function () {
   function clearOutbox(ids) { return tx('outbox', 'readwrite', function (os) { ids.forEach(function (id) { os.delete(id); }); }); }
   function wipe() { return open().then(function (d) { d.close(); dbp = null; return new Promise(function (res) { var r = indexedDB.deleteDatabase(NAME); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; }); }); }
 
-  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, metaUpdate: metaUpdate, update: update, reconcile: reconcile, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe, setReadOnly: setReadOnly, allRaw: allRaw, purge: purge };
+  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, metaUpdate: metaUpdate, update: update, reconcile: reconcile, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe, setReadOnly: setReadOnly, allRaw: allRaw, purge: purge, dropDeletedBefore: dropDeletedBefore };
 })();

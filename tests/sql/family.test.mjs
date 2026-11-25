@@ -366,4 +366,29 @@ ok('leaving as Former member removes the id from entries, reports and the whole 
 assert.ok((await db.query(`select 1 from cron.job where jobname = 'erase-due-families'`)).rows.length, 'erase job scheduled');
 ok('the daily erase job is scheduled');
 
+// Deleted entries: the server stamps when; after 30 days the row, its history, its extra
+// photos and its files are erased. Restoring clears the stamp; a newer deletion waits.
+const oldRec = (await as(ownerNow, `insert into records (id, household_id, kind, title) values (gen_random_uuid(), $1, 'allergy', 'old') returning id`, [hid])).rows[0].id;
+const newRec = (await as(ownerNow, `insert into records (id, household_id, kind, title) values (gen_random_uuid(), $1, 'allergy', 'new') returning id`, [hid])).rows[0].id;
+const back = (await as(ownerNow, `insert into records (id, household_id, kind, title) values (gen_random_uuid(), $1, 'allergy', 'back') returning id`, [hid])).rows[0].id;
+const extra = (await as(ownerNow, `insert into entry_photos (id, household_id, entry_id, entry_store) values (gen_random_uuid(), $1, $2, 'records') returning id`, [hid, oldRec])).rows[0].id;
+await as(ownerNow, `update records set deleted = true, deleted_at = now() - interval '90 days' where id = any($1)`, [[oldRec, newRec, back]]);
+assert.ok((await db.query(`select deleted_at > now() - interval '1 minute' ok from records where id = $1`, [newRec])).rows[0].ok, 'a phone cannot backdate the deletion');
+await as(ownerNow, 'update records set deleted = false where id = $1', [back]);
+assert.equal((await db.query('select deleted_at from records where id = $1', [back])).rows[0].deleted_at, null, 'restoring clears the stamp');
+await as(ownerNow, `update records set title = 'still old' where id = $1`, [oldRec]);
+await db.exec(`set session_replication_role = replica; update records set deleted_at = now() - interval '31 days' where id = '${oldRec}'; set session_replication_role = origin;`);
+await db.exec(`insert into storage.objects (bucket_id, name) values ('photos', '${hid}/extra/${extra}-a.jpg'), ('photos', '${hid}/extra/other-a.jpg')`);
+assert.deepEqual((await db.query('select * from expired_photo_paths(30)')).rows.map(r => r.expired_photo_paths), [`${hid}/extra/${extra}-a.jpg`]);
+await fails(ownerNow, 'select erase_expired_deleted(30)', [], 'a member calling the erase directly');
+await fails(ownerNow, 'select * from expired_photo_paths(30)', [], 'a member listing the files to erase');
+const gone = (await db.query('select erase_expired_deleted(30) g')).rows[0].g;
+assert.equal(gone.rows, 2, 'the old entry and its extra photo are erased');
+assert.ok(gone.history > 0, 'its edit history is erased');
+assert.equal((await db.query('select count(*)::int c from records where id = $1', [oldRec])).rows[0].c, 0);
+assert.equal((await db.query('select count(*)::int c from entry_photos where id = $1', [extra])).rows[0].c, 0);
+assert.equal((await db.query('select count(*)::int c from audit_log where row_id = $1', [oldRec])).rows[0].c, 0);
+assert.equal((await db.query('select count(*)::int c from records where id = any($1)', [[newRec, back]])).rows[0].c, 2, 'a recent deletion and a restored entry stay');
+ok('deleted entries are erased with their history and photos 30 days after deletion; recent and restored ones stay');
+
 console.log(`\nAll ${n} family checks passed.`);
