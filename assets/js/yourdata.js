@@ -38,6 +38,7 @@ function fillYourData(s) {
     '<h3 style="margin-top:0">Take a copy</h3>' +
     '<p class="muted">Straight from the cloud, with photos and the edit history, plus a list of every outside service that has handled it. The file isn’t locked: keep it somewhere safe.</p>' +
     '<div class="btn-row">' + (owner ? '<button class="btn" onclick="exportStart(\'family\')">Export the family file</button>' : '') + '<button class="btn ghost" onclick="exportStart(\'mine\')">Export my own data</button></div>' +
+    '<p class="muted">How we handle your data: ' + legalLinks() + '.</p>' +
     '<h3>Leave or delete</h3>' +
     '<div class="btn-row"><button class="btn ghost" onclick="leaveStart(false)">Leave this family</button><button class="btn ghost" onclick="leaveStart(true)">Delete my account</button>' +
     (owner && !State.eraseAfter ? '<button class="btn danger" onclick="deleteFamilyStart()">Delete the family</button>' : '') + '</div>' +

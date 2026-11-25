@@ -32,7 +32,7 @@ jobs:
       # Only the app itself is published, not the database, scripts or docs.
       - run: |
           mkdir _site
-          cp -r index.html manifest.webmanifest sw.js assets _site/
+          cp -r index.html manifest.webmanifest sw.js assets legal _site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
