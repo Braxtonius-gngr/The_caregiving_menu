@@ -538,7 +538,13 @@ Deno.serve(async (req) => {
   } catch (e) {
     if (e instanceof Anthropic.RateLimitError) return json({ error: "Busy, try again in a minute." }, 429);
     if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) return json({ error: "The AI key was rejected (" + e.status + "). The app owner needs to put a new Anthropic API key in Supabase (ANTHROPIC_API_KEY)." }, 502);
-    if (e instanceof Anthropic.APIError) return json({ error: `AI service error ${e.status}` }, 502);
+    if (e instanceof Anthropic.APIError) {
+      // Anthropic's own message says what was wrong with the request (never contains the key).
+      // deno-lint-ignore no-explicit-any
+      const detail = String((e as any).error?.error?.message ?? e.message ?? "").slice(0, 300);
+      console.error("anthropic", e.status, detail);
+      return json({ error: `AI service error ${e.status}${detail ? ": " + detail : ""}` }, 502);
+    }
     return json({ error: (e as Error).message }, 400);
   }
 });
