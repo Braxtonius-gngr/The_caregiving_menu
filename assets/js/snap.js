@@ -10,9 +10,12 @@ var SNAP_KINDS = {
   medication: 'a prescription bottle or pharmacy label',
   lab: 'a lab report',
   visit: 'an appointment card or reminder',
-  contact: 'a care team list, business card or emergency plan'
+  contact: 'a care team list, business card or emergency plan',
+  medlist: 'a list of her medicines',
+  exercise: 'a therapy home exercise sheet'
 };
 var SNAP_MAX_TRIES = 3;
+var SNAP_MAX_IMAGES = 6; // retakes plus extra pages of one document
 
 function snapIt(pid, expect) {
   S.snap = { pid: pid || null, expect: expect || null, images: [] };
@@ -30,19 +33,20 @@ function snapFile(input) {
   if (!Sync.enabled()) return toast('Turn on sync in Settings to read photos');
   var out = document.getElementById('snapOut'); if (out) out.innerHTML = '<p>Reading the photo...</p>';
   downscale(f, 1600).then(function (img) {
-    sn.images.push(img); if (sn.images.length > SNAP_MAX_TRIES) sn.images.shift();
-    sn.tries = (sn.tries || 0) + 1;
+    sn.images.push(img); if (sn.images.length > SNAP_MAX_IMAGES) sn.images.shift();
+    if (sn.addingPage) sn.addingPage = false; else sn.tries = (sn.tries || 0) + 1;
     return Sync.brain('read_photo', { images: sn.images, expect: sn.expect ? SNAP_KINDS[sn.expect] : null });
   }).then(function (d) { snapResult(d); })
     .catch(function (e) { var o = document.getElementById('snapOut'); if (o) o.innerHTML = '<p class="flag-text">Could not read the photo: ' + esc(e.message) + '</p>'; });
 }
 function snapResult(d) {
   var sn = S.snap, out = document.getElementById('snapOut'); if (!sn) return;
+  S.snapLast = d;
   if (d.kind === 'food_label' || d.kind === 'other') {
     var food = d.kind === 'food_label';
     return openSheet('<h2 style="margin-top:0">&#128247; Snap it</h2><p>' + esc(d.summary || '') + '</p>' +
-      '<p>' + (food ? 'Food labels go in <b>Kitchen</b> &rarr; Pantry &rarr; Scan, which saves the nutrition facts.' : 'This does not look like something the app can file yet.') + '</p>' +
-      snapButtons('Try another photo') + (food ? '<div class="btn-row"><button class="btn ghost" onclick="closeSheet();showScreen(\'kitchen\')">Open Kitchen</button></div>' : '') + '<div id="snapOut" aria-live="polite"></div>');
+      '<p>' + (food ? 'Food labels go in <b>Kitchen</b> &rarr; Pantry &rarr; Scan, which saves the nutrition facts.' : 'This does not look like a paper or screen the app reads. You can still keep it in Documents &rarr; Misc.') + '</p>' +
+      snapButtons('Try another photo') + (food ? '<div class="btn-row"><button class="btn ghost" onclick="closeSheet();showScreen(\'kitchen\')">Open Kitchen</button></div>' : '<div class="btn-row"><button class="btn ghost" onclick="snapTeam(S.snapLast)">Keep it in Misc</button></div>') + '<div id="snapOut" aria-live="polite"></div>');
   }
   if (d.decision === 'retake') {
     var last = sn.tries >= SNAP_MAX_TRIES;
@@ -55,13 +59,37 @@ function snapResult(d) {
       (last ? '<div class="btn-row"><button class="btn ghost" onclick="snapTypeIn()">Type it in instead</button></div>' : '') +
       '<div id="snapOut" aria-live="polite"></div>');
   }
+  // The paper seems to go on: ask for the next page before filling anything.
+  if (d.more_pages && !sn.noMore && sn.images.length < SNAP_MAX_IMAGES) {
+    return openSheet('<h2 style="margin-top:0">&#128196; Is there another page?</h2>' +
+      '<p>' + esc(d.summary || '') + '</p>' +
+      '<div class="card"><p><b>It looks like this continues' + (d.more_pages_hint ? ' (' + esc(d.more_pages_hint) + ')' : '') + '.</b> Add the next page so nothing is missed. Pages so far: ' + sn.images.length + '.</p></div>' +
+      snapPageInputs() +
+      '<div class="btn-row"><button class="btn" onclick="snapAddPage(\'cam\')">&#128247; Add the next page</button><button class="btn ghost" onclick="snapAddPage(\'lib\')">Choose a photo</button><button class="btn ghost" onclick="snapNoMore()">That&rsquo;s all, use what you have</button></div>' +
+      '<div id="snapOut" aria-live="polite"></div>');
+  }
   snapFill(d);
+}
+function snapPageInputs() {
+  return '<input id="snapCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="snapFile(this)"><input id="snapLib" type="file" accept="image/*" class="hidden" onchange="snapFile(this)">';
+}
+function snapAddPage(src) {
+  var sn = S.snap; if (!sn) return;
+  if (sn.images.length >= SNAP_MAX_IMAGES) return toast('Up to ' + SNAP_MAX_IMAGES + ' pages at a time. Save these, then snap the rest.');
+  sn.addingPage = true; sn.noMore = false;
+  var el = document.getElementById(src === 'lib' ? 'snapLib' : 'snapCam'); if (el) el.click();
+}
+function snapNoMore() { var sn = S.snap; if (!sn || !S.snapLast) return; sn.noMore = true; snapFill(S.snapLast); }
+// On result sheets: add a page any time; the whole set is read again together.
+function snapMorePagesRow() {
+  var sn = S.snap || { images: [] };
+  return snapPageInputs() + '<div class="btn-row"><button class="btn ghost sm" onclick="snapAddPage(\'cam\')">&#128196; Add another page</button><span class="muted">' + sn.images.length + ' page' + (sn.images.length === 1 ? '' : 's') + ' read</span></div><div id="snapOut" aria-live="polite"></div>';
 }
 // After a few unclear photos: open the right blank form.
 function snapTypeIn() {
   var sn = S.snap || {}, e = sn.expect;
   if (e === 'weight') return logWeight();
-  if (e === 'medication' || e === 'lab' || e === 'visit') return editRecord(null, e, sn.pid);
+  if (e === 'medication' || e === 'lab' || e === 'visit' || e === 'exercise') return editRecord(null, e, sn.pid);
   logVital(sn.pid);
 }
 
@@ -106,6 +134,8 @@ function snapFill(d) {
   }
   if (d.kind === 'lab_report') return snapLabs(d);
   if (d.kind === 'care_team' || d.kind === 'document') return snapTeam(d);
+  if (d.kind === 'med_list') return snapMeds(d);
+  if (d.kind === 'therapy_plan') return snapExercises(d);
   if (d.kind === 'appointment') {
     var a = d.appointment || {};
     editRecord(null, 'visit', pid);
@@ -150,7 +180,7 @@ function saveSnapLabs() {
  * the page itself as a Document with the photo attached. */
 function snapNameKey(n) { return String(n || '').toLowerCase().replace(/\b(dr|md|do|np|rn)\b\.?/g, '').replace(/[^a-z0-9]/g, ''); }
 function snapTeam(d) {
-  var sn = S.snap, pid = sn.pid, doc = d.document || {};
+  var sn = S.snap, pid = sn.pid, doc = d.document || {}, facts = (doc.fields || []).filter(function (f) { return f && f.label && f.value; });
   var have = {}; recordsOf(pid, ['contact']).forEach(function (r) { have[snapNameKey(r.title)] = true; });
   var rows = (d.contacts || []).filter(function (c) { return c && c.name; });
   S.snapTeam = { rows: rows, doc: doc, summary: d.summary || '' };
@@ -164,7 +194,9 @@ function snapTeam(d) {
       }).join('') : '') +
     '<h3>Keep the page</h3><label class="check"><input type="checkbox" id="stDoc" checked> Save it as a Document with the photo</label>' +
     '<label for="stTitle">Title</label><input id="stTitle" value="' + esc(doc.title || (d.kind === 'care_team' ? 'Care team sheet' : 'Document')) + '">' +
+    (facts.length ? '<p class="muted">Details it found (you can edit them after saving):</p><ul>' + facts.map(function (f) { return '<li><b>' + esc(f.label) + ':</b> ' + esc(f.value) + '</li>'; }).join('') + '</ul>' : '') +
     '<label for="stDetails">What it says</label><textarea id="stDetails" rows="5">' + esc(doc.details || '') + '</textarea>' +
+    snapMorePagesRow() +
     '<div class="btn-row"><button class="btn" onclick="saveSnapTeam()">Save</button><button class="btn ghost" onclick="snapIt(S.snap && S.snap.pid)">Retake</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
 }
 function saveSnapTeam() {
@@ -177,13 +209,99 @@ function saveSnapTeam() {
   }, Promise.resolve());
   if (keepDoc) chain = chain.then(function () {
     var dt = st.doc.date ? new Date(st.doc.date + 'T12:00:00').toISOString() : new Date().toISOString();
-    return DB.put('records', { kind: 'document', for_profile_id: pid, title: title, occurred_at: dt, fields: { doc_type: st.doc.doc_type || 'Other', notes: details || null } }).then(function (rec) {
-      var img = sn.images && sn.images[sn.images.length - 1];
-      if (rec && img) return DB.put('entry_photos', { entry_id: rec.id, entry_store: 'records', photo_data: img, photo_path: null, pos: 0, caption: null, mime: 'image/jpeg', file_name: null });
-    });
+    var extra = (st.doc.fields || []).filter(function (f) { return f && f.label && f.value; }).map(function (f) { return { label: f.label, value: f.value }; });
+    return DB.put('records', { kind: 'document', for_profile_id: pid, title: title, occurred_at: dt, fields: { doc_type: st.doc.doc_type || 'Other', notes: details || null, extra: extra.length ? extra : null } }).then(function (rec) { return snapKeepPhotos(rec); });
   });
   chain.then(function () { closeSheet(); return loadAll(); })
     .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast((picks.length ? picks.length + ' contact(s) added' : '') + (picks.length && keepDoc ? ', ' : '') + (keepDoc ? 'page saved to Documents' : '')); })
+    .catch(function (e) { toast('Could not save: ' + e.message); });
+}
+
+// Attach every page photo to a saved record.
+function snapKeepPhotos(rec) {
+  var imgs = (S.snap && S.snap.images) || [];
+  if (!rec || !imgs.length) return Promise.resolve();
+  return imgs.reduce(function (p, img, i) { return p.then(function () { return DB.put('entry_photos', { entry_id: rec.id, entry_store: 'records', photo_data: img, photo_path: null, pos: i, caption: null, mime: 'image/jpeg', file_name: null }); }); }, Promise.resolve());
+}
+
+/* A list of medicines (handwritten or printed). Every name is checked against the FDA label
+ * database; anything the AI was unsure of, or that is not found, starts unticked with the name
+ * editable, so nothing is added as a medicine without a person agreeing. */
+function snapMedKey(n) { return String(n || '').toLowerCase().replace(/[^a-z]/g, ''); }
+function snapMeds(d) {
+  var sn = S.snap, pid = sn.pid, rows = (d.med_list || []).filter(function (m) { return m && (m.name || m.written); });
+  if (!rows.length) return snapResult({ decision: 'retake', retake_reason: 'No medicine lines could be read.', retake_tip: 'Lay the list flat in good light and fill the frame with it.', summary: d.summary });
+  var have = {}; recordsOf(pid, ['medication']).forEach(function (r) { have[snapMedKey((r.title || '').split(' ')[0])] = true; });
+  S.snapMeds = rows;
+  openSheet('<h2 style="margin-top:0">&#128138; Medicine list from the photo</h2>' +
+    '<p class="muted">' + esc(d.summary || '') + ' Each name is checked against the FDA list. Ticked ones are added to her medicines; you then set when each is given.</p>' +
+    rows.map(function (m, i) {
+      var unsure = m.is_medicine !== 'yes', dup = have[snapMedKey((m.name || '').split(' ')[0])];
+      return '<div class="card' + (unsure ? ' attention' : '') + '"><label class="check"><input type="checkbox" id="sm' + i + '"' + (unsure || dup ? '' : ' checked') + '> <b>Add</b></label>' +
+        '<input id="smName' + i + '" value="' + esc(m.name || '') + '" aria-label="Medicine name">' +
+        '<div class="muted">' + esc([m.strength, m.dose, m.when, m.notes].filter(Boolean).join(' · ')) + '</div>' +
+        '<div class="muted">Written: &ldquo;' + esc(m.written || '') + '&rdquo;</div>' +
+        (unsure ? '<p class="flag-text">' + (m.is_medicine === 'no' ? 'This may not be a medicine. ' : 'Not sure this is right. ') + esc(m.doubt || '') + '</p>' : '') +
+        (dup ? '<p class="muted">Already in her medicines.</p>' : '') +
+        '<div class="row"><span class="muted grow" id="smChk' + i + '">Checking the FDA list...</span><button type="button" class="btn sm ghost" onclick="snapCheckMed(' + i + ')">Check again</button></div></div>';
+    }).join('') +
+    snapMorePagesRow() +
+    '<div class="btn-row"><button class="btn" onclick="saveSnapMeds()">Add ticked medicines</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
+  rows.forEach(function (m, i) { snapCheckMed(i); });
+}
+function snapCheckMed(i) {
+  var el = document.getElementById('smChk' + i), nm = document.getElementById('smName' + i), name = nm && nm.value.trim();
+  if (!el) return;
+  if (!name) { el.textContent = 'Type the name to check it.'; return; }
+  el.textContent = 'Checking the FDA list...';
+  Sync.lookup('drug_label', name).then(function (r) {
+    var e2 = document.getElementById('smChk' + i); if (!e2) return;
+    if (r && r.found) e2.innerHTML = '&#10003; Found: ' + esc(((r.generic || r.brand || name) + '').toLowerCase());
+    else { e2.innerHTML = '<span class="flag-text">&#9888; Not found in the FDA list. Check the spelling, or ask the pharmacist.</span>'; var c = document.getElementById('sm' + i); if (c) c.checked = false; }
+  }).catch(function () { var e3 = document.getElementById('smChk' + i); if (e3) e3.textContent = 'Could not check right now.'; });
+}
+function saveSnapMeds() {
+  var rows = S.snapMeds || [], pid = S.snap && S.snap.pid, picks = [];
+  rows.forEach(function (m, i) { var c = document.getElementById('sm' + i), n = document.getElementById('smName' + i); if (c && c.checked && n && n.value.trim()) picks.push({ m: m, name: n.value.trim() }); });
+  if (!picks.length) return toast('Nothing ticked');
+  picks.reduce(function (p, x) {
+    return p.then(function () {
+      var m = x.m;
+      return DB.put('records', { kind: 'medication', for_profile_id: pid, title: x.name + (m.strength ? ' ' + m.strength : ''), occurred_at: null,
+        fields: { dose: m.dose || null, when: m.when || null, notes: null, instructions: ['From a medicine list photo: "' + (m.written || '') + '"', m.notes].filter(Boolean).join('\n') } });
+    });
+  }, Promise.resolve()).then(function () { closeSheet(); return loadAll(); })
+    .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast(picks.length + ' medicine(s) added. Set when each is given in File → Summary.'); })
+    .catch(function (e) { toast('Could not save: ' + e.message); });
+}
+
+/* A therapy home exercise sheet: tick exercises to keep under File -> Therapy, and keep the pages. */
+function snapExercises(d) {
+  var rows = (d.exercises || []).filter(function (x) { return x && x.name; }), doc = d.document || {};
+  S.snapEx = { rows: rows, doc: doc };
+  openSheet('<h2 style="margin-top:0">&#129336; Therapy exercises from the photo</h2>' +
+    '<p class="muted">' + esc(d.summary || '') + ' Ticked exercises go to File &rarr; Therapy.</p>' +
+    (rows.length ? rows.map(function (x, i) {
+      return '<label class="check"><input type="checkbox" id="sx' + i + '" checked> <b>' + esc(x.name) + '</b> <span class="muted">' + esc([x.how, x.how_often].filter(Boolean).join(' · ')) + '</span>' + (x.notes ? '<div class="muted">' + esc(x.notes) + '</div>' : '') + '</label>';
+    }).join('') : '<p>No exercises could be read clearly.</p>') +
+    '<label for="sxFrom">From (therapist or clinic)</label><input id="sxFrom" value="' + esc(doc.title || '') + '">' +
+    '<label class="check"><input type="checkbox" id="sxDoc" checked> Also keep the pages under Documents</label>' +
+    snapMorePagesRow() +
+    '<div class="btn-row"><button class="btn" onclick="saveSnapExercises()">Save</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
+}
+function saveSnapExercises() {
+  var st = S.snapEx || { rows: [], doc: {} }, pid = S.snap && S.snap.pid, from = document.getElementById('sxFrom').value.trim();
+  var picks = st.rows.filter(function (x, i) { var c = document.getElementById('sx' + i); return c && c.checked; });
+  var keepDoc = document.getElementById('sxDoc').checked;
+  if (!picks.length && !keepDoc) return toast('Nothing ticked');
+  var chain = picks.reduce(function (p, x) {
+    return p.then(function () { return DB.put('records', { kind: 'exercise', for_profile_id: pid, title: x.name, occurred_at: new Date().toISOString(), fields: { how: x.how || null, how_often: x.how_often || null, from: from || null, notes: x.notes || null, active: 'Yes' } }); });
+  }, Promise.resolve());
+  if (keepDoc) chain = chain.then(function () {
+    return DB.put('records', { kind: 'document', for_profile_id: pid, title: 'Therapy exercises' + (from ? ' (' + from + ')' : ''), occurred_at: new Date().toISOString(), fields: { doc_type: 'Report', notes: st.doc.details || null } }).then(snapKeepPhotos);
+  });
+  chain.then(function () { closeSheet(); return loadAll(); })
+    .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast(picks.length + ' exercise(s) saved to File → Therapy'); })
     .catch(function (e) { toast('Could not save: ' + e.message); });
 }
 

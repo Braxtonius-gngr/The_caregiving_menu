@@ -20,10 +20,11 @@ var RECORD_KINDS = {
   update: { label: 'Update', title: 'Headline (optional)', date: 'datetime', fields: [['text', 'What happened', 'textarea']] },
   event: { label: 'Important day', title: 'What (lab draw, refill, birthday...)', date: 'date', fields: [['repeat', 'Repeats', 'select:No|Every year|Every month'], ['notes', 'Notes', 'textarea']] },
   dose: { label: 'Dose given', title: 'Medicine', date: 'datetime', fields: [['status', 'Status', 'select:given|skipped|refused'], ['note', 'Note', 'textarea']] },
-  plan: { label: 'Schedule draft', title: 'Title', date: 'datetime', fields: [] }
+  plan: { label: 'Schedule draft', title: 'Title', date: 'datetime', fields: [] },
+  exercise: { label: 'Exercise', title: 'Exercise', fields: [['how', 'Sets, reps or hold', 'text'], ['how_often', 'How often', 'text'], ['from', 'From (therapist or clinic)', 'text'], ['active', 'Still doing it', 'select:Yes|No'], ['notes', 'How to do it, cautions', 'textarea']] }
 };
 var MED_SLOTS = [['morning', 'Morning', 8], ['noon', 'Midday', 12], ['evening', 'Evening', 17], ['bedtime', 'Bedtime', 21], ['prn', 'Only when needed', null]];
-var FILE_SECTIONS = [['summary', 'Summary'], ['team', 'Care team'], ['labs', 'Labs'], ['visits', 'Visits'], ['documents', 'Documents'], ['updates', 'Updates'], ['export', 'For the doctor']];
+var FILE_SECTIONS = [['summary', 'Summary'], ['team', 'Care team'], ['labs', 'Labs'], ['visits', 'Visits'], ['therapy', 'Therapy'], ['documents', 'Documents'], ['updates', 'Updates'], ['export', 'For the doctor']];
 
 function filePid(arg) { return arg && arg.pid !== undefined ? arg.pid : (S.filePid !== undefined ? S.filePid : (State.activeProfile || ((State.profiles[0] || {}).id) || null)); }
 function recordsOf(pid, kinds) {
@@ -42,7 +43,7 @@ function renderFile(arg) {
     (prof ? '' : '<p class="muted">Add the person you care for in Settings first.</p>') +
     '<div class="seg" role="tablist">' + FILE_SECTIONS.map(function (s) { return '<button role="tab" aria-selected="' + (s[0] === section) + '" class="seg-btn' + (s[0] === section ? ' on' : '') + '" onclick="' + go({ pid: pid, section: s[0] }) + '">' + s[1] + '</button>'; }).join('') + '</div>';
   if (!prof) return head;
-  var body = { summary: fileSummary, team: fileTeam, labs: fileLabs, visits: fileVisits, documents: fileDocuments, updates: fileUpdates, export: fileExport }[section] || fileSummary;
+  var body = { summary: fileSummary, team: fileTeam, labs: fileLabs, visits: fileVisits, therapy: fileTherapy, documents: fileDocuments, updates: fileUpdates, export: fileExport }[section] || fileSummary;
   return head + body(pid, prof);
 }
 function addBtn(kind, pid, label) { return '<button class="btn sm writer-only" onclick="editRecord(null,\'' + kind + '\',' + (pid ? '\'' + pid + '\'' : 'null') + ')">+ ' + esc(label || RECORD_KINDS[kind].label) + '</button>'; }
@@ -127,10 +128,24 @@ function fileVisits(pid) {
     (upcoming.length ? '<h3>Coming up</h3>' + upcoming.map(card).join('') : '') +
     '<h3>Past visits</h3>' + (past.length ? past.map(card).join('') : '<p class="muted">After each visit, note what they said and what changed, and photograph the After Visit Summary.</p>');
 }
+// Documents grouped like folders; anything without a type of its own goes in Misc.
+function docFolder(r) { var t = (r.fields || {}).doc_type; return r.kind === 'directive' ? 'Directive' : (!t || t === 'Other') ? 'Misc' : t; }
 function fileDocuments(pid) {
-  var rs = recordsOf(pid, ['document', 'directive']).sort(byDateDesc);
-  return '<div class="row between"><h2>Documents</h2>' + addBtn('document', pid) + '</div>' +
-    (rs.length ? rs.map(function (r) { var fl = r.fields || {}; return recordCard(r, esc([fl.doc_type || (r.kind === 'directive' ? 'Directive' : ''), fmtWhen(r.occurred_at)].filter(Boolean).join(' · '))); }).join('') : '<p class="muted">Discharge papers, reports, insurance cards: add a document, then attach photos or PDFs.</p>');
+  var rs = recordsOf(pid, ['document', 'directive']).sort(byDateDesc), groups = {}, order = ['Directive', 'Insurance card', 'ID', 'Discharge papers', 'Report', 'Bill', 'Misc'];
+  rs.forEach(function (r) { var g = docFolder(r); (groups[g] = groups[g] || []).push(r); });
+  var card = function (r) { var fl = r.fields || {}, ex = (fl.extra || []).slice(0, 2).map(function (f) { return f.label + ': ' + f.value; }).join(' · '); return recordCard(r, esc(fmtWhen(r.occurred_at)), ex ? esc(ex) : ''); };
+  return '<div class="row between"><h2>Documents</h2><span>' + addBtn('document', pid) + ' <button class="btn sm ghost writer-only" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ')">&#128247; Snap a paper</button></span></div>' +
+    (rs.length ? order.concat(Object.keys(groups).filter(function (g) { return order.indexOf(g) < 0; })).filter(function (g) { return groups[g]; }).map(function (g) {
+      return '<details class="doc-folder" open><summary><b>&#128193; ' + esc(g) + '</b> <span class="muted">(' + groups[g].length + ')</span></summary>' + groups[g].map(card).join('') + '</details>';
+    }).join('') : '<p class="muted">Discharge papers, reports, insurance cards: snap a paper, or add a document and attach photos or PDFs. Papers that fit nowhere else go in Misc, with their own details pulled out.</p>');
+}
+function fileTherapy(pid) {
+  var rs = recordsOf(pid, ['exercise']).sort(function (a, b) { return (a.title || '').localeCompare(b.title || ''); });
+  var on = rs.filter(function (r) { return (r.fields || {}).active !== 'No'; }), off = rs.filter(function (r) { return (r.fields || {}).active === 'No'; });
+  var card = function (r) { var fl = r.fields || {}; return recordCard(r, esc([fl.how, fl.how_often].filter(Boolean).join(' · ')), fl.notes ? esc(fl.notes.slice(0, 140)) : ''); };
+  return '<div class="row between"><h2>Therapy</h2><span>' + addBtn('exercise', pid) + ' <button class="btn sm ghost writer-only" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ',\'exercise\')">&#128247; Snap the sheet</button></span></div>' +
+    (on.length ? on.map(card).join('') : '<p class="muted">Physical, occupational or speech therapy home exercises. Snap the sheet the therapist gave you and the exercises are listed here, with the pages kept under Documents.</p>') +
+    (off.length ? '<h3>No longer doing</h3>' + off.map(card).join('') : '');
 }
 function fileUpdates(pid) {
   var rs = recordsOf(pid, ['update']).sort(byDateDesc);
@@ -171,15 +186,26 @@ function editRecord(id, kind, pid) {
   var titleField = kind === 'lab'
     ? '<label for="rTitle">' + K.title + '</label><input id="rTitle" list="labList" value="' + esc(r ? r.title : '') + '" oninput="fillLabUnit(this.value)"><datalist id="labList">' + LAB_TESTS.map(function (t) { return '<option value="' + esc(t) + '">'; }).join('') + '</datalist>'
     : '<label for="rTitle">' + K.title + '</label><input id="rTitle" value="' + esc(r ? r.title : '') + '">';
-  if (!r && (kind === 'medication' || kind === 'lab' || kind === 'visit')) titleField = '<div class="btn-row writer-only"><button type="button" class="btn sm ghost" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ',\'' + kind + '\')">&#128247; From a photo</button></div>' + titleField;
+  if (!r && (kind === 'medication' || kind === 'lab' || kind === 'visit' || kind === 'exercise')) titleField = '<div class="btn-row writer-only"><button type="button" class="btn sm ghost" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ',\'' + kind + '\')">&#128247; From a photo</button></div>' + titleField;
   if (!r && kind === 'visit') titleField = titleField.replace('</button></div>', '</button><button type="button" class="btn sm ghost" onclick="scribeIt(' + (pid ? '\'' + pid + '\'' : 'null') + ')">&#127897; Scribe it</button></div>');
   if (kind === 'medication') titleField += '<div class="btn-row writer-only"><button type="button" class="btn sm ghost" onclick="fillFromLabel()">Fill from the FDA label</button></div><div class="muted" id="labelHint" aria-live="polite"></div>';
   openSheet('<h2 style="margin-top:0">' + (r ? '' : 'Add ') + esc(K.label) + '</h2>' + titleField +
     (dateType ? '<label for="rWhen">' + (kind === 'lab' ? 'Date of the test' : 'When') + '</label><input id="rWhen" type="' + (dateType === 'date' ? 'date' : 'datetime-local') + '" value="' + dateVal + '">' : '') +
-    K.fields.map(field).join('') +
+    K.fields.map(field).join('') + extraFieldsHtml(fl.extra) +
     (r && Sync.enabled() ? extraPhotosSection(r.id, 'records') : (r ? '' : '<p class="muted">Save first, then attach photos or PDFs.</p>')) +
     '<div class="btn-row"><button class="btn writer-only" onclick="saveRecord(' + (r ? '\'' + r.id + '\'' : 'null') + ',\'' + kind + '\',' + (pid ? '\'' + pid + '\'' : 'null') + ')">Save</button><button class="btn ghost" onclick="closeSheet()">Close</button>' +
     (r ? '<button class="btn ghost" onclick="showHistory(\'records\',\'' + r.id + '\')">History</button><button class="btn danger writer-only" onclick="deleteRecord(\'' + r.id + '\')">Delete</button>' : '') + '</div>');
+}
+// A document's own details (pulled from the page), as editable label/value boxes.
+function extraFieldsHtml(extra) {
+  if (!extra || !extra.length) return '';
+  return '<h3>Details from the page</h3>' + extra.map(function (f, i) {
+    return '<label for="rx-' + i + '" data-extra-label="' + esc(f.label) + '">' + esc(f.label) + '</label><input id="rx-' + i + '" data-extra="' + i + '" value="' + esc(f.value) + '">';
+  }).join('');
+}
+function readExtraFields() {
+  var els = document.querySelectorAll('#sheetBody [data-extra]'); if (!els.length) return undefined;
+  return Array.prototype.map.call(els, function (el) { var lab = document.querySelector('#sheetBody label[for="' + el.id + '"]'); return { label: lab ? lab.getAttribute('data-extra-label') : '', value: el.value.trim() }; }).filter(function (f) { return f.value; });
 }
 // Picking a known test fills its usual unit, if the unit box is still empty.
 function fillLabUnit(test) { var u = LAB_UNITS[test], el = document.getElementById('rf-unit'); if (u && el && !el.value) el.value = u; }
@@ -199,6 +225,7 @@ function saveRecord(id, kind, pid) {
     else if (f[2] === 'datetime') fields[f[0]] = v ? new Date(v).toISOString() : null;
     else fields[f[0]] = v || null;
   });
+  var ex = readExtraFields(); if (ex !== undefined) fields.extra = ex.length ? ex : null;
   var chk = S.phoneCheck;
   if (fields.phone && chk && chk.id === 'rf-phone' && chk.res.valid) { fields.phone = chk.res.national || fields.phone; fields.phone_e164 = chk.res.e164; fields.phone_type = chk.res.line_type; fields.phone_carrier = chk.res.carrier; }
   var whenEl = document.getElementById('rWhen'), when = whenEl && whenEl.value ? new Date(K.date === 'date' ? whenEl.value + 'T12:00:00' : whenEl.value).toISOString() : null;

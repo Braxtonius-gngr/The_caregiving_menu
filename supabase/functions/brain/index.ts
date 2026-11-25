@@ -277,9 +277,9 @@ const vitalsSchema = {
 const nstr = { type: ["string", "null"] };
 const photoSchema = {
   type: "object", additionalProperties: false,
-  required: ["kind", "decision", "retake_reason", "retake_tip", "summary", "uncertain", "vitals", "weight", "medication", "labs", "appointment", "contacts", "document"],
+  required: ["kind", "decision", "retake_reason", "retake_tip", "summary", "uncertain", "vitals", "weight", "medication", "labs", "appointment", "contacts", "document", "med_list", "exercises", "more_pages", "more_pages_hint"],
   properties: {
-    kind: { type: "string", enum: ["bp_monitor", "glucose_meter", "pulse_oximeter", "thermometer", "scale", "med_label", "lab_report", "appointment", "care_team", "document", "food_label", "other"] },
+    kind: { type: "string", enum: ["bp_monitor", "glucose_meter", "pulse_oximeter", "thermometer", "scale", "med_label", "lab_report", "appointment", "care_team", "med_list", "therapy_plan", "document", "food_label", "other"] },
     decision: { type: "string", enum: ["use", "retake"], description: "retake unless every value you report is clearly legible" },
     retake_reason: { type: "string", description: "If retake: what is wrong, in plain words (glare over the top number, screen cut off, blurry). Else empty." },
     retake_tip: { type: "string", description: "If retake: one specific instruction for the next photo. Else empty." },
@@ -298,7 +298,15 @@ const photoSchema = {
       properties: { name: { type: "string", description: "Person or place as written, e.g. Dr. Smith or HEB Pharmacy" }, role: { type: "string", description: "e.g. Cardiologist, Pharmacy, Home health agency, Insurance, Family" }, phone: nstr, fax: nstr, address: nstr, notes: { ...nstr, description: "Member/policy numbers, hours, anything else written for this contact" } } } },
     document: { type: "object", additionalProperties: false, required: ["doc_type", "title", "date", "details"],
       properties: { doc_type: { type: "string", enum: ["Discharge papers", "Report", "Insurance card", "ID", "Directive", "Bill", "Other"] }, title: { type: "string", description: "Short name for this paper, e.g. Emergency plan, Medicare card" },
-        date: { ...nstr, description: "YYYY-MM-DD shown on the paper" }, details: { type: "string", description: "Everything else important on the paper in short lines (plans, levels, numbers, instructions), not repeating the contacts" } } },
+        date: { ...nstr, description: "YYYY-MM-DD shown on the paper" }, details: { type: "string", description: "Everything else important on the paper in short lines (plans, levels, numbers, instructions), not repeating the contacts" },
+        fields: { type: "array", description: "The paper's own key facts as label/value pairs, e.g. Member ID, Group number, Policy, Valid until, Triage level. Labels short; values exactly as written", items: { type: "object", additionalProperties: false, required: ["label", "value"], properties: { label: str, value: str } } } } },
+    med_list: { type: "array", description: "For a handwritten or printed LIST of medicines: one row per line", items: { type: "object", additionalProperties: false, required: ["written", "name", "strength", "dose", "when", "notes", "is_medicine", "doubt"],
+      properties: { written: { type: "string", description: "The line exactly as written" }, name: { type: "string", description: "Medicine name, corrected to the real spelling only if you are sure which medicine it is" }, strength: nstr, dose: { ...nstr, description: "How much per dose, e.g. 1 tablet" }, when: { ...nstr, description: "How often / what time, as written" }, notes: nstr,
+        is_medicine: { type: "string", enum: ["yes", "unsure", "no"], description: "yes only if this is clearly a real medicine or supplement name" }, doubt: { type: "string", description: "If unsure or no: why (hard to read, not a medicine name you know, could be X or Y). Else empty" } } } },
+    exercises: { type: "array", description: "For a physical or occupational therapy home exercise sheet: one row per exercise", items: { type: "object", additionalProperties: false, required: ["name", "how", "how_often", "notes"],
+      properties: { name: str, how: { ...nstr, description: "Sets, reps, hold time, as written" }, how_often: { ...nstr, description: "e.g. twice a day" }, notes: { ...nstr, description: "How to do it, cautions, equipment" } } } },
+    more_pages: { type: "boolean", description: "True if the paper clearly continues beyond what the photos show (Page 1 of 3, continued, text cut off at the bottom, a list that runs off the page)" },
+    more_pages_hint: { type: "string", description: "If more_pages: what suggests it, e.g. Page 1 of 3. Else empty" },
   },
 };
 const formSchema = {
@@ -343,8 +351,12 @@ const PHOTO_RULES = `You read photos for a family caring for an elderly relative
 - Medicine label: the drug name and strength must be clearly readable, else retake.
 - Care team: a list of doctors, pharmacy, agencies or emergency contacts (an emergency plan, a care team sheet, business cards). kind = care_team; put each one in contacts with whatever phone, fax and address is written. Handwriting: copy names as written; list a contact even if its phone is unreadable, and note that in uncertain. Do not ask for a retake just because some numbers are unclear.
 - Other papers worth keeping (insurance card, ID, directive, discharge papers, bills, plans): kind = document; fill document, and contacts if any are listed. A care team sheet with other information on it also fills document (title and details).
+- A LIST of medicines (handwritten or printed, several medicines, not a single pharmacy label): kind = med_list. One row per line. Copy each line in written. Never invent a medicine: if a word is hard to read or is not a medicine name you know, set is_medicine to unsure (or no) and say why in doubt, e.g. "could be metoprolol or metolazone". Do not retake just because one line is unclear.
+- A therapy home exercise sheet (physical, occupational or speech therapy): kind = therapy_plan; fill exercises, and document (title, details) for anything else on it.
+- Papers that fit nowhere else: kind = document. In document.fields list the paper's own key facts as label/value pairs, so the family can find them later.
+- Several photos may be retakes of the same page OR further pages of one document; combine them into one answer. Set more_pages when the paper clearly continues past what you have.
 - Lab report: report every test row you can read clearly; leave unreadable rows out and list them in uncertain. Retake only if the main results are unreadable.
-- Fill unrelated sections with nulls, false, or empty lists (document: doc_type Other, empty title and details).`;
+- Fill unrelated sections with nulls, false, or empty lists (document: doc_type Other, empty title, details and fields).`;
 const guidanceSchema = {
   type: "object", additionalProperties: false,
   required: ["answer", "key_points", "sources", "questions_for_care_team", "caveat"],
@@ -555,7 +567,7 @@ Notes:
 ${text}` }], "medium");
     }
     case "read_photo": {
-      const images: string[] = (body.images ?? [body.image]).filter(Boolean).slice(-3);
+      const images: string[] = (body.images ?? [body.image]).filter(Boolean).slice(-6);
       if (!images.length) throw new Error("No photo sent.");
       const expect = body.expect ? `
 The family expects: ${String(body.expect).slice(0, 40)}.` : "";

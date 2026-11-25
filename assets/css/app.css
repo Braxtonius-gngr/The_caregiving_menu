@@ -225,3 +225,5 @@ label.check input { width: auto; margin: 0; }
 .zoom-close { position: absolute; top: calc(10px + env(safe-area-inset-top)); right: 12px; width: 48px; height: 48px; border-radius: 50%; border: 0; background: rgba(255,255,255,.18); color: #fff; font-size: 30px; line-height: 1; }
 .zoom-hint { position: absolute; bottom: calc(14px + env(safe-area-inset-bottom)); left: 0; right: 0; text-align: center; color: rgba(255,255,255,.7); font-size: 14px; pointer-events: none; }
 .photo-big, .photo-hero, #sheetBody .photo-thumb { cursor: zoom-in; }
+.doc-folder { margin: 6px 0 10px; }
+.doc-folder > summary { cursor: pointer; padding: 6px 0; }
