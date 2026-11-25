@@ -277,7 +277,7 @@ const vitalsSchema = {
 const nstr = { type: ["string", "null"] };
 const photoSchema = {
   type: "object", additionalProperties: false,
-  required: ["kind", "decision", "retake_reason", "retake_tip", "summary", "uncertain", "vitals", "weight", "medication", "labs", "appointment", "contacts", "document", "med_list", "exercises", "more_pages", "more_pages_hint"],
+  required: ["kind", "decision", "retake_reason", "retake_tip", "summary", "uncertain", "vitals", "weight", "medication", "labs", "appointment", "contacts", "document", "med_list", "list_source", "exercises", "more_pages", "more_pages_hint"],
   properties: {
     kind: { type: "string", enum: ["bp_monitor", "glucose_meter", "pulse_oximeter", "thermometer", "scale", "med_label", "lab_report", "appointment", "care_team", "med_list", "therapy_plan", "document", "food_label", "other"] },
     decision: { type: "string", enum: ["use", "retake"], description: "retake unless every value you report is clearly legible" },
@@ -303,6 +303,7 @@ const photoSchema = {
     med_list: { type: "array", description: "For a handwritten or printed LIST of medicines: one row per line", items: { type: "object", additionalProperties: false, required: ["written", "name", "strength", "dose", "when", "notes", "is_medicine", "doubt"],
       properties: { written: { type: "string", description: "The line exactly as written" }, name: { type: "string", description: "Medicine name, corrected to the real spelling only if you are sure which medicine it is" }, strength: nstr, dose: { ...nstr, description: "How much per dose, e.g. 1 tablet" }, when: { ...nstr, description: "How often / what time, as written" }, notes: nstr,
         is_medicine: { type: "string", enum: ["yes", "unsure", "no"], description: "yes only if this is clearly a real medicine or supplement name" }, doubt: { type: "string", description: "If unsure or no: why (hard to read, not a medicine name you know, could be X or Y). Else empty" } } } },
+    list_source: { type: "string", enum: ["handwritten list", "printed list", "discharge papers", "pharmacy printout", "other"], description: "For a medicine list: where it comes from" },
     exercises: { type: "array", description: "For a physical or occupational therapy home exercise sheet: one row per exercise", items: { type: "object", additionalProperties: false, required: ["name", "how", "how_often", "notes"],
       properties: { name: str, how: { ...nstr, description: "Sets, reps, hold time, as written" }, how_often: { ...nstr, description: "e.g. twice a day" }, notes: { ...nstr, description: "How to do it, cautions, equipment" } } } },
     more_pages: { type: "boolean", description: "True if the paper clearly continues beyond what the photos show (Page 1 of 3, continued, text cut off at the bottom, a list that runs off the page)" },
@@ -349,7 +350,7 @@ const PHOTO_COMMON = ["decision", "retake_reason", "retake_tip", "summary", "unc
 const PHOTO_PARTS: Record<string, string[]> = {
   bp_monitor: ["vitals"], glucose_meter: ["vitals"], pulse_oximeter: ["vitals"], thermometer: ["vitals"],
   scale: ["weight"], med_label: ["medication"], lab_report: ["labs"], appointment: ["appointment"],
-  care_team: ["contacts", "document"], document: ["contacts", "document"], med_list: ["med_list"], therapy_plan: ["exercises", "document"],
+  care_team: ["contacts", "document"], document: ["contacts", "document"], med_list: ["med_list", "list_source"], therapy_plan: ["exercises", "document"],
 };
 // deno-lint-ignore no-explicit-any
 const PP: Record<string, any> = (photoSchema as any).properties;
@@ -367,7 +368,7 @@ function photoEmpty() {
     weight: { value: null, unit: null },
     medication: { name: null, strength: null, directions: null, prescriber: null, pharmacy: null, filled_on: null, refills: null, quantity: null, warnings: [] },
     labs: [], appointment: { with_whom: null, date: null, time: null, place: null, reason: null, notes: null },
-    contacts: [], document: { doc_type: "Other", title: "", date: null, details: "", fields: [] }, med_list: [], exercises: [],
+    contacts: [], document: { doc_type: "Other", title: "", date: null, details: "", fields: [] }, med_list: [], list_source: "", exercises: [],
   };
 }
 const PHOTO_RULES = `You read photos for a family caring for an elderly relative. Wrong numbers are worse than no numbers: the family would rather take another photo.
@@ -379,7 +380,7 @@ const PHOTO_RULES = `You read photos for a family caring for an elderly relative
 - Medicine label: the drug name and strength must be clearly readable, else retake.
 - Care team: a list of doctors, pharmacy, agencies or emergency contacts (an emergency plan, a care team sheet, business cards). kind = care_team; put each one in contacts with whatever phone, fax and address is written. Handwriting: copy names as written; list a contact even if its phone is unreadable, and note that in uncertain. Do not ask for a retake just because some numbers are unclear.
 - Other papers worth keeping (insurance card, ID, directive, discharge papers, bills, plans): kind = document; fill document, and contacts if any are listed. A care team sheet with other information on it also fills document (title and details).
-- A LIST of medicines (handwritten or printed, several medicines, not a single pharmacy label): kind = med_list. One row per line. Copy each line in written. Never invent a medicine: if a word is hard to read or is not a medicine name you know, set is_medicine to unsure (or no) and say why in doubt, e.g. "could be metoprolol or metolazone". Do not retake just because one line is unclear.
+- A LIST of medicines (handwritten or printed, several medicines, not a single pharmacy label), including the medicine section of discharge papers or a pharmacy printout: kind = med_list, and say which in list_source. One row per line. Copy each line in written. Never invent a medicine: if a word is hard to read or is not a medicine name you know, set is_medicine to unsure (or no) and say why in doubt, e.g. "could be metoprolol or metolazone". Do not retake just because one line is unclear.
 - A therapy home exercise sheet (physical, occupational or speech therapy): kind = therapy_plan; fill exercises, and document (title, details) for anything else on it.
 - Papers that fit nowhere else: kind = document. In document.fields list the paper's own key facts as label/value pairs, so the family can find them later.
 - Several photos may be retakes of the same page OR further pages of one document; combine them into one answer. Set more_pages when the paper clearly continues past what you have.

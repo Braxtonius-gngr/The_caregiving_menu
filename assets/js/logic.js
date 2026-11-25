@@ -496,7 +496,61 @@ var Logic = (function () {
     return r;
   }
 
-  return { parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
+
+  /* ---------- Medicine reconciliation: one medicine, several sources ----------
+   * Each medicine record may carry fields.sources: [{type: list|discharge|bottle|form, label,
+   * strength, dose, when, said, date}]. Older records only have lines in Instructions
+   * ("From the medicine list: ...", "Bottle label ...: ...", "Label: ..."), read here as sources. */
+  function medStrength(t) {
+    var m = String(t || '').toLowerCase().replace(/,/g, '').match(/(\d+(?:\.\d+)?)\s*(mcg|mg|g|ml|units?|iu|%)/);
+    return m ? (+m[1]) + ' ' + m[2].replace(/s$/, '') : null;
+  }
+  function medKey(n) { return String(n || '').toLowerCase().split(/[\s,(]/)[0].replace(/[^a-z]/g, ''); }
+  function medSources(rec) {
+    var f = rec.fields || {}, out = (f.sources || []).slice();
+    var have = function (type, said) { return out.some(function (s) { return s.type === type && (s.said || '') === (said || ''); }); };
+    String(f.instructions || '').split('\n').forEach(function (line) {
+      var m = line.match(/^From the medicine list: "(.*)"\s*$/);
+      if (m && !out.some(function (s) { return s.type === 'list' || s.type === 'discharge'; }) && !have('list', m[1])) out.push({ type: 'list', label: 'Medicine list', strength: medStrength(m[1]), said: m[1] });
+      var b = line.match(/^(?:Bottle label(?: \(filled ([^)]*)\))?|Label): (.*)$/);
+      if (b && !out.some(function (s) { return s.type === 'bottle'; })) out.push({ type: 'bottle', label: 'Bottle', strength: null, said: b[2], date: b[1] || null });
+    });
+    return out;
+  }
+  var SOURCE_NAME = { list: 'list', discharge: 'discharge papers', bottle: 'bottle', form: 'typed in' };
+  // meds: medication records (not deleted). Returns one item per medicine plus possible duplicates.
+  function reconcileMeds(meds, today) {
+    var active = meds.filter(function (r) { var f = r.fields || {}; return !(f.stop && today && f.stop < today); });
+    var anyList = active.some(function (r) { return medSources(r).some(function (s) { return s.type === 'list' || s.type === 'discharge'; }); });
+    var items = active.map(function (r) {
+      var f = r.fields || {}, src = medSources(r), issues = [];
+      var strengths = {};
+      var saved = medStrength(r.title) || medStrength(f.dose);
+      if (saved) strengths[saved] = ['saved'];
+      src.forEach(function (s) { var st = medStrength(s.strength) || medStrength(s.said); if (st) (strengths[st] = strengths[st] || []).push(SOURCE_NAME[s.type] || s.type); });
+      var keys = Object.keys(strengths);
+      if (keys.length > 1) issues.push({ level: 'bad', text: 'Strength differs: ' + keys.map(function (k) { return strengths[k].join(' and ') + ' ' + k; }).join(', ') + '.' });
+      var types = src.map(function (s) { return s.type; });
+      if (anyList && types.indexOf('list') < 0 && types.indexOf('discharge') < 0) issues.push({ level: 'warn', text: 'Not on any medicine list or discharge papers.' });
+      if ((types.indexOf('list') >= 0 || types.indexOf('discharge') >= 0) && types.indexOf('bottle') < 0) issues.push({ level: 'info', text: 'No bottle photographed yet.' });
+      if (!f.slots) issues.push({ level: 'info', text: 'No time of day set.' });
+      if (f.check) issues.push({ level: 'bad', text: 'Flagged: ' + String(f.check).split('\n').join(' ') });
+      return { id: r.id, title: r.title, generic: f.generic || null, dose: f.dose || null, sources: src, issues: issues };
+    });
+    var dups = [];
+    for (var i = 0; i < items.length; i++) for (var j = i + 1; j < items.length; j++) {
+      var a = items[i], b = items[j];
+      var ka = [medKey(a.title), medKey(a.generic)].filter(Boolean), kb = [medKey(b.title), medKey(b.generic)].filter(Boolean);
+      if (ka.some(function (k) { return kb.indexOf(k) >= 0; })) {
+        dups.push([a.id, b.id]);
+        var t = 'Possible duplicate of ' + b.title + ' (same medicine' + (a.generic && a.generic === b.generic ? ', ' + a.generic : '') + ').';
+        a.issues.unshift({ level: 'bad', text: t }); b.issues.unshift({ level: 'bad', text: 'Possible duplicate of ' + a.title + '.' });
+      }
+    }
+    return { items: items, duplicates: dups, problems: items.filter(function (x) { return x.issues.some(function (s) { return s.level !== 'info'; }); }).length };
+  }
+
+  return { reconcileMeds: reconcileMeds, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
     slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();

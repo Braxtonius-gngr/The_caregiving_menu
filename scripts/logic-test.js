@@ -307,4 +307,25 @@ t('upcoming: visits, follow-ups, yearly and monthly days, refills, within the wi
   assert.deepEqual(u.map(function (x) { return x.day + ' ' + x.title + ' ' + x.inDays; }), ['2026-11-24 Refill: Furosemide 1', '2026-11-25 Kidney doctor 2', '2026-11-28 Labs 5', '2026-12-01 Birthday 8']);
 });
 
+t('reconcileMeds: list vs bottle strength, missing bottle, not on list, duplicates, flags', function () {
+  var meds = [
+    { id: 'a', title: 'Furosemide 20 mg', fields: { generic: 'furosemide', slots: 'morning', sources: [{ type: 'list', strength: '20 mg', said: 'Furosemide 20mg AM' }, { type: 'bottle', strength: '40 mg', said: 'Take 1 tablet every morning' }] } },
+    { id: 'b', title: 'Lisinopril 10 mg', fields: { slots: 'morning', instructions: 'From the medicine list: "Lisinopril 10 once a day"' } },
+    { id: 'c', title: 'Lasix 40 mg', fields: { generic: 'furosemide', slots: 'morning', instructions: 'Label: Take 1 daily' } },
+    { id: 'd', title: 'Metazol 5 mg', fields: { check: 'Not found in the FDA list.', sources: [{ type: 'list', said: 'Metazol?? 5' }] } },
+    { id: 'e', title: 'Old pill', fields: { stop: '2026-01-01' } }
+  ];
+  var r = Logic.reconcileMeds(meds, '2026-11-25');
+  var by = {}; r.items.forEach(function (x) { by[x.id] = x.issues.map(function (s) { return s.level + ':' + s.text; }).join(' | '); });
+  assert.ok(!by.e, 'stopped medicines are left out');
+  assert.ok(/bad:Strength differs: saved and list 20 mg, bottle 40 mg/.test(by.a), by.a);
+  assert.ok(/Possible duplicate of Lasix 40 mg/.test(by.a) && /Possible duplicate of Furosemide 20 mg/.test(by.c));
+  assert.ok(/info:No bottle photographed yet/.test(by.b), by.b);
+  assert.ok(/warn:Not on any medicine list/.test(by.c), by.c);
+  assert.ok(/bad:Flagged: Not found in the FDA list/.test(by.d) && /info:No time of day set/.test(by.d));
+  assert.deepEqual(r.duplicates, [['a', 'c']]);
+  assert.deepEqual(Logic.medSources(meds[1]).map(function (s) { return s.type + ':' + s.said; }), ['list:Lisinopril 10 once a day']);
+  assert.deepEqual(Logic.medSources(meds[2]).map(function (s) { return s.type; }), ['bottle']);
+});
+
 console.log(n + ' tests passed');

@@ -66,7 +66,7 @@ function fileSummary(pid, prof) {
     group('allergy', 'Allergies', function (r) { return [f(r, 'reaction'), f(r, 'severity')].filter(Boolean).join(' · '); }) +
     group('condition', 'Conditions', function (r) { return f(r, 'since') ? 'since ' + f(r, 'since') : ''; }) +
     group('medication', 'Medicines', function (r) { return [f(r, 'dose'), esc(slotsText(r)), f(r, 'purpose'), r.fields && r.fields.stop && r.fields.stop < careToday() ? 'stopped' : ''].filter(Boolean).join(' · '); }) +
-    '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'meds\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">Daily meds</button></div>' +
+    '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'meds\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">Daily meds</button><button class="btn sm ghost" onclick="showScreen(\'medcheck\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">Compare sources</button></div>' +
     group('directive', 'Directives and legal papers', function (r) { return f(r, 'kept') ? 'kept: ' + f(r, 'kept') : ''; }) +
     '<p class="muted">Keep this list the way the doctors and pharmacy have it. The app records; it doesn\'t advise.</p>';
 }

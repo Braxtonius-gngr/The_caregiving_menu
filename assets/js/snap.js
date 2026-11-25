@@ -283,8 +283,10 @@ function snapNewBottle(d, g) {
   snapSet('rf-prescriber', m.prescriber); snapSet('rf-pharmacy', m.pharmacy); snapSet('rf-generic', g && g.generic);
   snapNote(d);
   S.snapPending.check = d.uncertain && d.uncertain.length ? 'Not clear on the bottle: ' + d.uncertain.join(', ') : null;
+  S.snapPending.source = snapBottleSource(m);
   var hint = document.getElementById('labelHint'); if (hint) hint.textContent = 'Set the dose and when to give it. "Fill from the FDA label" adds the official warnings.';
 }
+function snapBottleSource(m) { return { type: 'bottle', label: 'Bottle', strength: m.strength || null, dose: null, when: null, said: m.directions || null, prescriber: m.prescriber || null, pharmacy: m.pharmacy || null, date: m.filled_on || localDay(new Date().toISOString()) }; }
 // The bottle matches a medicine already saved: show both side by side and add the bottle to it.
 function snapMergeBottle(d, ex, g) {
   var m = d.medication || {}, fl = ex.fields || {};
@@ -317,6 +319,7 @@ function saveMergeBottle() {
     if (!f.generic && mg.g && mg.g.generic) f.generic = mg.g.generic;
     if (!snapStrength(cur.title) && m.strength) cur.title = cur.title + ' ' + m.strength;
     f.instructions = [f.instructions, label].filter(Boolean).join('\n');
+    f.sources = (f.sources || []).concat([snapBottleSource(m)]);
     var pres = f.prescriber && m.prescriber && f.prescriber.toLowerCase() !== m.prescriber.toLowerCase() ? 'Prescriber differs: saved ' + f.prescriber + ', bottle ' + m.prescriber + '.' : null;
     f.check = snapAddCheck(f.check, [mg.clash, pres, unc.length ? 'Not clear on the bottle: ' + unc.join(', ') : null]);
     return cur;
@@ -333,7 +336,7 @@ function saveMergeBottle() {
 function snapMeds(d) {
   var sn = S.snap, pid = sn.pid, rows = (d.med_list || []).filter(function (m) { return m && (m.name || m.written); });
   if (!rows.length) return snapResult({ decision: 'retake', retake_reason: 'No medicine lines could be read.', retake_tip: 'Lay the list flat in good light and fill the frame with it.', summary: d.summary });
-  S.snapMeds = rows; S.snapMedInfo = rows.map(function (m) { var ex = snapFindMed(pid, m.name, null); return { match: ex ? ex.id : null, g: null, found: null }; });
+  S.snapMeds = rows; S.snapListSource = d.list_source || 'handwritten list'; S.snapMedInfo = rows.map(function (m) { var ex = snapFindMed(pid, m.name, null); return { match: ex ? ex.id : null, g: null, found: null }; });
   openSheet('<h2 style="margin-top:0">&#128138; Medicine list from the photo</h2>' +
     '<p class="muted">' + esc(d.summary || '') + ' Each name is checked against the FDA list. Ticked lines become her medicines, or are added to the one already saved; you then set when each is given.</p>' +
     rows.map(function (m, i) {
@@ -374,7 +377,8 @@ function saveSnapMeds() {
   rows.forEach(function (m, i) { var c = document.getElementById('sm' + i), n = document.getElementById('smName' + i); if (c && c.checked && n && n.value.trim()) picks.push({ m: m, name: n.value.trim(), info: S.snapMedInfo[i] }); });
   var keepDoc = document.getElementById('smDoc').checked;
   if (!picks.length && !keepDoc) return toast('Nothing ticked');
-  var added = 0, merged = 0, flagged = 0;
+  var added = 0, merged = 0, flagged = 0, ls = S.snapListSource || 'handwritten list', today = localDay(new Date().toISOString());
+  var srcOf = function (m) { return { type: ls === 'discharge papers' ? 'discharge' : 'list', label: ls.charAt(0).toUpperCase() + ls.slice(1), strength: m.strength || null, dose: m.dose || null, when: m.when || null, said: m.written || null, date: today }; };
   var chain = picks.reduce(function (p, x) {
     return p.then(function () {
       var m = x.m, info = x.info || {}, line = 'From the medicine list: "' + (m.written || x.name) + '"';
@@ -389,19 +393,20 @@ function saveSnapMeds() {
           if (!f.generic && info.g && info.g.generic) f.generic = info.g.generic;
           if (!savedStr && m.strength) cur.title = cur.title + ' ' + m.strength;
           f.instructions = [f.instructions, line].filter(Boolean).join('\n');
-          f.check = snapAddCheck(f.check, doubts.concat([savedStr && listStr && savedStr !== listStr ? 'Strength differs: saved ' + savedStr + ', the list says ' + listStr + '. Check with the pharmacist which is right.' : null]));
+          f.sources = (f.sources || []).concat([srcOf(m)]);
+          f.check = snapAddCheck(f.check, doubts.concat([savedStr && listStr && savedStr !== listStr ? 'Strength differs: saved ' + savedStr + ', ' + (ls === 'discharge papers' ? 'the discharge papers say ' : 'the list says ') + listStr + '. Check with the pharmacist which is right.' : null]));
           if (f.check) flagged++;
           return cur;
         }).then(function (rec) { merged++; return snapKeepPhotos(rec); });
       }
       var check = snapAddCheck(null, doubts); if (check) flagged++;
       return DB.put('records', { kind: 'medication', for_profile_id: pid, title: x.name + (m.strength ? ' ' + m.strength : ''), occurred_at: null,
-        fields: { dose: m.dose || null, when: m.when || null, generic: info.g && info.g.generic || null, instructions: [line, m.notes].filter(Boolean).join('\n'), check: check, from_photo: { title: (m.name || '') + (m.strength ? ' ' + m.strength : ''), dose: m.dose || '', when: m.when || '' } } })
+        fields: { dose: m.dose || null, when: m.when || null, generic: info.g && info.g.generic || null, instructions: [line, m.notes].filter(Boolean).join('\n'), check: check, sources: [srcOf(m)], from_photo: { title: (m.name || '') + (m.strength ? ' ' + m.strength : ''), dose: m.dose || '', when: m.when || '' } } })
         .then(function (rec) { added++; return snapKeepPhotos(rec); });
     });
   }, Promise.resolve());
   if (keepDoc) chain = chain.then(function () {
-    return DB.put('records', { kind: 'document', for_profile_id: pid, title: 'Medicine list', occurred_at: new Date().toISOString(), fields: { doc_type: 'Other', notes: rows.map(function (m) { return m.written; }).filter(Boolean).join('\n') } }).then(snapKeepPhotos);
+    return DB.put('records', { kind: 'document', for_profile_id: pid, title: ls === 'discharge papers' ? 'Discharge medicine list' : 'Medicine list', occurred_at: new Date().toISOString(), fields: { doc_type: 'Other', notes: rows.map(function (m) { return m.written; }).filter(Boolean).join('\n') } }).then(snapKeepPhotos);
   });
   chain.then(function () { closeSheet(); return loadAll(); })
     .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast([added ? added + ' added' : '', merged ? merged + ' added to ones already saved' : '', flagged ? flagged + ' flagged to double-check' : ''].filter(Boolean).join(', ') || 'Saved'); })
@@ -416,7 +421,7 @@ function snapAfterSave(rec) {
   var chain = p.photos ? snapKeepPhotos(rec) : Promise.resolve();
   // Keep what the photo said next to what was saved, so later changes can be traced.
   var fp = {}; Object.keys(p.read || {}).forEach(function (id) { fp[id === 'rTitle' ? 'title' : id.replace(/^rf-/, '')] = p.read[id]; });
-  if (p.check || Object.keys(fp).length) chain = chain.then(function () { return DB.update('records', rec.id, function (cur) { if (!cur) return null; cur.fields = cur.fields || {}; if (p.check) cur.fields.check = snapAddCheck(cur.fields.check, [p.check]); if (Object.keys(fp).length) cur.fields.from_photo = fp; return cur; }); });
+  if (p.check || p.source || Object.keys(fp).length) chain = chain.then(function () { return DB.update('records', rec.id, function (cur) { if (!cur) return null; cur.fields = cur.fields || {}; if (p.check) cur.fields.check = snapAddCheck(cur.fields.check, [p.check]); if (p.source) cur.fields.sources = (cur.fields.sources || []).concat([p.source]); if (Object.keys(fp).length) cur.fields.from_photo = fp; return cur; }); });
   return chain;
 }
 var _snapCloseSheet = closeSheet;
