@@ -342,6 +342,34 @@ const scribeSchema = {
     double_check: strList("Anything unclear, contradictory or possibly misheard (odd drug names, doses, numbers), phrased so the family can confirm it"),
   },
 };
+/* read_photo works in two steps (Anthropic limits how large one schema may be): photoKindSchema
+ * says what the photo is, then photoPartSchema(kind) reads it with only the sections that kind
+ * uses. photoEmpty() fills the other sections so the app always gets the full shape. */
+const PHOTO_COMMON = ["decision", "retake_reason", "retake_tip", "summary", "uncertain", "more_pages", "more_pages_hint"];
+const PHOTO_PARTS: Record<string, string[]> = {
+  bp_monitor: ["vitals"], glucose_meter: ["vitals"], pulse_oximeter: ["vitals"], thermometer: ["vitals"],
+  scale: ["weight"], med_label: ["medication"], lab_report: ["labs"], appointment: ["appointment"],
+  care_team: ["contacts", "document"], document: ["contacts", "document"], med_list: ["med_list"], therapy_plan: ["exercises", "document"],
+};
+// deno-lint-ignore no-explicit-any
+const PP: Record<string, any> = (photoSchema as any).properties;
+const photoKindSchema = { type: "object", additionalProperties: false, required: ["kind", "summary"], properties: { kind: PP.kind, summary: { type: "string", description: "One line: what the photo shows" } } };
+function photoPartSchema(keys: string[]) {
+  const req = [...PHOTO_COMMON, ...keys];
+  // deno-lint-ignore no-explicit-any
+  const props: Record<string, any> = {}; for (const k of req) props[k] = PP[k];
+  return { type: "object", additionalProperties: false, required: req, properties: props };
+}
+function photoEmpty() {
+  return {
+    decision: "use", retake_reason: "", retake_tip: "", summary: "", uncertain: [], more_pages: false, more_pages_hint: "",
+    vitals: { systolic: null, diastolic: null, pulse: null, value: null, unit: null, irregular_symbol: false, afib_symbol: false, time_shown: null },
+    weight: { value: null, unit: null },
+    medication: { name: null, strength: null, directions: null, prescriber: null, pharmacy: null, filled_on: null, refills: null, quantity: null, warnings: [] },
+    labs: [], appointment: { with_whom: null, date: null, time: null, place: null, reason: null, notes: null },
+    contacts: [], document: { doc_type: "Other", title: "", date: null, details: "", fields: [] }, med_list: [], exercises: [],
+  };
+}
 const PHOTO_RULES = `You read photos for a family caring for an elderly relative. Wrong numbers are worse than no numbers: the family would rather take another photo.
 - First decide what the photo is (kind).
 - Read only what is clearly printed or lit. Never guess or "correct" a digit. Seven-segment displays: check each segment (a 1 vs 7, 3 vs 8, 5 vs 6).
@@ -356,7 +384,7 @@ const PHOTO_RULES = `You read photos for a family caring for an elderly relative
 - Papers that fit nowhere else: kind = document. In document.fields list the paper's own key facts as label/value pairs, so the family can find them later.
 - Several photos may be retakes of the same page OR further pages of one document; combine them into one answer. Set more_pages when the paper clearly continues past what you have.
 - Lab report: report every test row you can read clearly; leave unreadable rows out and list them in uncertain. Retake only if the main results are unreadable.
-- Fill unrelated sections with nulls, false, or empty lists (document: doc_type Other, empty title, details and fields).`;
+- Fill only the sections asked for.`;
 const guidanceSchema = {
   type: "object", additionalProperties: false,
   required: ["answer", "key_points", "sources", "questions_for_care_team", "caveat"],
@@ -571,8 +599,16 @@ ${text}` }], "medium");
       if (!images.length) throw new Error("No photo sent.");
       const expect = body.expect ? `
 The family expects: ${String(body.expect).slice(0, 40)}.` : "";
-      return await ask(photoSchema, [...images.map(imageBlock), { type: "text", text: PHOTO_RULES + expect + `
-Today is ${new Date().toISOString().slice(0, 10)}.` }], "medium");
+      const blocks = images.map(imageBlock), today = `
+Today is ${new Date().toISOString().slice(0, 10)}.`;
+      // Step 1: what is it? A tiny schema, so the full reader never has to describe every kind at once.
+      const first = await ask(photoKindSchema, [...blocks, { type: "text", text: PHOTO_RULES + expect + "\nStep 1 of 2: only say what kind of photo this is, in one line of summary." }], "low");
+      const kind = String(first.kind);
+      const part = PHOTO_PARTS[kind];
+      if (!part) return { ...photoEmpty(), kind, decision: "use", summary: first.summary };
+      // Step 2: read it with only the sections this kind needs.
+      const out = await ask(photoPartSchema(part), [...blocks, { type: "text", text: PHOTO_RULES + expect + `\nStep 2 of 2: this photo is a ${kind.replace(/_/g, " ")}. Read it.` + today }], "medium");
+      return { ...photoEmpty(), ...out, kind };
     }
     case "guidance": {
       const q = String(body.question ?? "").slice(0, 600);
