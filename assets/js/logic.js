@@ -582,7 +582,17 @@ var Logic = (function () {
     };
   }
 
-  return { handoff: handoff, reconcileMeds: reconcileMeds, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
+  // Family notes are one text box; stamp each new or changed line with the day it was written,
+  // e.g. "[2026-11-24] Woke up damp...". Lines already dated, blank lines and headings are left alone.
+  function datedNotes(oldText, newText, day) {
+    var seen = {}; String(oldText || '').split('\n').forEach(function (l) { seen[l.trim()] = true; });
+    return String(newText || '').split('\n').map(function (l) {
+      var t = l.trim();
+      if (!t || seen[t] || /^\[\d{4}-\d{2}-\d{2}\]/.test(t) || /^Questions \(\d{4}-\d{2}-\d{2}\):$/.test(t)) return l;
+      return '[' + day + '] ' + t;
+    }).join('\n');
+  }
+  return { datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
     slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();

@@ -283,7 +283,7 @@ function exportHtml(pid, prof) {
   var f = function (r, k) { return esc((r.fields || {})[k] || ''); };
   var labs = {}; recordsOf(pid, ['lab']).sort(byDateDesc).forEach(function (r) { if (!labs[r.title]) labs[r.title] = r; });
   var visits = recordsOf(pid, ['visit']).filter(function (r) { return r.occurred_at <= new Date().toISOString(); }).sort(byDateDesc).slice(0, 3);
-  var qs = visits.map(function (v) { return (v.fields || {}).questions; }).filter(Boolean);
+  var qs = visits.filter(function (v) { return (v.fields || {}).questions; }).map(function (v) { return '[' + fmtWhen(v.occurred_at) + ', from the ' + v.title + ' visit] ' + v.fields.questions; });
   return '<h2>' + esc(prof.person_name) + '</h2><p class="muted">Prepared ' + esc(localDay(new Date().toISOString())) + ' by the family from home records.</p>' +
     '<h3>Allergies</h3>' + list('allergy', function (r) { return '<b>' + esc(r.title) + '</b>' + (f(r, 'reaction') ? ': ' + f(r, 'reaction') : ''); }) +
     '<h3>Conditions</h3>' + list('condition', function (r) { return esc(r.title) + (f(r, 'since') ? ' (since ' + f(r, 'since') + ')' : ''); }) +

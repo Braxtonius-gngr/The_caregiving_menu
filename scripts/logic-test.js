@@ -355,4 +355,11 @@ t('handoff: only the window and the person; doses by status, fluids, vitals, vis
   assert.strictEqual(Logic.handoff(d, P, '2026-11-26T00:00:00Z', '2026-11-26T05:00:00Z').empty, true);
 });
 
+t('datedNotes: only new or changed lines get the day; dated lines and question headers stay', function () {
+  var old = ['[2026-11-20] Started Foley', 'Questions (2026-11-21):', '- Is the dose right?'].join('\n');
+  var neu = old + '\n\nWoke up damp\n- ask nurse about balloon';
+  assert.strictEqual(Logic.datedNotes(old, neu, '2026-11-24'), old + '\n\n[2026-11-24] Woke up damp\n[2026-11-24] - ask nurse about balloon');
+  assert.strictEqual(Logic.datedNotes(neu, neu, '2026-11-25'), neu);
+});
+
 console.log(n + ' tests passed');

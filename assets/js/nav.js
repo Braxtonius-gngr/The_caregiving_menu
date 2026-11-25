@@ -23,7 +23,14 @@ function navDrop(kind) {
 /* ---------- screens ---------- */
 var _navShowScreen = showScreen;
 showScreen = function (name, arg) {
+  var oldSeg = document.querySelector('#screen .seg'), segLeft = oldSeg ? oldSeg.scrollLeft : 0, sameScreen = currentScreen === name;
   _navShowScreen(name, arg);
+  var seg = document.querySelector('#screen .seg');
+  if (seg) {
+    if (sameScreen) seg.scrollLeft = segLeft;
+    var on = seg.querySelector('.on, [aria-selected="true"]');
+    if (on) { var sr = seg.getBoundingClientRect(), br = on.getBoundingClientRect(); if (br.left < sr.left || br.right > sr.right) seg.scrollLeft += (br.left - sr.left) - (sr.width - br.width) / 2; }
+  }
   if (Nav.noPush) return;
   Nav.screenDirty = {}; Nav.refreshPending = false;
   var a = typeof arg === 'string' || typeof arg === 'number' ? arg : null, st = history.state;
