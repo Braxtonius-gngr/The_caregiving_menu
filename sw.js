@@ -21,6 +21,7 @@ var SHELL = [
   './assets/js/cuff.js',
   './assets/js/snap.js',
   './assets/js/scribe.js',
+  './assets/js/phototest.js',
   './assets/js/nav.js',
   './assets/js/simple.js',
   './assets/js/app.js',
