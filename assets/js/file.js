@@ -21,6 +21,7 @@ var RECORD_KINDS = {
   event: { label: 'Important day', title: 'What (lab draw, refill, birthday...)', date: 'date', fields: [['repeat', 'Repeats', 'select:No|Every year|Every month'], ['notes', 'Notes', 'textarea']] },
   dose: { label: 'Dose given', title: 'Medicine', date: 'datetime', fields: [['status', 'Status', 'select:given|skipped|refused'], ['note', 'Note', 'textarea']] },
   plan: { label: 'Schedule draft', title: 'Title', date: 'datetime', fields: [] },
+  exercise_log: { label: 'Exercise done', title: 'Exercise', date: 'datetime', fields: [] },
   exercise: { label: 'Exercise', title: 'Exercise', fields: [['how', 'Sets, reps or hold', 'text'], ['how_often', 'How often', 'text'], ['from', 'From (therapist or clinic)', 'text'], ['active', 'Still doing it', 'select:Yes|No'], ['notes', 'How to do it, cautions', 'textarea']] }
 };
 var MED_SLOTS = [['morning', 'Morning', 8], ['noon', 'Midday', 12], ['evening', 'Evening', 17], ['bedtime', 'Bedtime', 21], ['prn', 'Only when needed', null]];
@@ -315,8 +316,8 @@ function printExport(pid) {
 /* ---------- Kitchen: recipes and pantry under one tab ---------- */
 function renderKitchen(arg) {
   var which = (arg && arg.tab) || S.kitchenTab || 'ideas'; S.kitchenTab = which;
-  return '<div class="seg" role="tablist">' + [['ideas', 'Ideas'], ['recipes', 'Recipes'], ['pantry', 'Pantry']].map(function (t) { return '<button role="tab" aria-selected="' + (t[0] === which) + '" class="seg-btn' + (t[0] === which ? ' on' : '') + '" onclick="showScreen(\'kitchen\',{tab:\'' + t[0] + '\'})">' + t[1] + '</button>'; }).join('') + '</div>' +
-    (which === 'pantry' ? renderPantry() : which === 'recipes' ? renderRecipes() : renderKitchenIdeas());
+  return '<div class="seg" role="tablist">' + [['ideas', 'Ideas'], ['recipes', 'Recipes'], ['pantry', 'Pantry'], ['add', '+ Add']].map(function (t) { return '<button role="tab" aria-selected="' + (t[0] === which) + '" class="seg-btn' + (t[0] === which ? ' on' : '') + '" onclick="showScreen(\'kitchen\',{tab:\'' + t[0] + '\'})">' + t[1] + '</button>'; }).join('') + '</div>' +
+    (which === 'add' ? renderScan() : which === 'pantry' ? renderPantry() : which === 'recipes' ? renderRecipes() : renderKitchenIdeas());
 }
 
 /* ---------- medicine labels (FDA) ---------- */

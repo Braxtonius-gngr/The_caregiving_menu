@@ -566,6 +566,7 @@ var Logic = (function () {
     var status = function (s) { return doses.filter(function (r) { return ((r.fields || {}).status || 'given') === s; }); };
     var visits = recs.filter(function (r) { return r.kind === 'visit' && inWin(r.occurred_at); }).sort(byTime('occurred_at'));
     var updates = recs.filter(function (r) { return r.kind === 'update' && inWin(r.occurred_at); }).sort(byTime('occurred_at'));
+    var exercises = recs.filter(function (r) { return r.kind === 'exercise_log' && inWin(r.occurred_at); }).sort(byTime('occurred_at'));
     var changed = recs.filter(function (r) { return ['medication', 'contact', 'document', 'lab', 'exercise', 'allergy', 'condition'].indexOf(r.kind) >= 0 && inWin(r.updated_at); });
     var todo = [];
     visits.forEach(function (v) { var m = String((v.fields || {}).changed || '').match(/To do: (.*)/); if (m) m[1].split(/;\s*/).forEach(function (t) { if (t) todo.push(t); }); });
@@ -576,9 +577,9 @@ var Logic = (function () {
       meals: diary.filter(function (e) { return e.entry_kind !== 'output' && e.entry_kind !== 'drink'; }),
       vitals: meas.filter(function (m) { return m.kind !== 'weight'; }),
       weights: meas.filter(function (m) { return m.kind === 'weight'; }),
-      visits: visits, updates: updates, changed: changed, todo: todo,
+      visits: visits, updates: updates, changed: changed, todo: todo, exercises: exercises,
       checks: recs.filter(function (r) { return r.fields && r.fields.check; }),
-      empty: !diary.length && !meas.length && !doses.length && !visits.length && !updates.length && !changed.length
+      empty: !diary.length && !meas.length && !doses.length && !visits.length && !updates.length && !changed.length && !exercises.length
     };
   }
 
@@ -592,7 +593,16 @@ var Logic = (function () {
       return '[' + day + '] ' + t;
     }).join('\n');
   }
-  return { datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
+  // "twice a day" -> 2, "3 times daily" -> 3, "every morning" -> 1; 0 when it is not per day (e.g. 3x a week).
+  function exerciseTarget(text) {
+    var t = String(text || '').toLowerCase(), words = { once: 1, one: 1, twice: 2, two: 2, three: 3, thrice: 3, four: 4, five: 5 };
+    if (!t.trim()) return 1;
+    if (/week|hour|other day|every \d+ days/.test(t)) return 0;
+    var m = t.match(/(\d+)\s*(x|times?)?\s*(a|per|each|\/)?\s*(day|daily)/) || t.match(/(once|twice|thrice|one|two|three|four|five)\s*(times?)?\s*(a|per|each)?\s*(day|daily)?/);
+    if (m) return +m[1] || words[m[1]] || 1;
+    return 1;
+  }
+  return { exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
     slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();

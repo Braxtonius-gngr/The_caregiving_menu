@@ -362,4 +362,9 @@ t('datedNotes: only new or changed lines get the day; dated lines and question h
   assert.strictEqual(Logic.datedNotes(neu, neu, '2026-11-25'), neu);
 });
 
+t('exerciseTarget: times a day from the therapy sheet wording', function () {
+  var cases = { 'twice a day': 2, '3 times daily': 3, '3x/day': 3, 'once daily': 1, 'every morning': 1, '': 1, '3x a week': 0, 'every hour awake': 0, 'Two times per day': 2 };
+  Object.keys(cases).forEach(function (k) { assert.strictEqual(Logic.exerciseTarget(k), cases[k], k); });
+});
+
 console.log(n + ' tests passed');

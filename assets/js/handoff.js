@@ -53,6 +53,7 @@ function renderHandoff(arg) {
     return '<div class="tappable" onclick="editRecord(\'' + v.id + '\')"><b>' + esc(v.title) + '</b> <span class="muted">' + esc(handoffTime(v.occurred_at)) + '</span>' +
       [['said', 'Said'], ['changed', 'Changed'], ['meds_changed', 'Medicines'], ['tests', 'Tests']].map(function (k) { return f[k[0]] ? '<div><span class="muted">' + k[1] + ':</span> <span class="prewrap">' + esc(f[k[0]]) + '</span></div>' : ''; }).join('') + '</div>';
   }).join('<hr>'));
+  html += section('&#129336; Exercises', h.exercises && h.exercises.length ? '<ul>' + h.exercises.map(function (x) { return li(handoffTime(x.occurred_at), handoffWho(x), '&#10003; ' + esc(x.title)); }).join('') + '</ul>' : '');
   html += section('&#128221; Updates', h.updates.length ? '<ul>' + h.updates.map(function (u) { return li(handoffTime(u.occurred_at), handoffWho(u), esc((u.title ? u.title + ': ' : '') + ((u.fields || {}).text || ''))); }).join('') + '</ul>' : '');
   html += section('&#9989; Still to do', h.todo.length ? '<ul>' + h.todo.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>' : '');
   html += section('&#10067; To double-check', h.checks.length ? '<ul>' + h.checks.map(function (r) { return '<li class="tappable" onclick="editRecord(\'' + r.id + '\')"><b>' + esc(r.title) + '</b>: ' + esc(checkLine(r)) + '</li>'; }).join('') + '</ul>' : '');
@@ -76,6 +77,7 @@ function handoffText(noNames) {
   h.vitals.forEach(function (v) { L.push(handoffTime(v.taken_at) + ' ' + ((VITALS[v.kind] || [v.kind])[0]) + ' ' + v.value + (v.value2 != null ? '/' + v.value2 : '') + (v.pulse != null ? ' pulse ' + v.pulse : '') + (v.rhythm ? ' ' + rhythmName(v.rhythm) : '')); });
   h.weights.forEach(function (v) { L.push(handoffTime(v.taken_at) + ' weight ' + v.value + ' ' + (v.unit || '')); });
   h.visits.forEach(function (v) { var f = v.fields || {}; L.push('Visit: ' + (noNames ? 'care visit' : v.title) + '. ' + [f.said, f.changed, f.meds_changed, f.tests].filter(Boolean).join(' / ')); });
+  (h.exercises || []).forEach(function (x) { L.push(handoffTime(x.occurred_at) + ' exercise done: ' + x.title); });
   h.updates.forEach(function (u) { L.push('Update: ' + ((u.fields || {}).text || '')); });
   h.todo.forEach(function (t) { L.push('To do: ' + t); });
   h.checks.forEach(function (r) { L.push('To double-check: ' + r.title + ': ' + checkLine(r)); });

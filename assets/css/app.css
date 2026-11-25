@@ -235,3 +235,7 @@ label.check input { width: auto; margin: 0; }
 .snap-row { padding: 10px 12px; }
 .mc-issues { margin: 6px 0; padding-left: 18px; }
 .ask-src { margin: 4px 0; padding-left: 18px; font-size: .92em; }
+.cap-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 8px 0; }
+.cap-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: inherit; font: inherit; cursor: pointer; min-height: 64px; }
+.cap-tile .cap-ico { font-size: 1.4em; line-height: 1; }
+.cap-tile .muted { font-size: .85em; }

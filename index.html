@@ -25,7 +25,7 @@
   <nav class="tabbar" aria-label="Main">
     <button data-tab="home" class="tab active" onclick="showScreen('home')"><span class="tab-ico">&#9728;</span>Today</button>
     <button data-tab="diary" class="tab" onclick="showScreen('diary')"><span class="tab-ico">&#9998;</span>Diary</button>
-    <button data-tab="scan" class="tab tab-scan" onclick="showScreen('scan')"><span class="tab-ico">&#10010;</span>Add</button>
+    <button data-tab="scan" class="tab tab-scan" onclick="openCapture()" aria-label="Log something"><span class="tab-ico">&#10010;</span>Log</button>
     <button data-tab="file" class="tab" onclick="showScreen('file')"><span class="tab-ico">&#128193;</span>File</button>
     <button data-tab="kitchen" class="tab" onclick="showScreen('kitchen')"><span class="tab-ico">&#127859;</span>Kitchen</button>
   </nav>
@@ -56,6 +56,7 @@
   <script src="assets/js/handoff.js"></script>
   <script src="assets/js/voice.js"></script>
   <script src="assets/js/ask.js"></script>
+  <script src="assets/js/capture.js"></script>
   <script src="assets/js/simple.js"></script>
   <script src="assets/js/app.js"></script>
   <script src="assets/js/nav.js"></script>

@@ -46,12 +46,12 @@ function openSheet(html) { document.getElementById('sheetBody').innerHTML = html
 var scanSession = 0; // bumped when the scanner opens or a sheet closes; late lookups compare against it
 function closeSheet() { scanSession++; S.sharedPhoto = null; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
 
-var TITLES = { simple: '', home: 'Today', meds: 'Daily meds', help: 'How to', timing: 'Timing review', patterns: 'Patterns', plans: 'Schedule drafts', phototest: 'Photo reader test', medcheck: 'Compare medicines', handoff: 'Catch me up', ask: 'Ask her file', plan: 'Schedule draft',  recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted', file: 'Patient file', kitchen: 'Kitchen' };
+var TITLES = { simple: '', home: 'Today', meds: 'Daily meds', help: 'How to', timing: 'Timing review', patterns: 'Patterns', plans: 'Schedule drafts', phototest: 'Photo reader test', medcheck: 'Compare medicines', handoff: 'Catch me up', ask: 'Ask her file', plan: 'Schedule draft',  recipes: 'Recipes', scan: 'Kitchen', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted', file: 'Patient file', kitchen: 'Kitchen' };
 var currentScreen = 'home';
 function showScreen(name, arg) {
   currentScreen = name;
   document.getElementById('screenTitle').textContent = TITLES[name] || name;
-  var tab = { ask: 'home', handoff: 'home', medcheck: 'file', phototest: 'settings', recipes: 'kitchen', pantry: 'kitchen', recipe: 'kitchen', fluids: 'diary', trash: 'diary', meds: 'home', help: 'home', timing: 'home', patterns: 'home', plans: 'home', plan: 'home' }[name] || name;
+  var tab = { scan: 'kitchen', ask: 'home', handoff: 'home', medcheck: 'file', phototest: 'settings', recipes: 'kitchen', pantry: 'kitchen', recipe: 'kitchen', fluids: 'diary', trash: 'diary', meds: 'home', help: 'home', timing: 'home', patterns: 'home', plans: 'home', plan: 'home' }[name] || name;
   document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === tab); });
   var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe, fluids: renderFluids, trash: renderTrash, file: renderFile, kitchen: renderKitchen, meds: renderMeds, help: renderHelp, timing: renderTiming, patterns: renderPatterns, plans: renderPlans, plan: renderPlan, phototest: renderPhotoTest, medcheck: renderMedCheck, handoff: renderHandoff, ask: renderAsk }[name];
   document.getElementById('screen').innerHTML = fn ? fn(arg) : '';
