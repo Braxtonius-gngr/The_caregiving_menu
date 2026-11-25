@@ -274,7 +274,7 @@ const timingQSchema = {
         required: ["text", "why", "med_ref", "sources"],
         properties: {
           text: { type: "string", description: "One question the family can read out to the pharmacist, e.g. 'Is it OK that her amlodipine is given at breakfast?' or 'Does her gabapentin need to be spaced from her antacid?'. A question, never an instruction, never a proposed time" },
-          why: { type: "string", description: "Why it is worth asking, tied to the label text, her day, her real dose times or what the sources say. Plain words, no 'should'" },
+          why: { type: "string", description: "Facts only: what the label or sources say and how her day compares. Never what to do, avoid or prefer" },
           med_ref: { type: "string", description: "The medicine's ref from the input (e.g. m1), or empty when it is about several or none" },
           sources: { type: "array", items: { type: "integer" }, description: "Numbers of the sources used, from the numbered list" },
         },
@@ -624,7 +624,7 @@ On hand: ${(body.pantry ?? []).join(", ")}` }], "low");
 Rules:
 - Only questions. Never propose a time, a slot, a dose or a change; never write "should", "recommend" or "best"; never tell the family what to do. The pharmacist or doctor decides.
 - 3 to 8 questions, most useful first. Skip anything already covered by timing_questions in her data unless the sources add something.
-- Each question gets a short "why", tied to the label text, her day or the numbered sources, and cites the source numbers it relies on. If nothing supports a question, leave it out.
+- Each question gets a short "why" that states facts only: what the label or the numbered sources say, and how her day and real dose times compare. Never say what to do, avoid, prefer or aim for. Cite the source numbers it relies on. If nothing supports a question, leave it out.
 - Never ask about stopping a medicine or changing a dose.
 
 Her data:
