@@ -192,7 +192,7 @@ Return only what the schema asks for. Use generic, lowercase, singular ingredien
 Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
 Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
 
-type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance" | "read_vitals" | "read_photo" | "fill_form" | "scribe";
+type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance" | "read_vitals" | "read_photo" | "fill_form" | "scribe" | "handoff";
 
 /* ---------- current guidance: search trusted sites first, then answer in a fixed shape ---------- */
 // Web search stays on public health sources; the answer step cites them by number.
@@ -371,6 +371,14 @@ function photoEmpty() {
     contacts: [], document: { doc_type: "Other", title: "", date: null, details: "", fields: [] }, med_list: [], list_source: "", exercises: [],
   };
 }
+const handoffSchema = {
+  type: "object", additionalProperties: false, required: ["summary", "watch", "to_do"],
+  properties: {
+    summary: { type: "string", description: "3-5 plain sentences: how the time went, in the order that matters for the next caregiver" },
+    watch: strList("Only things in the facts worth keeping an eye on: refused or skipped medicines, flagged output, readings marked irregular, open questions. Empty if none"),
+    to_do: strList("Open to-dos and things to double-check, from the facts. Empty if none"),
+  },
+};
 const PHOTO_RULES = `You read photos for a family caring for an elderly relative. Wrong numbers are worse than no numbers: the family would rather take another photo.
 - First decide what the photo is (kind).
 - Read only what is clearly printed or lit. Never guess or "correct" a digit. Seven-segment displays: check each segment (a 1 vs 7, 3 vs 8, 5 vs 6).
@@ -594,6 +602,18 @@ Her current medicines: ${meds || "none listed"}.
 
 Notes:
 ${text}` }], "medium");
+    }
+    case "handoff": {
+      // body.facts: plain lines from the app's own entries, without anyone's name.
+      const facts = String(body.facts ?? "").slice(0, 12000);
+      if (!facts.trim()) throw new Error("Nothing to summarize.");
+      return await ask(handoffSchema, [{ type: "text", text: `A family caregiver is handing over care of an elderly relative to the next family member. Write a short handoff from these logged facts only.
+- Use only the facts below. Never add events, numbers, causes or advice that are not there. If the facts are thin, say so briefly.
+- Plain, calm words a tired family member can read in 20 seconds. Times as given.
+- Do not diagnose. A refused medicine, a flagged output or an irregular reading goes in watch, described as logged.
+
+Facts:
+${facts}` }], "low");
     }
     case "read_photo": {
       const images: string[] = (body.images ?? [body.image]).filter(Boolean).slice(-6);

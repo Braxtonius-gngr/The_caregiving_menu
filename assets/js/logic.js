@@ -550,7 +550,39 @@ var Logic = (function () {
     return { items: items, duplicates: dups, problems: items.filter(function (x) { return x.issues.some(function (s) { return s.level !== 'info'; }); }).length };
   }
 
-  return { reconcileMeds: reconcileMeds, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
+
+  /* ---------- Shift handoff: what happened between two times, for one person ----------
+   * d: { diary, measurements, records } (all stores), pid, since and until as ISO strings.
+   * Pure and factual: every line comes from a saved entry, so a summary can never invent. */
+  function handoff(d, pid, since, until) {
+    var mine = function (x) { return !x.deleted && (x.for_profile_id || null) === (pid || null); };
+    var inWin = function (t) { return t && t >= since && t <= until; };
+    var byTime = function (k) { return function (a, b) { return a[k] < b[k] ? -1 : 1; }; };
+    var diary = (d.diary || []).filter(function (e) { return mine(e) && inWin(e.eaten_at); }).sort(byTime('eaten_at'));
+    var fb = fluidBalance(diary);
+    var meas = (d.measurements || []).filter(function (m) { return mine(m) && inWin(m.taken_at); }).sort(byTime('taken_at'));
+    var recs = (d.records || []).filter(mine);
+    var doses = recs.filter(function (r) { return r.kind === 'dose' && inWin(r.occurred_at); }).sort(byTime('occurred_at'));
+    var status = function (s) { return doses.filter(function (r) { return ((r.fields || {}).status || 'given') === s; }); };
+    var visits = recs.filter(function (r) { return r.kind === 'visit' && inWin(r.occurred_at); }).sort(byTime('occurred_at'));
+    var updates = recs.filter(function (r) { return r.kind === 'update' && inWin(r.occurred_at); }).sort(byTime('occurred_at'));
+    var changed = recs.filter(function (r) { return ['medication', 'contact', 'document', 'lab', 'exercise', 'allergy', 'condition'].indexOf(r.kind) >= 0 && inWin(r.updated_at); });
+    var todo = [];
+    visits.forEach(function (v) { var m = String((v.fields || {}).changed || '').match(/To do: (.*)/); if (m) m[1].split(/;\s*/).forEach(function (t) { if (t) todo.push(t); }); });
+    return {
+      since: since, until: until,
+      meds: { given: status('given'), skipped: status('skipped'), refused: status('refused') },
+      fluids: { inMl: fb.inMl, outMl: fb.outMl, drinks: fb.drinks, outputs: fb.outputs, flags: fb.flags },
+      meals: diary.filter(function (e) { return e.entry_kind !== 'output' && e.entry_kind !== 'drink'; }),
+      vitals: meas.filter(function (m) { return m.kind !== 'weight'; }),
+      weights: meas.filter(function (m) { return m.kind === 'weight'; }),
+      visits: visits, updates: updates, changed: changed, todo: todo,
+      checks: recs.filter(function (r) { return r.fields && r.fields.check; }),
+      empty: !diary.length && !meas.length && !doses.length && !visits.length && !updates.length && !changed.length
+    };
+  }
+
+  return { handoff: handoff, reconcileMeds: reconcileMeds, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
     slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();

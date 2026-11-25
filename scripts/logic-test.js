@@ -328,4 +328,31 @@ t('reconcileMeds: list vs bottle strength, missing bottle, not on list, duplicat
   assert.deepEqual(Logic.medSources(meds[2]).map(function (s) { return s.type; }), ['bottle']);
 });
 
+t('handoff: only the window and the person; doses by status, fluids, vitals, visits with to-dos, open checks', function () {
+  var P = 'p1', d = {
+    diary: [
+      { for_profile_id: P, entry_kind: 'drink', volume_ml: 240, eaten_at: '2026-11-25T10:00:00Z' },
+      { for_profile_id: P, entry_kind: 'output', volume_ml: 300, output_color: 'pink_red', eaten_at: '2026-11-25T11:00:00Z' },
+      { for_profile_id: P, entry_kind: 'drink', volume_ml: 999, eaten_at: '2026-11-24T10:00:00Z' },
+      { for_profile_id: 'other', entry_kind: 'drink', volume_ml: 500, eaten_at: '2026-11-25T10:30:00Z' }],
+    measurements: [
+      { for_profile_id: P, kind: 'blood_pressure', value: 142, value2: 80, taken_at: '2026-11-25T09:00:00Z' },
+      { for_profile_id: P, kind: 'weight', value: 151, unit: 'lb', taken_at: '2026-11-25T08:00:00Z' }],
+    records: [
+      { for_profile_id: P, kind: 'dose', title: 'Furosemide', occurred_at: '2026-11-25T08:05:00Z', fields: { status: 'given' } },
+      { for_profile_id: P, kind: 'dose', title: 'Lisinopril', occurred_at: '2026-11-25T08:06:00Z', fields: { status: 'refused' } },
+      { for_profile_id: P, kind: 'visit', title: 'Nurse', occurred_at: '2026-11-25T14:00:00Z', fields: { said: 'Lungs clear', changed: 'Legs up.\nTo do: Book lab; Weigh daily' } },
+      { for_profile_id: P, kind: 'medication', title: 'Metazol', updated_at: '2026-11-25T12:00:00Z', fields: { check: 'Not found' } },
+      { for_profile_id: P, kind: 'update', occurred_at: '2026-11-23T12:00:00Z', fields: { text: 'old' } }]
+  };
+  var h = Logic.handoff(d, P, '2026-11-25T06:00:00Z', '2026-11-25T20:00:00Z');
+  assert.strictEqual(h.meds.given.length, 1); assert.strictEqual(h.meds.refused[0].title, 'Lisinopril'); assert.strictEqual(h.meds.skipped.length, 0);
+  assert.strictEqual(h.fluids.inMl, 240); assert.strictEqual(h.fluids.outMl, 300); assert.strictEqual(h.fluids.flags.length, 1);
+  assert.strictEqual(h.vitals.length, 1); assert.strictEqual(h.weights.length, 1);
+  assert.deepEqual(h.todo, ['Book lab', 'Weigh daily']);
+  assert.strictEqual(h.updates.length, 0); assert.strictEqual(h.changed[0].title, 'Metazol'); assert.strictEqual(h.checks.length, 1);
+  assert.strictEqual(h.empty, false);
+  assert.strictEqual(Logic.handoff(d, P, '2026-11-26T00:00:00Z', '2026-11-26T05:00:00Z').empty, true);
+});
+
 console.log(n + ' tests passed');
