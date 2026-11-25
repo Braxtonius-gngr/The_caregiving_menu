@@ -192,7 +192,7 @@ Return only what the schema asks for. Use generic, lowercase, singular ingredien
 Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
 Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
 
-type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance" | "read_vitals" | "read_photo" | "fill_form" | "scribe" | "handoff";
+type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "schedule_draft" | "guidance" | "read_vitals" | "read_photo" | "fill_form" | "scribe" | "handoff" | "quick_log";
 
 /* ---------- current guidance: search trusted sites first, then answer in a fixed shape ---------- */
 // Web search stays on public health sources; the answer step cites them by number.
@@ -371,6 +371,35 @@ function photoEmpty() {
     contacts: [], document: { doc_type: "Other", title: "", date: null, details: "", fields: [] }, med_list: [], list_source: "", exercises: [],
   };
 }
+const quickItem = {
+  type: "object", additionalProperties: false,
+  required: ["type", "what", "amount", "unit", "portion", "output_type", "color", "clots", "vital_kind", "value", "value2", "pulse", "rhythm", "med_ref", "slot", "status", "note", "time", "unsure"],
+  properties: {
+    type: { type: "string", enum: ["drink", "meal", "output", "vital", "weight", "dose", "note"] },
+    what: { type: "string", description: "Drink or food in plain words (water, coffee with milk, half a turkey sandwich); empty otherwise" },
+    amount: { ...num, description: "Amount for a drink or output, as said" },
+    unit: { type: "string", enum: ["oz", "ml", "cup", "lb", "kg", ""] },
+    portion: { ...num, description: "Share actually drunk or eaten, 0-1 (half = 0.5), only if said" },
+    output_type: { type: "string", enum: ["urine", "vomit", "stool", "drain", "none", "other", ""] },
+    color: { type: "string", enum: ["pale", "yellow", "dark_yellow", "amber", "pink_red", "cola", ""] },
+    clots: { type: "boolean" },
+    vital_kind: { type: "string", enum: ["blood_pressure", "glucose", "oxygen", "temperature", ""] },
+    value: { ...num, description: "Main reading: top BP number, sugar, oxygen %, temperature or weight" },
+    value2: { ...num, description: "Bottom BP number" },
+    pulse: num,
+    rhythm: { type: "string", enum: ["irregular", "afib", ""] },
+    med_ref: { type: "string", description: "For a dose: the ref of the one medicine named, or 'all' for every medicine of a time of day (the morning pills); empty if none matches" },
+    slot: { type: "string", enum: ["morning", "noon", "evening", "bedtime", "prn", ""] },
+    status: { type: "string", enum: ["given", "skipped", "refused", ""] },
+    note: { type: "string", description: "Anything else said about this entry (why refused, where, how she seemed); for type note, the whole note" },
+    time: { type: "string", description: "HH:MM 24-hour if a time was said (at 2 = 14:00 if that fits the day so far), else empty" },
+    unsure: { type: "string", description: "If any part was unclear or guessed (a number, which medicine), say what; else empty" },
+  },
+};
+const quickSchema = {
+  type: "object", additionalProperties: false, required: ["items", "unclear"],
+  properties: { items: { type: "array", items: quickItem }, unclear: strList("Parts of what was said that could not be turned into an entry") },
+};
 const handoffSchema = {
   type: "object", additionalProperties: false, required: ["summary", "watch", "to_do"],
   properties: {
@@ -602,6 +631,24 @@ Her current medicines: ${meds || "none listed"}.
 
 Notes:
 ${text}` }], "medium");
+    }
+    case "quick_log": {
+      // body.text: what a caregiver said or typed; body.meds: [{ref, name, slots}] (her medicines, no person names).
+      const text = String(body.text ?? "").slice(0, 2000);
+      if (text.trim().length < 3) throw new Error("Nothing was said.");
+      const meds = (body.meds ?? []).slice(0, 60).map((m: Record<string, unknown>) => `${String(m.ref).slice(0, 6)}: ${String(m.name).slice(0, 80)} (${String(m.slots ?? "").slice(0, 60) || "no set time"})`).join("\n");
+      return await ask(quickSchema, [{ type: "text", text: `A family caregiver said this about the elderly relative they care for. Turn it into log entries.
+- One item per thing that happened: a drink, food eaten, urine or other output, a reading (blood pressure, sugar, oxygen, temperature), a weight, a medicine given/skipped/refused, or a note.
+- Use only what was said. Never invent an amount, number, colour or time. If a number may have been misheard, still record it and say so in unsure.
+- "142 over 80" is blood pressure 142/80. "Pee", "went to the bathroom" with an amount is urine output.
+- Medicines: match to her list below by name (brand or generic). "The morning pills" = med_ref all with slot morning. If no medicine matches, leave med_ref empty and say which in unsure.
+- A sentence that is not an entry (how she slept, her mood) is a note.
+Time now: ${String(body.now ?? "").slice(0, 5)}.
+Her medicines:
+${meds || "(none saved)"}
+
+What was said:
+${text}` }], "low");
     }
     case "handoff": {
       // body.facts: plain lines from the app's own entries, without anyone's name.
