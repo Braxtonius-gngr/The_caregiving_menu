@@ -9,14 +9,15 @@ var SNAP_KINDS = {
   weight: 'a bathroom scale display',
   medication: 'a prescription bottle or pharmacy label',
   lab: 'a lab report',
-  visit: 'an appointment card or reminder'
+  visit: 'an appointment card or reminder',
+  contact: 'a care team list, business card or emergency plan'
 };
 var SNAP_MAX_TRIES = 3;
 
 function snapIt(pid, expect) {
   S.snap = { pid: pid || null, expect: expect || null, images: [] };
   openSheet('<h2 style="margin-top:0">&#128247; Snap it</h2>' +
-    '<p>' + (expect && SNAP_KINDS[expect] ? 'Take a photo of ' + SNAP_KINDS[expect] + '.' : 'Take a photo of a cuff or meter screen, the scale, a pill bottle label, a lab report or an appointment card.') + ' The app reads it and fills in the form for you to check.</p>' +
+    '<p>' + (expect && SNAP_KINDS[expect] ? 'Take a photo of ' + SNAP_KINDS[expect] + '.' : 'Take a photo of a cuff or meter screen, the scale, a pill bottle label, a lab report, an appointment card, a care team list or any paper worth keeping.') + ' The app reads it and fills in the form for you to check.</p>' +
     '<p class="muted">Fill the frame, avoid glare, hold still. If anything is unclear it will ask for another photo rather than guess.</p>' +
     snapButtons('Take photo') + '<div id="snapOut" aria-live="polite"></div>');
 }
@@ -104,6 +105,7 @@ function snapFill(d) {
     return;
   }
   if (d.kind === 'lab_report') return snapLabs(d);
+  if (d.kind === 'care_team' || d.kind === 'document') return snapTeam(d);
   if (d.kind === 'appointment') {
     var a = d.appointment || {};
     editRecord(null, 'visit', pid);
@@ -141,6 +143,47 @@ function saveSnapLabs() {
     });
   }, Promise.resolve()).then(function () { closeSheet(); return loadAll(); })
     .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast(picks.length + ' result(s) saved'); })
+    .catch(function (e) { toast('Could not save: ' + e.message); });
+}
+
+/* Care team sheet or a paper worth keeping: tick contacts to add to the Care team, and keep
+ * the page itself as a Document with the photo attached. */
+function snapNameKey(n) { return String(n || '').toLowerCase().replace(/\b(dr|md|do|np|rn)\b\.?/g, '').replace(/[^a-z0-9]/g, ''); }
+function snapTeam(d) {
+  var sn = S.snap, pid = sn.pid, doc = d.document || {};
+  var have = {}; recordsOf(pid, ['contact']).forEach(function (r) { have[snapNameKey(r.title)] = true; });
+  var rows = (d.contacts || []).filter(function (c) { return c && c.name; });
+  S.snapTeam = { rows: rows, doc: doc, summary: d.summary || '' };
+  openSheet('<h2 style="margin-top:0">&#128247; From the photo</h2>' +
+    '<p class="muted">' + esc(d.summary || '') + '</p>' +
+    (rows.length ? '<h3>Add to the Care team</h3><p class="muted">Untick anything that looks wrong; you can edit each one later.' + (d.uncertain && d.uncertain.length ? ' Not clear: ' + esc(d.uncertain.join(', ')) + '.' : '') + '</p>' +
+      rows.map(function (c, i) {
+        var dup = have[snapNameKey(c.name)];
+        return '<label class="check"><input type="checkbox" id="st' + i + '"' + (dup ? '' : ' checked') + '> <b>' + esc(c.name) + '</b> <span class="muted">' + esc(c.role || '') + '</span>' +
+          (c.phone ? ' · ' + esc(c.phone) : '') + (c.fax ? ' · fax ' + esc(c.fax) : '') + (dup ? ' <span class="muted">(already in the Care team)</span>' : '') + '</label>';
+      }).join('') : '') +
+    '<h3>Keep the page</h3><label class="check"><input type="checkbox" id="stDoc" checked> Save it as a Document with the photo</label>' +
+    '<label for="stTitle">Title</label><input id="stTitle" value="' + esc(doc.title || (d.kind === 'care_team' ? 'Care team sheet' : 'Document')) + '">' +
+    '<label for="stDetails">What it says</label><textarea id="stDetails" rows="5">' + esc(doc.details || '') + '</textarea>' +
+    '<div class="btn-row"><button class="btn" onclick="saveSnapTeam()">Save</button><button class="btn ghost" onclick="snapIt(S.snap && S.snap.pid)">Retake</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
+}
+function saveSnapTeam() {
+  var st = S.snapTeam || { rows: [], doc: {} }, sn = S.snap || {}, pid = sn.pid || null;
+  var picks = st.rows.filter(function (c, i) { var el = document.getElementById('st' + i); return el && el.checked; });
+  var keepDoc = document.getElementById('stDoc').checked, title = document.getElementById('stTitle').value.trim() || 'Document', details = document.getElementById('stDetails').value.trim();
+  if (!picks.length && !keepDoc) return toast('Nothing checked');
+  var chain = picks.reduce(function (p, c) {
+    return p.then(function () { return DB.put('records', { kind: 'contact', for_profile_id: pid, title: c.name, occurred_at: null, fields: { role: c.role || null, phone: c.phone || null, fax: c.fax || null, address: c.address || null, notes: [c.notes, 'From a photo'].filter(Boolean).join('; ') } }); });
+  }, Promise.resolve());
+  if (keepDoc) chain = chain.then(function () {
+    var dt = st.doc.date ? new Date(st.doc.date + 'T12:00:00').toISOString() : new Date().toISOString();
+    return DB.put('records', { kind: 'document', for_profile_id: pid, title: title, occurred_at: dt, fields: { doc_type: st.doc.doc_type || 'Other', notes: details || null } }).then(function (rec) {
+      var img = sn.images && sn.images[sn.images.length - 1];
+      if (rec && img) return DB.put('entry_photos', { entry_id: rec.id, entry_store: 'records', photo_data: img, photo_path: null, pos: 0, caption: null, mime: 'image/jpeg', file_name: null });
+    });
+  });
+  chain.then(function () { closeSheet(); return loadAll(); })
+    .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast((picks.length ? picks.length + ' contact(s) added' : '') + (picks.length && keepDoc ? ', ' : '') + (keepDoc ? 'page saved to Documents' : '')); })
     .catch(function (e) { toast('Could not save: ' + e.message); });
 }
 

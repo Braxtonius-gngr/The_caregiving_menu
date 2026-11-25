@@ -277,9 +277,9 @@ const vitalsSchema = {
 const nstr = { type: ["string", "null"] };
 const photoSchema = {
   type: "object", additionalProperties: false,
-  required: ["kind", "decision", "retake_reason", "retake_tip", "summary", "uncertain", "vitals", "weight", "medication", "labs", "appointment"],
+  required: ["kind", "decision", "retake_reason", "retake_tip", "summary", "uncertain", "vitals", "weight", "medication", "labs", "appointment", "contacts", "document"],
   properties: {
-    kind: { type: "string", enum: ["bp_monitor", "glucose_meter", "pulse_oximeter", "thermometer", "scale", "med_label", "lab_report", "appointment", "food_label", "other"] },
+    kind: { type: "string", enum: ["bp_monitor", "glucose_meter", "pulse_oximeter", "thermometer", "scale", "med_label", "lab_report", "appointment", "care_team", "document", "food_label", "other"] },
     decision: { type: "string", enum: ["use", "retake"], description: "retake unless every value you report is clearly legible" },
     retake_reason: { type: "string", description: "If retake: what is wrong, in plain words (glare over the top number, screen cut off, blurry). Else empty." },
     retake_tip: { type: "string", description: "If retake: one specific instruction for the next photo. Else empty." },
@@ -294,6 +294,11 @@ const photoSchema = {
       properties: { test: str, value: num, value_text: nstr, unit: nstr, low: num, high: num, range_text: nstr, flag: nstr, date: { ...nstr, description: "YYYY-MM-DD collected" } } } },
     appointment: { type: "object", additionalProperties: false, required: ["with_whom", "date", "time", "place", "reason", "notes"],
       properties: { with_whom: nstr, date: { ...nstr, description: "YYYY-MM-DD" }, time: { ...nstr, description: "HH:MM 24h" }, place: nstr, reason: nstr, notes: nstr } },
+    contacts: { type: "array", description: "Every doctor, nurse, pharmacy, agency, insurer or family contact listed, on any kind of photo", items: { type: "object", additionalProperties: false, required: ["name", "role", "phone", "fax", "address", "notes"],
+      properties: { name: { type: "string", description: "Person or place as written, e.g. Dr. Smith or HEB Pharmacy" }, role: { type: "string", description: "e.g. Cardiologist, Pharmacy, Home health agency, Insurance, Family" }, phone: nstr, fax: nstr, address: nstr, notes: { ...nstr, description: "Member/policy numbers, hours, anything else written for this contact" } } } },
+    document: { type: "object", additionalProperties: false, required: ["doc_type", "title", "date", "details"],
+      properties: { doc_type: { type: "string", enum: ["Discharge papers", "Report", "Insurance card", "ID", "Directive", "Bill", "Other"] }, title: { type: "string", description: "Short name for this paper, e.g. Emergency plan, Medicare card" },
+        date: { ...nstr, description: "YYYY-MM-DD shown on the paper" }, details: { type: "string", description: "Everything else important on the paper in short lines (plans, levels, numbers, instructions), not repeating the contacts" } } },
   },
 };
 const formSchema = {
@@ -336,8 +341,10 @@ const PHOTO_RULES = `You read photos for a family caring for an elderly relative
 - If several photos are given, they are tries of the same thing; combine them and only report a value that at least one photo shows clearly. If photos disagree, retake.
 - Blood pressure cuff: SYS top, DIA middle, pulse bottom. Report the irregular-heartbeat or AFib symbol only if it is lit. Ignore memory averages.
 - Medicine label: the drug name and strength must be clearly readable, else retake.
+- Care team: a list of doctors, pharmacy, agencies or emergency contacts (an emergency plan, a care team sheet, business cards). kind = care_team; put each one in contacts with whatever phone, fax and address is written. Handwriting: copy names as written; list a contact even if its phone is unreadable, and note that in uncertain. Do not ask for a retake just because some numbers are unclear.
+- Other papers worth keeping (insurance card, ID, directive, discharge papers, bills, plans): kind = document; fill document, and contacts if any are listed. A care team sheet with other information on it also fills document (title and details).
 - Lab report: report every test row you can read clearly; leave unreadable rows out and list them in uncertain. Retake only if the main results are unreadable.
-- Fill unrelated sections with nulls, false, or empty lists.`;
+- Fill unrelated sections with nulls, false, or empty lists (document: doc_type Other, empty title and details).`;
 const guidanceSchema = {
   type: "object", additionalProperties: false,
   required: ["answer", "key_points", "sources", "questions_for_care_team", "caveat"],
