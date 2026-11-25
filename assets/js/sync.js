@@ -284,7 +284,7 @@ var Sync = (function () {
       if (!res || typeof res.json !== 'function') throw r.error;
       return res.json().catch(function () { return {}; }).then(function (d) {
         if (res.status === 401) throw new Error('Your sign-in has expired. Sign in again in Settings.');
-        throw new Error((d && d.error) || ('Cloud error ' + res.status));
+        var err = new Error((d && d.error) || ('Cloud error ' + res.status)); err.code = d && d.code; throw err;
       });
     });
   }
@@ -463,5 +463,86 @@ var Sync = (function () {
     return queuePhotoDelete('record:' + PHOTO_STORES[store] + '/' + id).then(flushIfSignedIn);
   }
 
-  return { authStorageKey: authStorageKey, config: config, configured: configured, saveConfig: saveConfig, clearConfig: clearConfig, setupLink: setupLink, applySetupLink: applySetupLink, joinPendingInvite: joinPendingInvite, pendingInvite: pendingInvite, photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, inviteLinks: inviteLinks, resetInviteLinks: resetInviteLinks, members: members, setMyName: setMyName, setHouseholdName: setHouseholdName, setMemberRole: setMemberRole, removeMember: removeMember, householdName: householdName, setDayStart: setDayStart, approveMember: approveMember, history: history, recentChanges: recentChanges, hardDelete: hardDelete, refreshDayStart: refreshDayStart, refreshRole: refreshRole, householdId: householdId, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup };
+  // ---------- your data: export, delete, leave (migration 0021, function /account) ----------
+  function account(action, body) {
+    return householdId().then(function (hid) { return invokeFn('account', Object.assign({ action: action, hid: hid }, body || {})); });
+  }
+  // Tables a family export reads straight from the server (not from this device).
+  var EXPORT_TABLES = ['records', 'entry_photos', 'measurements', 'diary_entries', 'diet_profiles', 'profile_rules', 'recipes', 'recipe_ingredients',
+    'recipe_variations', 'ingredients', 'pantry_items', 'shopping_list', 'usage_log', 'consents', 'ai_usage', 'audit_log', 'former_members', 'data_requests'];
+  var EXPORT_MINE = { records: 'user_id', entry_photos: 'user_id', measurements: 'user_id', diary_entries: 'user_id', consents: 'user_id', ai_usage: 'user_id', audit_log: 'changed_by', data_requests: 'user_id' };
+  function readAll(c, table, hid, col, uid) {
+    var out = [];
+    function page(from) {
+      var q = c.from(table).select('*').eq('household_id', hid);
+      if (col) q = q.eq(col, uid);
+      return q.range(from, from + 999).then(function (r) {
+        if (r.error) throw new Error(table + ': ' + r.error.message);
+        out = out.concat(r.data || []);
+        return (r.data || []).length === 1000 ? page(from + 1000) : out;
+      });
+    }
+    return page(0);
+  }
+  function blobToDataUrl(b) { return new Promise(function (ok, bad) { var fr = new FileReader(); fr.onload = function () { ok(fr.result); }; fr.onerror = bad; fr.readAsDataURL(b); }); }
+  // scope 'family' (owners) or 'mine'. Logs the export first; the server refuses what isn't allowed.
+  // onStep(text) reports progress.
+  function exportAll(scope, onStep) {
+    var c = getClient(), hid, uid, out = { exported_at: new Date().toISOString(), scope: scope, app_version: TCM_CONFIG.APP_VERSION };
+    onStep = onStep || function () {};
+    return account('export', { scope: scope }).then(function () { return Promise.all([householdId(), session()]); }).then(function (r) {
+      hid = r[0]; uid = r[1].user.id; out.household_id = hid;
+      var tables = scope === 'family' ? EXPORT_TABLES : Object.keys(EXPORT_MINE);
+      return tables.reduce(function (p, t) {
+        return p.then(function () { onStep('Reading ' + t.replace(/_/g, ' ') + '...'); return readAll(c, t, hid, scope === 'family' ? null : EXPORT_MINE[t], uid).then(function (rows) { out[t] = rows; }); });
+      }, Promise.resolve());
+    }).then(function () { return members(); }).then(function (people) {
+      out.members = scope === 'family' ? people : (people || []).filter(function (m) { return m.is_me; });
+      return householdName().then(function (n) { out.household_name = n; });
+    }).then(function () {
+      if (scope !== 'family') {
+        var paths = {}; (out.entry_photos || []).forEach(function (r) { if (r.photo_path) paths[r.photo_path] = 1; }); return Object.keys(paths);
+      }
+      return c.rpc('household_photo_paths', { hid: hid }).then(function (r) { if (r.error) throw r.error; return r.data || []; });
+    }).then(function (paths) {
+      out.photos = {}; out.photos_missing = [];
+      return paths.reduce(function (p, path, i) {
+        return p.then(function () {
+          onStep('Photo ' + (i + 1) + ' of ' + paths.length + '...');
+          return c.storage.from(BUCKET).download(path).then(function (r) {
+            if (r.error || !r.data) { out.photos_missing.push(path); return; }
+            return blobToDataUrl(r.data).then(function (u) { out.photos[path] = u; });
+          });
+        });
+      }, Promise.resolve());
+    }).then(function () { return out; });
+  }
+  function eraseDate() {
+    var c = getClient();
+    return householdId().then(function (hid) { return hid ? c.from('households').select('erase_after').eq('id', hid).maybeSingle() : { data: null }; })
+      .then(function (r) { return r && r.data ? r.data.erase_after : null; }, function () { return null; });
+  }
+  function formerMembers() {
+    var c = getClient();
+    return householdId().then(function (hid) { return c.from('former_members').select('user_id, display_name').eq('household_id', hid); })
+      .then(function (r) { return r.error ? [] : r.data || []; }, function () { return []; });
+  }
+  function dataRequests(n) {
+    var c = getClient();
+    return householdId().then(function (hid) { return c.from('data_requests').select('*').eq('household_id', hid).order('created_at', { ascending: false }).limit(n || 20); })
+      .then(function (r) { return r.error ? [] : r.data || []; }, function () { return []; });
+  }
+  // Seconds since this person last signed in (from the session token), for the fresh sign-in check.
+  function signedInAgo() {
+    return session().then(function (s) {
+      if (!s) return Infinity;
+      try {
+        var p = JSON.parse(atob(s.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        var t = Math.max.apply(null, [0].concat((p.amr || []).map(function (a) { return Number(a.timestamp) || 0; })));
+        return Date.now() / 1000 - t;
+      } catch (e) { return Infinity; }
+    });
+  }
+
+  return { authStorageKey: authStorageKey, config: config, configured: configured, saveConfig: saveConfig, clearConfig: clearConfig, setupLink: setupLink, applySetupLink: applySetupLink, joinPendingInvite: joinPendingInvite, pendingInvite: pendingInvite, photoSrc: photoSrc, removePhoto: removePhoto, removeRecordPhotos: removeRecordPhotos, flushPhotoDeletes: flushPhotoDeletes, uploadPendingPhotos: uploadPendingPhotos, inviteCode: inviteCode, inviteLinks: inviteLinks, resetInviteLinks: resetInviteLinks, members: members, setMyName: setMyName, setHouseholdName: setHouseholdName, setMemberRole: setMemberRole, removeMember: removeMember, householdName: householdName, setDayStart: setDayStart, approveMember: approveMember, history: history, recentChanges: recentChanges, hardDelete: hardDelete, refreshDayStart: refreshDayStart, refreshRole: refreshRole, householdId: householdId, joinHousehold: joinHousehold, enabled: enabled, getClient: getClient, session: session, signIn: signIn, signOut: signOut, run: run, brain: brain, lookup: lookup, account: account, exportAll: exportAll, eraseDate: eraseDate, formerMembers: formerMembers, dataRequests: dataRequests, signedInAgo: signedInAgo };
 })();

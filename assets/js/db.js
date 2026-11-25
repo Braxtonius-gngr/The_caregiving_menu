@@ -75,10 +75,11 @@ var DB = (function () {
   // Viewers in a shared family can read but not change anything. Writes made by sync
   // itself (silent) still go through, so the shared file keeps arriving.
   var readOnly = false, LOCAL_ONLY = ['meta', 'outbox', 'intake_jobs'];
-  function setReadOnly(on) { readOnly = !!on; }
+  var readOnlyMsg = '';
+  function setReadOnly(on, msg) { readOnly = !!on; readOnlyMsg = msg || ''; }
   function blocked(store, opts) {
     if (!readOnly || (opts && opts.silent) || LOCAL_ONLY.indexOf(store) >= 0) return null;
-    if (typeof toast === 'function') toast('View only: ask an owner to make you a caregiver to add or change things.');
+    if (typeof toast === 'function') toast(readOnlyMsg || 'View only: ask an owner to make you a caregiver to add or change things.');
     return Promise.reject(new Error('View only'));
   }
 

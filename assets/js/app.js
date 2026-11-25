@@ -4,8 +4,9 @@ function loadAll() {
     DB.all('ingredients'), DB.all('recipes'), DB.all('recipe_ingredients'), DB.all('recipe_variations'),
     DB.all('pantry_items'), DB.all('diet_profiles'), DB.all('profile_rules'), DB.all('diary_entries'),
     DB.all('shopping_list'), DB.all('usage_log'), DB.meta('aisle_order'), DB.meta('my_role'), DB.meta('family_members'), DB.all('measurements'),
-    DB.meta('day_start_hour'), DB.meta('fluid_unit'), DB.meta('weight_unit'), DB.allRaw('diary_entries'), DB.allRaw('measurements'), DB.allRaw('entry_photos'), DB.meta('pending_members'), DB.allRaw('records')
+    DB.meta('day_start_hour'), DB.meta('fluid_unit'), DB.meta('weight_unit'), DB.allRaw('diary_entries'), DB.allRaw('measurements'), DB.allRaw('entry_photos'), DB.meta('pending_members'), DB.allRaw('records'), DB.meta('erase_after')
   ]).then(function (r) {
+    State.eraseAfter = r[22] || null;
     State.records = r[21].filter(function (x) { return !x.deleted; });
     State.trash = r[17].filter(function (x) { return x.deleted; }).map(function (x) { x._store = 'diary_entries'; return x; })
       .concat(r[18].filter(function (x) { return x.deleted; }).map(function (x) { x._store = 'measurements'; return x; }))
@@ -163,6 +164,7 @@ function renderAuthBox() {
       : signInBlock('s');
     var fam = document.getElementById('familyBox');
     if (fam) { if (s) renderFamilyBox(); else fam.innerHTML = '<p class="muted">Sign in above to see and invite your family.</p>'; }
+    fillYourData(s);
   });
 }
 function joinWithCode() {
@@ -201,7 +203,7 @@ function renderFamilyBox() {
         ? '<h3>Invite family</h3><p class="muted">A link works for whoever opens it and signs in, so send it only to the person you mean. You can change anyone\'s role later.</p>' +
           '<div class="btn-row"><button class="btn sm" onclick="shareInvite(\'caregiver\')">Invite a caregiver (can log)</button><button class="btn sm ghost" onclick="shareInvite(\'viewer\')">Invite a viewer (read only)</button></div>' +
           '<p><button class="linkish" onclick="resetInvites()">Cancel all invite links sent so far</button></p><p><button class="linkish" onclick="showRecentChanges()">Recent changes</button></p>'
-        : '<p class="muted">Ask an owner to invite others.</p>' + (me.role ? '<p><button class="linkish" onclick="leaveFamily()">Leave this family</button></p>' : ''));
+        : '<p class="muted">Ask an owner to invite others.</p>' + (me.role ? '<p><button class="linkish" onclick="leaveStart(false)">Leave this family</button></p>' : ''));
   }).catch(function (e) {
     if (State.role === 'pending') { box.innerHTML = '<p><b>Waiting for approval.</b> An owner of the family needs to approve you before you can see or add anything.</p>' + '<label for="myName">Your name (so they know who is asking)</label><div class="row"><input id="myName" class="grow" maxlength="40" placeholder="e.g. Mom"><button class="btn sm" onclick="saveMyName()">Save</button></div>'; return; }
     var msg = (e && e.message) || String(e);
@@ -225,10 +227,17 @@ function denyPerson(uid) {
   if (!confirm('Turn down this request? They will not see anything. You can invite them again later.')) return;
   Sync.removeMember(uid).then(function () { toast('Turned down'); renderFamilyBox(); }).catch(function (e) { toast(e.message); });
 }
-function cacheMembers(people) {
+// Names for "who logged it": current members, plus people who left and agreed to keep their name.
+function loadMemberNames() {
+  return Promise.all([Sync.members(), Sync.formerMembers()]).then(function (r) { return cacheMembers(r[0], r[1]); }, function () {});
+}
+function cacheMembers(people, former) {
   var names = {};
+  if (former) State.formerMembers = former; else former = State.formerMembers;
+  (former || []).forEach(function (m) { names[m.user_id] = m.display_name + ' (left)'; });
   (people || []).forEach(function (m) { names[m.user_id] = memberLabel(m); });
   var approved = (people || []).filter(function (m) { return m.approved !== false; });
+  names['00000000-0000-0000-0000-000000000000'] = 'a former member';
   State.memberNames = names; State.memberCount = approved.length;
   State.pendingMembers = (people || []).filter(function (m) { return m.approved === false; }).map(function (m) { return memberLabel(m); });
   return Promise.all([DB.meta('family_members', names), DB.meta('pending_members', State.pendingMembers)]);
@@ -286,8 +295,9 @@ function resetInvites() {
 // Viewers get a read-only app on their device; the server enforces the same rule.
 function applyRole(role) {
   State.role = role || null;
-  DB.setReadOnly(role === 'viewer' || role === 'pending');
-  document.body.classList.toggle('role-viewer', role === 'viewer' || role === 'pending');
+  var locked = !!State.eraseAfter;
+  DB.setReadOnly(role === 'viewer' || role === 'pending' || locked, locked ? 'This family is set to be deleted, so nothing can be added or changed. An owner can cancel it in Settings.' : '');
+  document.body.classList.toggle('role-viewer', role === 'viewer' || role === 'pending' || locked);
 }
 function renderSettingsAgain() { showScreen('settings'); }
 // Background sync: once per page, whenever the cloud is (or becomes) configured.
@@ -309,7 +319,9 @@ function syncNow() {
     if (State.signedIn !== r.signedIn) { State.signedIn = r.signedIn; if (!State.profiles.length && currentScreen === 'home') refresh(); }
     if (!r.signedIn) return;
     var roleBefore = State.role;
-    return Promise.all([Sync.members().then(cacheMembers, function () {}), Sync.refreshDayStart()]).then(function () {
+    var lockedBefore = State.eraseAfter;
+    return Promise.all([loadMemberNames(), Sync.refreshDayStart(), Sync.eraseDate().then(function (d) { State.eraseAfter = d; return DB.meta('erase_after', d); })]).then(function () {
+      if (lockedBefore !== State.eraseAfter) { applyRole(State.role); bgRefresh(); }
       if (justJoined) askMyName();
       purgeOldTrashPhotos().catch(function () {});
       return DB.meta('my_role').then(function (role) {

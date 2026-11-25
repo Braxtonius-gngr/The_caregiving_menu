@@ -23,7 +23,7 @@ function renderHome(arg) {
   var entries = fluidEntriesFor(pid, day), plan = Logic.medPlan(medsOf(pid), dosesOf(pid), day, careHourNow());
   var flags = attentionItems(pid, day, entries, plan);
   html += '<div class="row between"><span class="muted">' + esc(prof.person_name) + ' · ' + esc(dayLabel(day)) + '</span><span><button class="btn sm writer-only" onclick="snapIt(' + pidArg(pid) + ')">&#128247; Snap it</button> <button class="btn sm writer-only" onclick="sayIt(' + pidArg(pid) + ')">&#127908; Say it</button> <button class="btn sm ghost writer-only" onclick="scribeIt(' + pidArg(pid) + ')">&#127897; Scribe</button></span></div>';
-  html += gettingStarted(pid);
+  html += eraseBanner() + gettingStarted(pid);
   html += catchUpRow(pid);
   if (flags.length) html += '<div class="card attention" role="alert"><h3>&#9888; Needs attention</h3>' + flags.map(function (f) { return '<div class="list-item"><div class="grow">' + f.text + '</div>' + (f.action || '') + '</div>'; }).join('') + '</div>';
   html += todayChecks(pid);

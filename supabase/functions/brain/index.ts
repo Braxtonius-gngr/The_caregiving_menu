@@ -762,9 +762,10 @@ Deno.serve(async (req) => {
     const db = admin();
     const since = new Date(); since.setUTCDate(1); since.setUTCHours(0, 0, 0, 0);
     const [{ data: hh }, { data: used }] = await Promise.all([
-      db.from("households").select("ai_allowance_cents").eq("id", hid).single(),
+      db.from("households").select("ai_allowance_cents, erase_after").eq("id", hid).single(),
       db.from("ai_usage").select("cost_cents").eq("household_id", hid).gte("created_at", since.toISOString()),
     ]);
+    if (hh && hh.erase_after) return json({ error: "This family is set to be deleted, so the AI is off. An owner can cancel the deletion in Settings." }, 423);
     const spent = (used ?? []).reduce((t: number, r: { cost_cents: number }) => t + Number(r.cost_cents), 0);
     if (hh && hh.ai_allowance_cents != null && spent >= hh.ai_allowance_cents) return json({ error: "Your family has used this month's AI allowance. Everything can still be typed in by hand; the allowance resets on the 1st.", limit: true }, 402);
     const uses: Use[] = [];

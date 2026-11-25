@@ -35,7 +35,7 @@ function describeChange(row) {
   });
   return parts.length ? parts.join('; ') : 'Photo or bookkeeping change';
 }
-function whoName(uid) { return uid ? ((State.memberNames || {})[uid] || 'someone who left') : 'the app'; }
+function whoName(uid) { return uid ? ((State.memberNames || {})[uid] || 'a former member') : 'the app'; }
 function showHistory(store, id) {
   if (!Sync.enabled()) return toast('History is kept in the cloud. Connect and sign in first.');
   openSheet('<h2 style="margin-top:0">History</h2><div id="histBody" class="muted">Loading...</div><div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
