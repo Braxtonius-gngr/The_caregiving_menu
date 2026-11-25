@@ -348,3 +348,25 @@ label.check input { width: auto; margin: 0; }
 .next .late { color: var(--status-bad-fg); display: inline-flex; align-items: center; gap: 6px; }
 .next .late .ico { width: 18px; height: 18px; vertical-align: 0; }
 .dose-overdue .check { border-color: var(--status-bad); }
+/* Missed doses: the panel edge beats like a heart (a double beat every 1.6s, well under 3 flashes a second),
+ * a red ripple pushing out from the edge; late circles beat in time. */
+.next.urgent { animation: drift var(--dur-drift) ease-in-out infinite alternate, heartbeat 1.6s var(--ease-settle) infinite; }
+@keyframes heartbeat {
+  0%   { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--status-bad) 45%, transparent), 0 0 0 0 color-mix(in srgb, var(--status-bad) 50%, transparent); }
+  10%  { box-shadow: inset 0 0 0 3px var(--status-bad), 0 0 0 0 color-mix(in srgb, var(--status-bad) 55%, transparent); }
+  28%  { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--status-bad) 45%, transparent), 0 0 0 9px color-mix(in srgb, var(--status-bad) 0%, transparent); }
+  36%  { box-shadow: inset 0 0 0 3px var(--status-bad), 0 0 0 0 color-mix(in srgb, var(--status-bad) 50%, transparent); }
+  60%, 100% { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--status-bad) 45%, transparent), 0 0 0 14px color-mix(in srgb, var(--status-bad) 0%, transparent); }
+}
+.next.urgent .dose-overdue:not(.done) .check { animation: beat 1.6s var(--ease-settle) infinite; border-width: 2.5px; }
+@keyframes beat { 0%, 60%, 100% { transform: scale(1); } 10% { transform: scale(1.12); } 22% { transform: scale(1); } 36% { transform: scale(1.08); } }
+/* Resolved: the beat stops, the red drains, a cool teal splash spreads from the ticked circle and a ring ripples out. */
+.next.urgent.resolving { animation: none; box-shadow: none; background: var(--surface-accent); transition: background-color var(--dur-enter) var(--ease-settle); }
+.next.resolving .late { color: var(--action-text); transition: color var(--dur-enter) var(--ease-settle); }
+.splash, .splash-ring { position: absolute; left: var(--sx, 32px); top: var(--sy, 32px); width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%; pointer-events: none; }
+.splash { background: radial-gradient(circle, var(--surface-accent-2) 0 45%, color-mix(in srgb, var(--action) 22%, transparent) 70%, transparent 72%); animation: splash 900ms var(--ease-settle) forwards; }
+.splash-ring { border: 2px solid color-mix(in srgb, var(--action) 55%, transparent); animation: splash-ring 900ms var(--ease-settle) 120ms both; }
+@keyframes splash { from { transform: scale(0); opacity: .95; } 70% { opacity: .6; } to { transform: scale(48); opacity: 0; } }
+@keyframes splash-ring { from { transform: scale(.6); opacity: 1; } to { transform: scale(14); opacity: 0; } }
+.dose.done .check { border-color: var(--action); }
+.next > :not(.splash):not(.splash-ring) { position: relative; z-index: 1; }

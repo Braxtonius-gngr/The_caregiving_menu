@@ -184,6 +184,17 @@ function tickDose(btn, medId, slot, pid) {
   if (btn.disabled) return; btn.disabled = true;
   var row = btn.closest('.dose'); if (row) row.classList.add('done');
   var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var panel = btn.closest('.next.urgent');
+  // The last late dose ticked: the heartbeat stops and a cool splash spreads from the circle before the list updates.
+  if (panel && !still && !panel.querySelector('.dose-overdue:not(.done)')) {
+    var b = btn.getBoundingClientRect(), p = panel.getBoundingClientRect();
+    panel.style.setProperty('--sx', (b.left + b.width / 2 - p.left) + 'px');
+    panel.style.setProperty('--sy', (b.top + b.height / 2 - p.top) + 'px');
+    panel.insertAdjacentHTML('beforeend', '<span class="splash" aria-hidden="true"></span><span class="splash-ring" aria-hidden="true"></span>');
+    panel.classList.add('resolving');
+    setTimeout(function () { giveDose(medId, slot, pid); }, 950);
+    return;
+  }
   setTimeout(function () { giveDose(medId, slot, pid); }, still ? 0 : 460);
 }
 // opts: { at: ISO time given (default now), amount: what was given (default the usual dose) }
