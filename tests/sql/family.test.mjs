@@ -253,4 +253,65 @@ await as(U.mom, `update records set fields = fields || '{"status": "approved", "
 assert.equal((await as(U.me, `select fields->>'status' s from records where id = $1`, [plan])).rows[0].s, 'approved');
 ok('medicine plans: caregivers draft and edit; only an owner approves');
 
+// ---------- Many families: nothing crosses between households ----------
+// Every table in public is checked, listed from the database itself, so a table added later
+// without the right policy fails here. Family A = hid (me, mom, aunt); family B = the stranger.
+const tables = (await db.query(`select c.relname t, c.relrowsecurity rls from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r' order by 1`)).rows;
+for (const t of tables) assert.ok(t.rls, `row-level security is off on ${t.t}`);
+ok(`row-level security is on for all ${tables.length} tables`);
+
+const hidB = (await as(U.stranger, 'select ensure_household() as h')).rows[0].h;
+assert.notEqual(hidB, hid);
+const withHid = [];
+for (const { t } of tables) {
+  const cols = (await db.query(`select column_name c, data_type d, is_nullable n, column_default def from information_schema.columns where table_schema = 'public' and table_name = $1`, [t])).rows;
+  if (!cols.some(c => c.c === 'household_id')) continue;
+  withHid.push(t);
+  // Make sure family A has at least one row here (inserted as the database owner, past the policies).
+  if ((await db.query(`select count(*)::int c from ${t} where household_id = $1`, [hid])).rows[0].c) continue;
+  const sample = { uuid: 'gen_random_uuid()', text: `'x'`, numeric: '1', integer: '1', bigint: '1', 'double precision': '1', real: '1', boolean: 'false', jsonb: `'{}'`, json: `'{}'`, date: 'current_date', 'timestamp with time zone': 'now()', ARRAY: `'{}'` };
+  const need = cols.filter(c => c.n === 'NO' && c.def == null && c.c !== 'household_id');
+  const names = ['household_id'].concat(need.map(c => c.c)), vals = [`'${hid}'`].concat(need.map(c => sample[c.d] || `'x'`));
+  try { await db.exec(`insert into ${t} (${names.join(',')}) values (${vals.join(',')})`); }
+  catch (e) { assert.fail(`could not seed ${t} for the sweep: ${e.message}`); }
+}
+for (const t of withHid) {
+  const aRows = (await db.query(`select count(*)::int c from ${t} where household_id = $1`, [hid])).rows[0].c;
+  assert.ok(aRows > 0, `family A has a row in ${t}`);
+  // Read: B sees none of A's rows, even asking for them by household.
+  assert.equal((await as(U.stranger, `select * from ${t} where household_id = $1`, [hid])).rows.length, 0, `B reads A's ${t}`);
+  // Change and delete: nothing of A's is touched.
+  const upd = await as(U.stranger, `update ${t} set household_id = household_id where household_id = $1`, [hid]).catch(() => ({ affectedRows: 0 }));
+  assert.equal(upd.affectedRows || 0, 0, `B updates A's ${t}`);
+  const del = await as(U.stranger, `delete from ${t} where household_id = $1`, [hid]).catch(() => ({ affectedRows: 0 }));
+  assert.equal(del.affectedRows || 0, 0, `B deletes A's ${t}`);
+  assert.equal((await db.query(`select count(*)::int c from ${t} where household_id = $1`, [hid])).rows[0].c, aRows, `A's ${t} unchanged`);
+  // Insert: a copy of one of A's rows, with a new id, refused for B.
+  const one = (await db.query(`select row_to_json(x) j from ${t} x where household_id = $1 limit 1`, [hid])).rows[0].j;
+  if ('id' in one) one.id = (await db.query('select gen_random_uuid() u')).rows[0].u;
+  await fails(U.stranger, `insert into ${t} select * from json_populate_record(null::${t}, $1)`, [JSON.stringify(one)], `B inserting into A's ${t}`);
+}
+ok(`family B cannot read, change, delete or add rows of family A in any of ${withHid.length} household tables (${withHid.join(', ')})`);
+
+// Photos and documents in storage: A's folder is closed to B.
+await db.exec(`insert into storage.objects (bucket_id, name) values ('photos', '${hid}/records/x.jpg')`);
+assert.equal((await as(U.stranger, `select name from storage.objects where bucket_id = 'photos' and name like $1`, [hid + '/%'])).rows.length, 0);
+await fails(U.stranger, `insert into storage.objects (bucket_id, name) values ('photos', $1)`, [hid + '/records/sneaky.jpg'], 'B uploading into A\'s photo folder');
+assert.ok((await as(U.mom, `select name from storage.objects where bucket_id = 'photos' and name like $1`, [hid + '/%'])).rows.some(r => r.name === hid + '/records/x.jpg'), 'a family member sees the family photo');
+ok('photo storage: a family sees its own folder; another family sees and writes nothing there');
+
+// Family-level functions refuse outsiders.
+await fails(U.stranger, 'select * from household_members($1)', [hid], 'B listing A\'s members');
+await fails(U.stranger, 'select * from invite_links($1)', [hid], 'B asking for A\'s invite links');
+await fails(U.stranger, 'select set_member_role($1, $2, $3)', [hid, U.stranger, 'owner'], 'B making themselves owner of A');
+assert.equal((await as(U.stranger, 'select my_role($1) r', [hid])).rows[0].r, null);
+ok('member lists, invite links and roles of a family are closed to other families');
+
+// Someone removed from a family loses everything at once.
+const ownerNow = (await db.query(`select user_id from members where household_id = $1 and role = 'owner' limit 1`, [hid])).rows[0].user_id;
+await as(ownerNow, 'select remove_member($1, $2)', [hid, U.aunt]);
+for (const t of withHid) assert.equal((await as(U.aunt, `select * from ${t} where household_id = $1`, [hid])).rows.length, 0, `removed member still reads ${t}`);
+assert.equal((await as(U.aunt, `select name from storage.objects where bucket_id = 'photos' and name like $1`, [hid + '/%'])).rows.length, 0);
+ok('a removed member sees nothing of the family any more');
+
 console.log(`\nAll ${n} family checks passed.`);
