@@ -342,3 +342,9 @@ label.check input { width: auto; margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Next up when a dose is late: the same panel, its light turns warm red. One place for overdue doses (no repeat in the red card). */
+.next.urgent { background: radial-gradient(130% 100% at 0% 0%, var(--status-bad-bg), transparent 65%), var(--surface-accent); background-size: 200% 200%; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--status-bad) 45%, transparent); }
+.next .late { color: var(--status-bad-fg); display: inline-flex; align-items: center; gap: 6px; }
+.next .late .ico { width: 18px; height: 18px; vertical-align: 0; }
+.dose-overdue .check { border-color: var(--status-bad); }
