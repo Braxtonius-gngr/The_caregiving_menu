@@ -126,17 +126,31 @@ function toggleShop(id) {
 }
 
 /* ---------- auth box in Settings ---------- */
-// Settings: this family's AI use this month against its allowance (photos, voice, questions).
+// Settings: the family's AI balance this month (a meter, no prices) and who used what.
+var AI_FEATURE = { read_photo: 'Snap it', fill_form: 'Fill from a photo', read_vitals: 'Snap it', quick_log: 'Say it', scribe: 'Scribe', ask_file: 'Ask her file', handoff: 'Catch me up',
+  estimate_plate: 'Meal estimates', parse_recipe: 'Kitchen', parse_receipt: 'Kitchen', pantry_photo: 'Kitchen', variations: 'Kitchen', diet_swaps: 'Kitchen', canonicalize: 'Kitchen', meal_ideas: 'Kitchen',
+  appointment_summary: 'Visit summary', schedule_draft: 'Medicine timing', guidance: 'Current guidance' };
 function renderAiUse() {
   var el = document.getElementById('aiUse'); if (!el || !Sync.enabled()) return;
   var c = Sync.getClient(); if (!c) return;
   Sync.householdId().then(function (hid) {
     if (!hid) return;
     var start = new Date(); start.setDate(1); start.setHours(0, 0, 0, 0);
-    return Promise.all([c.from('ai_usage').select('cost_cents, feature').gte('created_at', start.toISOString()), c.from('households').select('ai_allowance_cents').eq('id', hid).single()]).then(function (r) {
-      if (r[0].error || !document.getElementById('aiUse')) return;
-      var rows = r[0].data || [], cents = rows.reduce(function (t, x) { return t + Number(x.cost_cents); }, 0), allow = r[1].data ? r[1].data.ai_allowance_cents : null;
-      el.innerHTML = '<b>' + rows.length + '</b> AI request' + (rows.length === 1 ? '' : 's') + ' this month, about <b>$' + (cents / 100).toFixed(2) + '</b>' + (allow ? ' of the $' + (allow / 100).toFixed(0) + ' monthly allowance' : '') + '. Typing things in by hand never counts.';
+    return Promise.all([c.from('ai_usage').select('cost_cents, feature, user_id').eq('household_id', hid).gte('created_at', start.toISOString()),
+      c.from('households').select('ai_allowance_cents').eq('id', hid).single()]).then(function (r) {
+      el = document.getElementById('aiUse'); if (r[0].error || !el) return;
+      var rows = r[0].data || [], spent = rows.reduce(function (t, x) { return t + Number(x.cost_cents); }, 0), allow = r[1].data ? r[1].data.ai_allowance_cents : null;
+      // One request = one thing a person did (a Snap it can take two AI calls); count calls per feature.
+      var by = {};
+      rows.forEach(function (x) { var who = x.user_id || 'x', f = AI_FEATURE[x.feature] || 'Other'; by[who] = by[who] || { n: 0, f: {} }; by[who].n++; by[who].f[f] = (by[who].f[f] || 0) + 1; });
+      var meter = allow == null ? '<p><b>No monthly limit</b> for your family.</p>'
+        : (function () { var pct = Math.min(100, Math.round(100 * spent / allow)); return '<p><b>' + pct + '%</b> of this month&rsquo;s AI used' + (pct >= 100 ? ': AI features are paused until the 1st. Typing by hand still works.' : '') + '</p><div class="bar"><i class="' + (pct >= 90 ? 'over' : '') + '" style="width:' + pct + '%"></i></div>'; })();
+      var people = Object.keys(by).sort(function (a, b) { return by[b].n - by[a].n; }).map(function (u) {
+        var f = by[u].f;
+        return '<li><b>' + esc(u === 'x' ? 'Someone' : whoName(u)) + '</b>: ' + Object.keys(f).sort(function (a, b) { return f[b] - f[a]; }).map(function (k) { return esc(k) + ' ' + f[k]; }).join(', ') + '</li>';
+      });
+      el.innerHTML = meter + (people.length ? '<p class="muted">Used this month by:</p><ul class="ai-who">' + people.join('') + '</ul>' : '<p class="muted">No AI used yet this month.</p>') +
+        '<p class="muted">Snap it, Say it, Scribe and questions use AI. Typing things in by hand never counts.</p>';
     });
   }).catch(function () {});
 }

@@ -762,7 +762,7 @@ Deno.serve(async (req) => {
       db.from("ai_usage").select("cost_cents").eq("household_id", hid).gte("created_at", since.toISOString()),
     ]);
     const spent = (used ?? []).reduce((t: number, r: { cost_cents: number }) => t + Number(r.cost_cents), 0);
-    if (hh && spent >= hh.ai_allowance_cents) return json({ error: "Your family has used this month's AI allowance. Everything can still be typed in by hand; the allowance resets on the 1st.", limit: true }, 402);
+    if (hh && hh.ai_allowance_cents != null && spent >= hh.ai_allowance_cents) return json({ error: "Your family has used this month's AI allowance. Everything can still be typed in by hand; the allowance resets on the 1st.", limit: true }, 402);
     const uses: Use[] = [];
     try {
       return json(await meter.run(uses, () => handle(body.mode, body)));

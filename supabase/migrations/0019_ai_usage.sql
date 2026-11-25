@@ -19,7 +19,10 @@ alter table ai_usage enable row level security;
 create policy ai_usage_read on ai_usage for select using (household_id in (select my_household_ids()));
 -- No insert/update/delete policies: only the server (service role) writes.
 
-alter table households add column if not exists ai_allowance_cents int not null default 1500;
+-- Monthly AI allowance in cents; null = no limit. Families that exist when this runs (the
+-- founding family) get no limit; families created later start at $10.
+alter table households add column if not exists ai_allowance_cents int default 1000;
+update households set ai_allowance_cents = null;
 
 -- This month's AI cost for a family the caller belongs to (cents).
 create or replace function ai_cost_this_month(hid uuid) returns numeric
