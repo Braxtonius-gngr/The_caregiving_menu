@@ -145,7 +145,7 @@ function fileTherapy(pid) {
   var rs = recordsOf(pid, ['exercise']).sort(function (a, b) { return (a.title || '').localeCompare(b.title || ''); });
   var on = rs.filter(function (r) { return (r.fields || {}).active !== 'No'; }), off = rs.filter(function (r) { return (r.fields || {}).active === 'No'; });
   var card = function (r) { var fl = r.fields || {}; return recordCard(r, esc([fl.how, fl.how_often].filter(Boolean).join(' · ')), fl.notes ? esc(fl.notes.slice(0, 140)) : ''); };
-  return '<div class="row between"><h2>Therapy</h2><span>' + addBtn('exercise', pid) + ' <button class="btn sm ghost writer-only" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ',\'exercise\')">&#128247; Snap the sheet</button></span></div>' +
+  return '<div class="row between"><h2>Therapy</h2><span>' + addBtn('exercise', pid) + ' <button class="btn sm ghost writer-only" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ',\'exercise\')">&#128247; Snap the sheet</button> <button class="btn sm ghost writer-only" onclick="openWorkoutSchedule(' + (pid ? '\'' + pid + '\'' : 'null') + ')">Workout schedule</button></span></div>' +
     (on.length ? on.map(card).join('') : '<p class="muted">Physical, occupational or speech therapy home exercises. Snap the sheet the therapist gave you and the exercises are listed here, with the pages kept under Documents.</p>') +
     (off.length ? '<h3>No longer doing</h3>' + off.map(card).join('') : '');
 }
