@@ -196,6 +196,23 @@ function editRecord(id, kind, pid) {
     (r && Sync.enabled() ? extraPhotosSection(r.id, 'records') : (r ? '' : '<p class="muted">Save first, then attach photos or PDFs.</p>')) +
     '<div class="btn-row"><button class="btn writer-only" onclick="saveRecord(' + (r ? '\'' + r.id + '\'' : 'null') + ',\'' + kind + '\',' + (pid ? '\'' + pid + '\'' : 'null') + ')">Save</button><button class="btn ghost" onclick="closeSheet()">Close</button>' +
     (r ? '<button class="btn ghost" onclick="showHistory(\'records\',\'' + r.id + '\')">History</button><button class="btn danger writer-only" onclick="deleteRecord(\'' + r.id + '\')">Delete</button>' : '') + '</div>');
+  if (r) photoDiffNotes(fl);
+}
+// Where a saved value no longer matches what the photo said, show the photo's reading under
+// the box, so a change (fixing a misread, or a newer number) can be traced. History says who and when.
+function photoDiffNotes(fl) {
+  var fp = fl && fl.from_photo; if (!fp) return;
+  var norm = function (v) { return String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' '); };
+  var note = function (el, read) {
+    if (!el || norm(el.value) === norm(read)) return;
+    if (el.parentNode && el.parentNode.classList && el.parentNode.classList.contains('row')) el = el.parentNode; // e.g. phone + Check number
+    el.insertAdjacentHTML('afterend', '<div class="muted photo-diff">&#128247; Photo read: &ldquo;' + esc(read || '(blank)') + '&rdquo;. Changed since; History shows who and when.</div>');
+  };
+  Object.keys(fp).forEach(function (k) { if (k !== 'extra') note(document.getElementById(k === 'title' ? 'rTitle' : 'rf-' + k), fp[k]); });
+  (fp.extra || []).forEach(function (f) {
+    var lab = Array.prototype.find.call(document.querySelectorAll('#sheetBody label[data-extra-label]'), function (l) { return l.getAttribute('data-extra-label') === f.label; });
+    if (lab) note(document.getElementById(lab.getAttribute('for')), f.value);
+  });
 }
 // A document's own details (pulled from the page), as editable label/value boxes.
 function extraFieldsHtml(extra) {

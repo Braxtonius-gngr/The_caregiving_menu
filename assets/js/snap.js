@@ -100,11 +100,12 @@ function snapNote(d) {
   var body = document.getElementById('sheetBody'), h2 = body && body.querySelector('h2');
   if (h2) h2.insertAdjacentHTML('afterend', h);
   // If this fills a record form, its Save attaches the photo and keeps any doubt as a flag.
-  S.snapPending = { check: d.uncertain && d.uncertain.length ? 'Not clear in the photo: ' + d.uncertain.join(', ') : null, photos: true };
+  S.snapPending = { check: d.uncertain && d.uncertain.length ? 'Not clear in the photo: ' + d.uncertain.join(', ') : null, photos: true, read: S.snapRead || {} };
 }
-function snapSet(id, v) { var el = document.getElementById(id); if (el && v != null && v !== '') el.value = v; }
+function snapSet(id, v) { var el = document.getElementById(id); if (el && v != null && v !== '') { el.value = v; S.snapRead = S.snapRead || {}; S.snapRead[id] = String(v); } }
 function snapFill(d) {
   var sn = S.snap, pid = sn.pid, v = d.vitals || {};
+  S.snapRead = {};
   if (SNAP_VITAL[d.kind]) {
     var kind = SNAP_VITAL[d.kind];
     logVital(pid, kind);
@@ -183,36 +184,59 @@ function snapTeam(d) {
   var sn = S.snap, pid = sn.pid, doc = d.document || {}, facts = (doc.fields || []).filter(function (f) { return f && f.label && f.value; });
   var have = {}; recordsOf(pid, ['contact']).forEach(function (r) { have[snapNameKey(r.title)] = true; });
   var rows = (d.contacts || []).filter(function (c) { return c && c.name; });
-  S.snapTeam = { rows: rows, doc: doc, summary: d.summary || '', uncertain: d.uncertain || [] };
+  S.snapTeam = { rows: rows, facts: facts, doc: doc, summary: d.summary || '', uncertain: d.uncertain || [] };
+  // Each box remembers what the photo said; editing one shows "Photo read: ..." right away.
+  var box = function (id, label, val, cls) { return '<input id="' + id + '" class="' + (cls || '') + '" aria-label="' + label + '" placeholder="' + label + '" value="' + esc(val || '') + '" data-read="' + esc(val || '') + '" oninput="snapDiffHint(this)"><div class="muted photo-diff hidden" id="' + id + 'Diff"></div>'; };
   openSheet('<h2 style="margin-top:0">&#128247; From the photo</h2>' +
     '<p class="muted">' + esc(d.summary || '') + '</p>' +
-    (rows.length ? '<h3>Add to the Care team</h3><p class="muted">Untick anything that looks wrong; you can edit each one later.' + (d.uncertain && d.uncertain.length ? ' Not clear: ' + esc(d.uncertain.join(', ')) + '.' : '') + '</p>' +
+    (rows.length ? '<h3>Add to the Care team</h3><p class="muted">Fix anything it misread right here, and untick old or wrong entries. What the photo said is kept with each one, so a change can be traced later.</p>' +
+      (d.uncertain && d.uncertain.length ? '<div class="card attention"><p><b>Not clear in the photo</b></p><ul>' + d.uncertain.map(function (u) { return '<li>' + esc(u) + '</li>'; }).join('') + '</ul></div>' : '') +
       rows.map(function (c, i) {
         var dup = have[snapNameKey(c.name)];
-        return '<label class="check"><input type="checkbox" id="st' + i + '"' + (dup ? '' : ' checked') + '> <b>' + esc(c.name) + '</b> <span class="muted">' + esc(c.role || '') + '</span>' +
-          (c.phone ? ' · ' + esc(c.phone) : '') + (c.fax ? ' · fax ' + esc(c.fax) : '') + (dup ? ' <span class="muted">(already in the Care team)</span>' : '') + '</label>';
+        return '<div class="card snap-row"><label class="check"><input type="checkbox" id="st' + i + '"' + (dup ? '' : ' checked') + '> <b>Add</b>' + (dup ? ' <span class="muted">(already in the Care team)</span>' : '') + '</label>' +
+          box('stN' + i, 'Name', c.name) + box('stR' + i, 'Role', c.role) + box('stP' + i, 'Phone', c.phone) +
+          (c.fax ? box('stF' + i, 'Fax', c.fax) : '') + '</div>';
       }).join('') : '') +
     '<h3>Keep the page</h3><label class="check"><input type="checkbox" id="stDoc" checked> Save it as a Document with the photo</label>' +
     '<label for="stTitle">Title</label><input id="stTitle" value="' + esc(doc.title || (d.kind === 'care_team' ? 'Care team sheet' : 'Document')) + '">' +
-    (facts.length ? '<p class="muted">Details it found (you can edit them after saving):</p><ul>' + facts.map(function (f) { return '<li><b>' + esc(f.label) + ':</b> ' + esc(f.value) + '</li>'; }).join('') + '</ul>' : '') +
+    (facts.length ? '<h3>Details it found</h3>' + facts.map(function (f, i) { return '<label for="sfV' + i + '">' + esc(f.label) + '</label>' + box('sfV' + i, f.label, f.value); }).join('') : '') +
     '<label for="stDetails">What it says</label><textarea id="stDetails" rows="5">' + esc(doc.details || '') + '</textarea>' +
     snapMorePagesRow() +
     '<div class="btn-row"><button class="btn" onclick="saveSnapTeam()">Save</button><button class="btn ghost" onclick="snapIt(S.snap && S.snap.pid)">Retake</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
 }
+function snapNorm(v) { return String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' '); }
+function snapDiffHint(el) {
+  var hint = document.getElementById(el.id + 'Diff'), read = el.getAttribute('data-read') || '';
+  if (!hint) return;
+  var changed = snapNorm(el.value) !== snapNorm(read);
+  hint.classList.toggle('hidden', !changed);
+  hint.textContent = changed ? 'Photo read: “' + (read || '(blank)') + '”. Your change is saved with a note.' : '';
+}
+function snapVal(id, fallback) { var el = document.getElementById(id); return el ? el.value.trim() : (fallback || ''); }
 function saveSnapTeam() {
-  var st = S.snapTeam || { rows: [], doc: {} }, sn = S.snap || {}, pid = sn.pid || null;
-  var picks = st.rows.filter(function (c, i) { var el = document.getElementById('st' + i); return el && el.checked; });
+  var st = S.snapTeam || { rows: [], doc: {}, facts: [] }, sn = S.snap || {}, pid = sn.pid || null;
+  var picks = [];
+  st.rows.forEach(function (c, i) { var el = document.getElementById('st' + i); if (el && el.checked) picks.push({ c: c, name: snapVal('stN' + i, c.name), role: snapVal('stR' + i, c.role), phone: snapVal('stP' + i, c.phone), fax: snapVal('stF' + i, c.fax) }); });
   var keepDoc = document.getElementById('stDoc').checked, title = document.getElementById('stTitle').value.trim() || 'Document', details = document.getElementById('stDetails').value.trim();
   if (!picks.length && !keepDoc) return toast('Nothing checked');
-  var chain = picks.reduce(function (p, c) {
-    // Flag a contact the AI was unsure about (its name appears in the "not clear" list).
+  if (picks.some(function (x) { return !x.name; })) return toast('Every ticked row needs a name');
+  var chain = picks.reduce(function (p, x) {
+    var c = x.c;
+    // Flag a contact the AI was unsure about (its name appears in the "not clear" list), unless the person already fixed it.
     var key = snapNameKey(c.name), doubt = (st.uncertain || []).filter(function (u) { var k = snapNameKey(u); return key && k && (k.indexOf(key) >= 0 || key.indexOf(k) >= 0); });
-    return p.then(function () { return DB.put('records', { kind: 'contact', for_profile_id: pid, title: c.name, occurred_at: null, fields: { role: c.role || null, phone: c.phone || null, fax: c.fax || null, address: c.address || null, notes: [c.notes, 'From a photo'].filter(Boolean).join('; '), check: doubt.length ? 'Not clear in the photo: ' + doubt.join(', ') + '. Check the name and number.' : (c.phone ? null : 'No phone number could be read.') } }); });
+    var edited = snapNorm(x.name) !== snapNorm(c.name) || snapNorm(x.phone) !== snapNorm(c.phone);
+    var check = doubt.length && !edited ? 'Not clear in the photo: ' + doubt.join(', ') + '. Check the name and number.' : (x.phone ? null : 'No phone number yet.');
+    return p.then(function () {
+      return DB.put('records', { kind: 'contact', for_profile_id: pid, title: x.name, occurred_at: null, fields: { role: x.role || null, phone: x.phone || null, fax: x.fax || null, address: c.address || null,
+        notes: [c.notes, 'From a photo'].filter(Boolean).join('; '), check: check, from_photo: { title: c.name || '', role: c.role || '', phone: c.phone || '', fax: c.fax || '' } } });
+    });
   }, Promise.resolve());
   if (keepDoc) chain = chain.then(function () {
     var dt = st.doc.date ? new Date(st.doc.date + 'T12:00:00').toISOString() : new Date().toISOString();
-    var extra = (st.doc.fields || []).filter(function (f) { return f && f.label && f.value; }).map(function (f) { return { label: f.label, value: f.value }; });
-    return DB.put('records', { kind: 'document', for_profile_id: pid, title: title, occurred_at: dt, fields: { doc_type: st.doc.doc_type || 'Other', notes: details || null, extra: extra.length ? extra : null, check: st.uncertain && st.uncertain.length ? 'Not clear in the photo: ' + st.uncertain.join(', ') : null } }).then(function (rec) { return snapKeepPhotos(rec); });
+    var read = (st.facts || []).map(function (f) { return { label: f.label, value: f.value }; });
+    var extra = read.map(function (f, i) { return { label: f.label, value: snapVal('sfV' + i, f.value) }; }).filter(function (f) { return f.value; });
+    return DB.put('records', { kind: 'document', for_profile_id: pid, title: title, occurred_at: dt, fields: { doc_type: st.doc.doc_type || 'Other', notes: details || null, extra: extra.length ? extra : null,
+      check: st.uncertain && st.uncertain.length ? 'Not clear in the photo: ' + st.uncertain.join(', ') : null, from_photo: { title: st.doc.title || '', extra: read } } }).then(function (rec) { return snapKeepPhotos(rec); });
   });
   chain.then(function () { closeSheet(); return loadAll(); })
     .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast((picks.length ? picks.length + ' contact(s) added' : '') + (picks.length && keepDoc ? ', ' : '') + (keepDoc ? 'page saved to Documents' : '')); })
@@ -372,7 +396,7 @@ function saveSnapMeds() {
       }
       var check = snapAddCheck(null, doubts); if (check) flagged++;
       return DB.put('records', { kind: 'medication', for_profile_id: pid, title: x.name + (m.strength ? ' ' + m.strength : ''), occurred_at: null,
-        fields: { dose: m.dose || null, when: m.when || null, generic: info.g && info.g.generic || null, instructions: [line, m.notes].filter(Boolean).join('\n'), check: check } })
+        fields: { dose: m.dose || null, when: m.when || null, generic: info.g && info.g.generic || null, instructions: [line, m.notes].filter(Boolean).join('\n'), check: check, from_photo: { title: (m.name || '') + (m.strength ? ' ' + m.strength : ''), dose: m.dose || '', when: m.when || '' } } })
         .then(function (rec) { added++; return snapKeepPhotos(rec); });
     });
   }, Promise.resolve());
@@ -390,7 +414,9 @@ function snapAfterSave(rec) {
   var p = S.snapPending; S.snapPending = null;
   if (!p || !rec) return Promise.resolve();
   var chain = p.photos ? snapKeepPhotos(rec) : Promise.resolve();
-  if (p.check) chain = chain.then(function () { return DB.update('records', rec.id, function (cur) { if (!cur) return null; cur.fields = cur.fields || {}; cur.fields.check = snapAddCheck(cur.fields.check, [p.check]); return cur; }); });
+  // Keep what the photo said next to what was saved, so later changes can be traced.
+  var fp = {}; Object.keys(p.read || {}).forEach(function (id) { fp[id === 'rTitle' ? 'title' : id.replace(/^rf-/, '')] = p.read[id]; });
+  if (p.check || Object.keys(fp).length) chain = chain.then(function () { return DB.update('records', rec.id, function (cur) { if (!cur) return null; cur.fields = cur.fields || {}; if (p.check) cur.fields.check = snapAddCheck(cur.fields.check, [p.check]); if (Object.keys(fp).length) cur.fields.from_photo = fp; return cur; }); });
   return chain;
 }
 var _snapCloseSheet = closeSheet;

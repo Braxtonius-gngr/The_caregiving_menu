@@ -230,3 +230,6 @@ label.check input { width: auto; margin: 0; }
 .cmp { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: .95em; }
 .cmp th, .cmp td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .cmp tr.flag-text td, .cmp tr.flag-text th { color: var(--bad); }
+.photo-diff { font-size: .88em; margin: 2px 0 6px; color: var(--warn, #b7791f); }
+.snap-row input:not([type=checkbox]) { margin: 4px 0 0; }
+.snap-row { padding: 10px 12px; }
