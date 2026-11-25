@@ -126,6 +126,20 @@ function toggleShop(id) {
 }
 
 /* ---------- auth box in Settings ---------- */
+// Settings: this family's AI use this month against its allowance (photos, voice, questions).
+function renderAiUse() {
+  var el = document.getElementById('aiUse'); if (!el || !Sync.enabled()) return;
+  var c = Sync.getClient(); if (!c) return;
+  Sync.householdId().then(function (hid) {
+    if (!hid) return;
+    var start = new Date(); start.setDate(1); start.setHours(0, 0, 0, 0);
+    return Promise.all([c.from('ai_usage').select('cost_cents, feature').gte('created_at', start.toISOString()), c.from('households').select('ai_allowance_cents').eq('id', hid).single()]).then(function (r) {
+      if (r[0].error || !document.getElementById('aiUse')) return;
+      var rows = r[0].data || [], cents = rows.reduce(function (t, x) { return t + Number(x.cost_cents); }, 0), allow = r[1].data ? r[1].data.ai_allowance_cents : null;
+      el.innerHTML = '<b>' + rows.length + '</b> AI request' + (rows.length === 1 ? '' : 's') + ' this month, about <b>$' + (cents / 100).toFixed(2) + '</b>' + (allow ? ' of the $' + (allow / 100).toFixed(0) + ' monthly allowance' : '') + '. Typing things in by hand never counts.';
+    });
+  }).catch(function () {});
+}
 function renderAuthBox() {
   var box = document.getElementById('authBox'); if (!box) return;
   Sync.session().then(function (s) {
@@ -411,7 +425,7 @@ function askSharedPhoto(blob) {
 function logFoodWithSharedPhoto() { logFood(); } // logFood shows S.sharedPhoto as the preview
 
 var _origShowScreen = showScreen;
-showScreen = function (name, arg) { if (State.simple && simpleProfile()) name = 'simple'; S.lastArg = arg; _origShowScreen(name, arg); if (name === 'settings') renderAuthBox(); hydratePhotos(); };
+showScreen = function (name, arg) { if (State.simple && simpleProfile()) name = 'simple'; S.lastArg = arg; _origShowScreen(name, arg); if (name === 'settings') { renderAuthBox(); renderAiUse(); } hydratePhotos(); };
 
 document.addEventListener('DOMContentLoaded', function () {
   try { if (Sync.applySetupLink()) setTimeout(function () { toast(Sync.pendingInvite() ? 'Cloud connected. Sign in (Settings) to join your household.' : 'Cloud connected. Sign in in Settings.'); }, 400); }

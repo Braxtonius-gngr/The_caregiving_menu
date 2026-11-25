@@ -8,6 +8,32 @@
 import Anthropic from "npm:@anthropic-ai/sdk@1.3.0";
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
 import { corsHeaders, json } from "../_shared/cors.ts";
+import { AsyncLocalStorage } from "node:async_hooks";
+
+/* ---------- AI cost per family ----------
+ * Every Claude call adds its token usage to the current request's meter; the request handler
+ * writes one ai_usage row per call (server key) and refuses new calls once a family has used its
+ * monthly allowance. Prices are US dollars per million tokens (Anthropic pricing, 2026-11-24). */
+const PRICES: Record<string, { in: number; out: number; cacheRead: number; cacheWrite: number }> = {
+  "claude-opus-5-5": { in: 4, out: 20, cacheRead: 0.2, cacheWrite: 5 },
+  "claude-sonnet-5-5": { in: 2, out: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+  "claude-haiku-5-5": { in: 0.1, out: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+};
+const WEB_SEARCH_CENTS = 1; // $10 per 1,000 searches
+type Use = { model: string; input: number; cacheRead: number; cacheWrite: number; output: number; searches: number };
+const meter = new AsyncLocalStorage<Use[]>();
+// deno-lint-ignore no-explicit-any
+function meterAdd(res: any) {
+  const u = res?.usage ?? {}, list = meter.getStore();
+  if (!list) return;
+  list.push({ model: String(res?.model ?? MODEL), input: u.input_tokens ?? 0, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0,
+    output: u.output_tokens ?? 0, searches: u.server_tool_use?.web_search_requests ?? 0 });
+}
+function costCents(x: Use) {
+  const p = PRICES[Object.keys(PRICES).find((k) => x.model.startsWith(k)) ?? "claude-opus-5-5"];
+  return ((x.input * p.in + x.output * p.out + x.cacheRead * p.cacheRead + x.cacheWrite * p.cacheWrite) / 1e6) * 100 + x.searches * WEB_SEARCH_CENTS;
+}
+const admin = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 
 const MODEL = Deno.env.get("CLAUDE_MODEL") ?? "claude-opus-5-5";
 const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
@@ -216,6 +242,7 @@ async function research(question: string): Promise<{ notes: string; sources: Sou
     };
     // deno-lint-ignore no-explicit-any
     const res: any = await anthropic.beta.messages.create(params as any);
+    meterAdd(res);
     if (res.stop_reason === "refusal") throw new Error("The model declined this request.");
     for (const b of res.content) {
       if (b.type === "web_search_tool_result" && Array.isArray(b.content)) {
@@ -505,6 +532,7 @@ async function ask(schema: object, content: Anthropic.ContentBlockParam[], effor
   };
   // deno-lint-ignore no-explicit-any
   const res = await anthropic.beta.messages.create(params as any);
+  meterAdd(res);
   if (res.stop_reason === "refusal") throw new Error("The model declined this request.");
   if (res.stop_reason === "max_tokens") throw new Error("Response was cut off; try a smaller input.");
   const text = res.content.find((b) => b.type === "text");
@@ -723,7 +751,30 @@ Deno.serve(async (req) => {
     const { data: { user } } = await sb.auth.getUser();
     if (!user) return json({ error: "sign in first" }, 401);
     const body = await req.json();
-    return json(await handle(body.mode, body));
+    // Which family is asking, and has it used this month's AI allowance?
+    const { data: mem } = await sb.from("members").select("household_id").eq("user_id", user.id).limit(1);
+    const hid = mem && mem[0] ? mem[0].household_id : null;
+    if (!hid) return json({ error: "Join or create a family first." }, 403);
+    const db = admin();
+    const since = new Date(); since.setUTCDate(1); since.setUTCHours(0, 0, 0, 0);
+    const [{ data: hh }, { data: used }] = await Promise.all([
+      db.from("households").select("ai_allowance_cents").eq("id", hid).single(),
+      db.from("ai_usage").select("cost_cents").eq("household_id", hid).gte("created_at", since.toISOString()),
+    ]);
+    const spent = (used ?? []).reduce((t: number, r: { cost_cents: number }) => t + Number(r.cost_cents), 0);
+    if (hh && spent >= hh.ai_allowance_cents) return json({ error: "Your family has used this month's AI allowance. Everything can still be typed in by hand; the allowance resets on the 1st.", limit: true }, 402);
+    const uses: Use[] = [];
+    try {
+      return json(await meter.run(uses, () => handle(body.mode, body)));
+    } finally {
+      // Record what was spent, even when the request failed part-way.
+      if (uses.length) {
+        const rows = uses.map((x) => ({ household_id: hid, user_id: user.id, feature: String(body.mode ?? "").slice(0, 40), model: x.model,
+          input_tokens: x.input, cache_read_tokens: x.cacheRead, cache_write_tokens: x.cacheWrite, output_tokens: x.output, web_searches: x.searches, cost_cents: +costCents(x).toFixed(3) }));
+        const { error } = await db.from("ai_usage").insert(rows);
+        if (error) console.error("ai_usage", error.message);
+      }
+    }
   } catch (e) {
     if (e instanceof Anthropic.RateLimitError) return json({ error: "Busy, try again in a minute." }, 429);
     if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) return json({ error: "The AI key was rejected (" + e.status + "). The app owner needs to put a new Anthropic API key in Supabase (ANTHROPIC_API_KEY)." }, 502);
