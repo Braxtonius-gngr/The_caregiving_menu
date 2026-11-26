@@ -20,7 +20,7 @@ function renderHome(arg) {
   var pid = todayPid(arg), day = careToday(), prof = State.profiles.find(function (p) { return p.id === pid; });
   var html = profileSwitcher();
   if (!prof) return html + welcomeCard() + legalFooter();
-  var entries = fluidEntriesFor(pid, day), plan = Logic.medPlan(medsOf(pid), dosesOf(pid), day, careHourNow());
+  var entries = fluidEntriesFor(pid, day), plan = planFor(pid, day);
   var flags = attentionItems(pid, day, entries, plan);
   html += '<p class="today-sub">' + esc(dayLabel(day)) + ' · Caring for ' + esc(prof.person_name) + '</p>';
   html += eraseBanner() + gettingStarted(pid);
@@ -51,7 +51,7 @@ function catchUpRow(pid) {
   return '<div class="quiet-row"><button class="btn sm ghost" onclick="showScreen(\'handoff\',{pid:' + pidArg(pid) + '})">' + icon('wave') + ' Catch me up</button><button class="btn sm ghost" onclick="showScreen(\'ask\',{pid:' + pidArg(pid) + '})">' + icon('chat') + ' Ask her file</button><span class="muted">' + (seen ? (since < 1 ? 'caught up just now' : 'last caught up ' + (since < 48 ? since + ' h' : Math.round(since / 24) + ' days') + ' ago') : 'what happened while you were away') + '</span></div>';
 }
 function attentionItems(pid, day, entries, plan) {
-  var cs = careSettingsOf(pid), out = [], b = Logic.fluidBalance(entries), limit = +cs.fluid_limit_ml || 0;
+  var cs = careSettingsOf(pid), out = [], b = Logic.fluidBalance(entries), limit = +cs.fluid_limit_ml || 0, away = careStay(pid);
   var call = cs.care_phone ? ' <a class="btn sm" href="tel:' + esc(cs.care_phone_e164 || cs.care_phone.replace(/[^\d+]/g, '')) + '">Call</a>' : '';
   if (limit && b.inMl > limit) out.push({ text: 'Fluid in is <b>' + shortOz(b.inMl) + '</b>, over her ' + shortOz(limit) + ' limit' + (cs.fluid_limit_source ? ' (' + esc(cs.fluid_limit_source) + ')' : '') + '.' });
   b.flags.forEach(function (f) { out.push({ text: esc(localTime(f.entry.eaten_at) + ' ' + (OUTPUT_TYPES[f.entry.output_type] || 'output').toLowerCase() + ': ' + f.reasons.join(', ')) + '. Worth a call to the care team if this is new or getting worse.', action: call }); });
@@ -59,25 +59,99 @@ function attentionItems(pid, day, entries, plan) {
   var w = Logic.weightChange(State.measurements || [], pid, day, dayStart());
   Logic.weightFlags(w, cs).forEach(function (t) { out.push({ text: 'Weight ' + esc(t) + (cs.alert_source ? ' (alert level: ' + esc(cs.alert_source) + ')' : '') + '.', action: call }); });
   var weighsDaily = Logic.standardWeights(State.measurements || [], pid, dayStart()).some(function (x) { return x.day >= shiftDay(day, -7); });
-  if (!w && weighsDaily && careHourNow() >= 10) out.push({ text: 'No morning weight yet today.', action: '<button class="btn sm writer-only" onclick="logWeight()">Log weight</button>' });
-  plan.filter(function (p) { return p.state === 'overdue'; }).forEach(function (p) { out.push({ text: '<b>' + esc(p.med.title) + '</b> ' + esc(slotName(p.slot).toLowerCase()) + ' dose not marked yet.', action: '<button class="btn sm writer-only" onclick="giveDose(\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')">Given</button>' }); });
+  // While she is in care elsewhere, the things only home would do are not missing.
+  if (!away && !w && weighsDaily && careHourNow() >= 10) out.push({ text: 'No morning weight yet today.', action: '<button class="btn sm writer-only" onclick="logWeight()">Log weight</button>' });
+  if (!away) plan.filter(function (p) { return p.state === 'overdue'; }).forEach(function (p) { out.push({ text: '<b>' + esc(p.med.title) + '</b> ' + esc(slotName(p.slot).toLowerCase()) + ' dose not marked yet.', action: '<button class="btn sm writer-only" onclick="giveDose(\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')">Given</button>' }); });
   Logic.upcoming(medsOf(pid), day, 3, localDay).forEach(function (u) { out.push({ text: esc(u.title) + ' ' + (u.inDays === 0 ? 'today' : u.inDays === 1 ? 'tomorrow' : 'in ' + u.inDays + ' days') + '.' }); });
   return out;
 }
 
+/* ---------- under care elsewhere ---------- */
+// A hospital, rehab or respite stay. While one is open the medicine lists are replaced by a calm
+// card, and scheduled doses inside it count as covered by that place (see Logic.stayAt).
+function careStays(pid) { return careSettingsOf(pid).care_stays || []; }
+function careStay(pid) { return Logic.stayOpen(careStays(pid)); }
+function planFor(pid, day) { return Logic.medPlan(medsOf(pid), dosesOf(pid), day, careHourNow(), careStays(pid), dayStart()); }
+function localStamp(iso) { return localDay(iso) + 'T' + localTime(iso); }
+function plainDay(day) { return new Date(day + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); }
+function careStartBtn(pid) { return '<button class="btn sm ghost writer-only" onclick="careSheet(' + pidArg(pid) + ')">' + icon('heart') + ' In care elsewhere?</button>'; }
+function underCareCard(pid, stay) {
+  var prof = State.profiles.find(function (p) { return p.id === pid; }) || {}, name = esc(prof.person_name || 'your person');
+  var day = careToday(), dueHome = stay.until && stay.until <= day, a = pidArg(pid);
+  return '<div class="next under-care"><div class="when"><span>' + icon('heart') + ' Under care</span><span>since ' + esc(dayLabel(careDayOf(stay.from_at)).replace(/^(Today|Yesterday)$/, function (w) { return w.toLowerCase(); })) + '</span></div>' +
+    '<div class="what">' + name + ' is being looked after at ' + esc(stay.org) + '</div>' +
+    '<p class="quiet">Their team is giving the medicines, so there is nothing to give or mark here. These days are saved as covered, never as missed.</p>' +
+    (dueHome ? '<p class="care-ask"><b>Is ' + name + ' home?</b> ' + (stay.until === day ? 'Today was' : esc(plainDay(stay.until)) + ' was') + ' the day you expected.</p>' +
+        '<div class="btn-row writer-only"><button class="btn sm" onclick="endCareSheet(' + a + ')">Yes, back home</button><button class="btn sm ghost" onclick="careSheet(' + a + ')">Not yet</button></div>'
+      : '<p class="quiet">' + (stay.until ? 'Expected home ' + esc(plainDay(stay.until)) + '. The app will ask that day; nothing switches back on by itself.' : 'No date set for coming home.') + '</p>' +
+        '<div class="btn-row writer-only"><button class="btn sm ghost" onclick="endCareSheet(' + a + ')">Back home</button><button class="btn sm ghost" onclick="careSheet(' + a + ')">Change</button></div>') +
+    '</div>';
+}
+// Start a stay, or change the open one (place, when it began, expected day home).
+function careSheet(pid) {
+  var stay = careStay(pid) || {}, prof = State.profiles.find(function (p) { return p.id === pid; }) || {}, name = esc(prof.person_name || 'your person');
+  var past = careStays(pid).map(function (s) { return s.org; }).filter(function (o, i, all) { return o && all.indexOf(o) === i; });
+  openSheet('<h2 style="margin-top:0">' + icon('heart') + ' In care elsewhere</h2>' +
+    '<p class="muted">For a hospital, rehab or respite stay. While this is on, ' + name + '&rsquo;s medicine reminders rest and nothing is counted as missed. Everything else keeps working.</p>' +
+    '<label for="careOrg">Where</label><input id="careOrg" list="careOrgs" placeholder="St. Mary&rsquo;s Hospital" value="' + esc(stay.org || '') + '"><datalist id="careOrgs">' + past.map(function (o) { return '<option value="' + esc(o) + '">'; }).join('') + '</datalist>' +
+    '<label for="careFrom">Since</label><input id="careFrom" type="datetime-local" value="' + localStamp(stay.from_at || new Date().toISOString()) + '">' +
+    '<label for="careUntil">Expected home <span class="muted">(optional)</span></label><input id="careUntil" type="date" min="' + careToday() + '" value="' + esc(stay.until && stay.until > careToday() ? stay.until : '') + '">' +
+    '<p class="muted">On that day the app asks if ' + name + ' is home. Leave it blank if you do not know yet.</p>' +
+    '<div class="btn-row"><button class="btn" onclick="saveCare(' + pidArg(pid) + ')">' + (stay.from_at ? 'Save' : 'Start') + '</button><button class="btn ghost" onclick="closeSheet()">Cancel</button>' +
+    (stay.from_at ? '<button class="linkish" onclick="dropCare(' + pidArg(pid) + ')">Started by mistake</button>' : '') + '</div>');
+}
+function writeStays(pid, fn, msg) {
+  return DB.update('diet_profiles', pid, function (p) { var cs = Object.assign({}, p.care_settings || {}); cs.care_stays = fn((cs.care_stays || []).slice()); p.care_settings = cs; return p; })
+    .then(function () { closeSheet(); return loadAll(); }).then(function () { refresh(); if (msg) toast(msg); });
+}
+function saveCare(pid) {
+  var org = document.getElementById('careOrg').value.trim(), from = document.getElementById('careFrom').value, until = document.getElementById('careUntil').value || null;
+  if (!org) return toast('Type where the care is');
+  if (!from || isNaN(new Date(from))) return toast('Pick when it started');
+  if (new Date(from) > new Date()) return toast('The start cannot be in the future');
+  var fromAt = new Date(from).toISOString();
+  writeStays(pid, function (stays) {
+    var open = Logic.stayOpen(stays), next = { org: org, from_at: fromAt, to_at: null, until: until };
+    if (open) stays[stays.indexOf(open)] = next; else stays.push(next);
+    return stays;
+  }, 'Under care at ' + org + '. Medicine reminders are resting.');
+}
+function endCareSheet(pid) {
+  var stay = careStay(pid); if (!stay) return;
+  openSheet('<h2 style="margin-top:0">Welcome home</h2><p class="muted">Medicine reminders start again from this time. Doses before it stay recorded as covered by ' + esc(stay.org) + '.</p>' +
+    '<label for="careTo">Back home at</label><input id="careTo" type="datetime-local" value="' + localStamp(new Date().toISOString()) + '">' +
+    '<p class="note">Bring the discharge papers to the next visit, and check the medicine list against them: doses and medicines often change during a stay.</p>' +
+    '<div class="btn-row"><button class="btn" onclick="endCare(' + pidArg(pid) + ')">Back home</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
+}
+function endCare(pid) {
+  var stay = careStay(pid), to = document.getElementById('careTo').value; if (!stay) return closeSheet();
+  if (!to || isNaN(new Date(to))) return toast('Pick when the stay ended');
+  if (new Date(to) <= new Date(stay.from_at)) return toast('That is before the stay started');
+  if (new Date(to) > new Date()) return toast('That time has not come yet');
+  var toAt = new Date(to).toISOString();
+  writeStays(pid, function (stays) { var open = Logic.stayOpen(stays); if (open) stays[stays.indexOf(open)] = Object.assign({}, open, { to_at: toAt }); return stays; }, 'Welcome home. Medicine reminders are back on.');
+}
+function dropCare(pid) {
+  if (!confirm('Remove this stay? Medicine reminders come back as if it never started.')) return;
+  writeStays(pid, function (stays) { var open = Logic.stayOpen(stays); return stays.filter(function (s) { return s !== open; }); }, 'Stay removed');
+}
+
 /* ---------- meds now ---------- */
-var DOSE_TEXT = { given: '&#10003; given', skipped: 'skipped', refused: 'refused', due: 'due now', overdue: 'overdue', later: 'later' };
+var DOSE_TEXT = { given: '&#10003; given', skipped: 'skipped', refused: 'refused', due: 'due now', overdue: 'overdue', later: 'later', covered: '&hearts; covered' };
 function doseRow(p, pid) {
   var f = p.med.fields || {}, d = p.dose;
   var amt = d && d.fields.amount && d.fields.amount !== f.dose ? ' · <b>' + esc(d.fields.amount) + '</b>' : '';
-  var by = d ? ' ' + esc(localTime(d.occurred_at || d.updated_at)) + amt + (d.edited_by || d.user_id ? ' by ' + esc(whoName(d.edited_by || d.user_id)) : '') : (p.time ? ' · ' + esc(p.time) : '');
+  var by = d ? ' ' + esc(localTime(d.occurred_at || d.updated_at)) + amt + (d.edited_by || d.user_id ? ' by ' + esc(whoName(d.edited_by || d.user_id)) : '') : p.stay ? ' · in care at ' + esc(p.stay.org) : (p.time ? ' · ' + esc(p.time) : '');
   return '<div class="list-item dose-' + p.state + '"><div class="grow tappable" onclick="aboutMed(\'' + p.med.id + '\')"><b>' + esc(p.med.title) + '</b> <span class="muted">' + esc([f.dose, f.with_food && f.with_food !== 'Either' ? f.with_food.toLowerCase() : ''].filter(Boolean).join(' · ')) + '</span>' +
     '<div class="muted"><span class="dose-state">' + DOSE_TEXT[p.state] + '</span>' + by + (d && d.fields.note ? ' · ' + esc(d.fields.note) : '') + (f.label_boxed ? ' · <span class="flag-text">boxed warning</span>' : '') + '</div></div>' +
     (d ? '<button class="btn sm ghost writer-only" onclick="editDose(\'' + d.id + '\')">Edit</button><button class="btn sm ghost writer-only" onclick="undoDose(\'' + d.id + '\')">Undo</button>'
+      : p.state === 'covered' ? ''
       : '<button class="btn sm writer-only" onclick="giveDose(\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')">Given</button><button class="btn sm ghost writer-only" onclick="skipDose(\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')">Not given</button>') + '</div>';
 }
 function todayMeds(pid, day, plan) {
-  var meds = medsOf(pid).filter(function (m) { return Logic.medActive(m, day); });
+  var meds = medsOf(pid).filter(function (m) { return Logic.medActive(m, day); }), away = careStay(pid);
+  if (away) return underCareCard(pid, away);
+  plan = plan.filter(function (p) { return p.state !== 'covered'; });
   if (!meds.length) return '<div class="next"><div class="when">Medicines</div><div class="what">None set up yet</div><p class="quiet">Add her medicines in File &rarr; Summary and pick when each is given. ' + helpLink('meds') + '</p><div class="btn-row"><button class="btn sm" onclick="showScreen(\'meds\',{pid:' + pidArg(pid) + '})">Set up</button></div></div>';
   // Show what's due or overdue and the next slot coming; the rest is on the meds screen.
   var open = plan.filter(function (p) { return p.state === 'due' || p.state === 'overdue'; });
@@ -90,7 +164,7 @@ function todayMeds(pid, day, plan) {
     : show.length ? '<div class="when"><span>Next up' + (show[0].time ? ' · ' + esc(show[0].time) : '') + '</span>' + count + '</div><div class="what">' + esc(slotName(show[0].slot)) + ' medicines</div>'
     : '<div class="when"><span>Medicines</span>' + count + '</div><div class="what">' + (plan.length ? 'Nothing due right now' : 'No scheduled doses today') + '</div>';
   return '<div class="next">' + head + (show.length ? scrollList(show.map(function (p) { return nextDoseRow(p, pid); }), 5) : '') +
-    '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'meds\',{pid:' + pidArg(pid) + '})">All meds today</button></div></div>';
+    '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'meds\',{pid:' + pidArg(pid) + '})">All meds today</button>' + careStartBtn(pid) + '</div></div>';
 }
 var DOSE_TAG = { due: '<span class="badge warn">Due now</span>', overdue: '<span class="badge bad">Overdue</span>' };
 // One medicine in Next up: tap the circle to mark it given (the tick draws, then the list updates; Undo is in the toast).
@@ -178,17 +252,18 @@ function aboutMed(id) {
 /* ---------- Daily meds screen ---------- */
 function renderMeds(arg) {
   var pid = filePid(arg || {}), day = careToday(), meds = medsOf(pid), doses = dosesOf(pid);
-  var plan = Logic.medPlan(meds, doses, day, careHourNow());
+  var plan = planFor(pid, day), away = careStay(pid);
   var active = meds.filter(function (m) { return Logic.medActive(m, day); }).sort(function (a, b) { return (a.title || '').localeCompare(b.title || ''); });
   var prn = active.filter(function (m) { return Logic.medSlots(m).indexOf('prn') >= 0; });
   var html = '<div class="chips">' + State.profiles.map(function (p) { return '<span class="chip' + (p.id === pid ? ' on' : '') + '" onclick="S.filePid=\'' + p.id + '\';showScreen(\'meds\',{pid:\'' + p.id + '\'})">' + esc(p.person_name) + '</span>'; }).join('') + '</div>';
   html += '<div class="row between"><h2>' + esc(dayLabel(day)) + '</h2>' + addBtn('medication', pid) + '</div>';
   if (!active.length) html += '<p class="muted">No medicines yet. Add each one with its dose and when it is given; the app then lists what is due each day. ' + helpLink('meds') + '</p>';
+  if (away) html += underCareCard(pid, away);
   ['morning', 'noon', 'evening', 'bedtime'].forEach(function (slot) {
-    var rows = plan.filter(function (p) { return p.slot === slot; });
+    var rows = away ? [] : plan.filter(function (p) { return p.slot === slot; });
     if (rows.length) html += '<h3>' + esc(slotName(slot)) + '</h3>' + rows.map(function (p) { return doseRow(p, pid); }).join('');
   });
-  if (prn.length) html += '<h3>Only when needed</h3>' + prn.map(function (m) {
+  if (prn.length && !away) html += '<h3>Only when needed</h3>' + prn.map(function (m) {
     var given = Logic.prnDoses(doses, m.id, day);
     return '<div class="list-item"><div class="grow tappable" onclick="aboutMed(\'' + m.id + '\')"><b>' + esc(m.title) + '</b> <span class="muted">' + esc((m.fields || {}).dose || '') + '</span><div class="muted">' + (given.length ? 'Given today: ' + given.map(function (d) { return '<span class="tappable" onclick="event.stopPropagation();editDose(\'' + d.id + '\')">' + esc(localTime(d.occurred_at) + (d.fields.amount ? ' (' + d.fields.amount + ')' : '')) + '</span>'; }).join(', ') : 'Not given today') + '</div></div><button class="btn sm writer-only" onclick="doseSheet(\'' + m.id + '\',\'prn\',' + pidArg(pid) + ')">Gave a dose</button></div>';
   }).join('');
@@ -197,23 +272,25 @@ function renderMeds(arg) {
   var stopped = meds.filter(function (m) { return !Logic.medActive(m, day); });
   if (stopped.length) html += '<details><summary class="muted">Stopped or not started (' + stopped.length + ')</summary>' + stopped.map(function (m) { return recordCard(m, esc([(m.fields || {}).start ? 'from ' + m.fields.start : '', (m.fields || {}).stop ? 'stopped ' + m.fields.stop : ''].filter(Boolean).join(' · '))); }).join('') + '</details>';
   html += '<div class="note">' + MED_PROMPTS.map(esc).join('<br>') + '</div>';
-  html += '<div class="btn-row"><button class="btn ghost" onclick="showScreen(\'timing\',{pid:' + pidArg(pid) + '})">Timing review</button><button class="btn ghost" onclick="showScreen(\'plans\',{pid:' + pidArg(pid) + '})">Pharmacist questions</button><button class="btn ghost" onclick="printExport(' + pidArg(pid) + ')">Print med list and file</button></div>';
+  html += '<div class="btn-row">' + (away ? '' : careStartBtn(pid)) + '<button class="btn ghost" onclick="showScreen(\'timing\',{pid:' + pidArg(pid) + '})">Timing review</button><button class="btn ghost" onclick="showScreen(\'plans\',{pid:' + pidArg(pid) + '})">Pharmacist questions</button><button class="btn ghost" onclick="printExport(' + pidArg(pid) + ')">Print med list and file</button></div>';
   return html;
 }
-// Seven days, one row per scheduled dose: ✓ given, – skipped/refused, blank not marked.
+// Seven days, one row per scheduled dose: ✓ given, – skipped/refused, ♥ in care elsewhere, blank not marked.
 function medWeek(pid, meds, doses, day) {
+  var stays = careStays(pid), anyStay = false;
   var days = []; for (var i = 6; i >= 0; i--) days.push(shiftDay(day, -i));
   var rows = [];
   meds.forEach(function (m) { Logic.medSlots(m).filter(function (s) { return s !== 'prn'; }).forEach(function (slot) { if (days.some(function (d) { return Logic.medActive(m, d); })) rows.push({ m: m, slot: slot }); }); });
   if (!rows.length) return '';
   var cell = function (m, slot, d) {
     if (!Logic.medActive(m, d)) return '<td class="muted">·</td>';
-    var x = Logic.doseFor(doses, m.id, d, slot);
-    return '<td title="' + esc(x ? x.fields.status : 'not marked') + '">' + (!x ? '' : x.fields.status === 'given' ? '&#10003;' : '&ndash;') + '</td>';
+    var x = Logic.doseFor(doses, m.id, d, slot), st = x ? null : Logic.stayAt(stays, d, Logic.slotHour(m, slot), dayStart());
+    if (st) { anyStay = true; return '<td class="covered" title="in care at ' + esc(st.org) + '">&hearts;</td>'; }
+    return '<td title=""' + esc(x ? x.fields.status : 'not marked') + '">' + (!x ? '' : x.fields.status === 'given' ? '&#10003;' : '&ndash;') + '</td>';
   };
-  return '<h2>Last 7 days</h2><div class="table-wrap"><table class="io-table med-week"><tr><th></th>' + days.map(function (d) { return '<th>' + esc(new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short' })) + '</th>'; }).join('') + '</tr>' +
-    rows.map(function (r) { return '<tr><td>' + esc(r.m.title) + ' <span class="muted">' + esc(slotName(r.slot).toLowerCase()) + '</span></td>' + days.map(function (d) { return cell(r.m, r.slot, d); }).join('') + '</tr>'; }).join('') +
-    '</table></div><p class="muted">&#10003; given · &ndash; skipped or refused · blank: not marked</p>';
+  var body = rows.map(function (r) { return '<tr><td>' + esc(r.m.title) + ' <span class="muted">' + esc(slotName(r.slot).toLowerCase()) + '</span></td>' + days.map(function (d) { return cell(r.m, r.slot, d); }).join('') + '</tr>'; }).join('');
+  return '<h2>Last 7 days</h2><div class="table-wrap"><table class="io-table med-week"><tr><th></th>' + days.map(function (d) { return '<th>' + esc(new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short' })) + '</th>'; }).join('') + '</tr>' + body +
+    '</table></div><p class="muted">&#10003; given · &ndash; skipped or refused' + (anyStay ? ' · &hearts; in care elsewhere' : '') + ' · blank: not marked</p>';
 }
 
 /* ---------- vitals ---------- */
@@ -325,7 +402,7 @@ var HELP = [
   ['drink', 'Log a drink', ['Tap <b>Add</b>, then <b>Log a drink</b>. Pick the amount (oz, mL, cups) and save.', 'Soup, Jell-O, ice cream and ice chips count as fluid too: when you log them as food, fill in the fluid box (the app suggests an amount).']],
   ['output', 'Log urine with the hat', ['Diary &rarr; <b>Log output</b>. Read the number on the hat at eye level, pick the colour, tick clots if you see any, and save.', 'Logged it as a drink by mistake? Open the entry and tap <b>This was output, not a drink</b>.', 'Pink, red, cola-coloured urine or clots show in <b>Needs attention</b>.']],
   ['weight', 'Morning weight', ['Every morning: after she pees, before she eats or drinks, same scale, similar clothes.', 'Today &rarr; Vitals &rarr; <b>Log weight</b>, keep the "Morning" box ticked. Only morning weights are compared day to day.']],
-  ['meds', 'Give and record meds', ['First, add each medicine: File &rarr; Summary &rarr; <b>+ Medicine</b>. Type the dose, tap when it is given (morning, midday, evening, bedtime, or only when needed), and save.', 'Tap <b>Fill from the FDA label</b> to copy the official label (how to take it, side effects). Change any of it to what her doctor or pharmacist said; your words are what the app shows.', 'Each day, Today &rarr; Meds shows what is due. Tap <b>Given</b> after she takes it, or <b>Not given</b> with a reason. Everyone in the family sees who gave it and when.', 'Given at a different time, or a different amount (half a tablet, a sliding-scale dose)? Tap <b>Edit</b> on that row and change the time or amount. For "only when needed" medicines, <b>Gave a dose</b> asks for both.', 'If she takes a medicine at a set time, open the medicine, tap <b>Edit</b>, and type the time under each slot. It then shows as due an hour before and overdue two hours after.', 'Marked the wrong one? Tap <b>Undo</b> on that row.']],
+  ['meds', 'Give and record meds', ['First, add each medicine: File &rarr; Summary &rarr; <b>+ Medicine</b>. Type the dose, tap when it is given (morning, midday, evening, bedtime, or only when needed), and save.', 'Tap <b>Fill from the FDA label</b> to copy the official label (how to take it, side effects). Change any of it to what her doctor or pharmacist said; your words are what the app shows.', 'Each day, Today &rarr; Meds shows what is due. Tap <b>Given</b> after she takes it, or <b>Not given</b> with a reason. Everyone in the family sees who gave it and when.', 'In hospital, rehab or respite? Tap <b>In care elsewhere?</b> under the medicines and type where. Reminders rest and nothing shows as missed while their team gives the medicines; those days are saved as covered. Tap <b>Back home</b> when the stay ends.', 'Given at a different time, or a different amount (half a tablet, a sliding-scale dose)? Tap <b>Edit</b> on that row and change the time or amount. For "only when needed" medicines, <b>Gave a dose</b> asks for both.', 'If she takes a medicine at a set time, open the medicine, tap <b>Edit</b>, and type the time under each slot. It then shows as due an hour before and overdue two hours after.', 'Marked the wrong one? Tap <b>Undo</b> on that row.']],
   ['vitals', 'Blood pressure, pulse and AFib', ['Today &rarr; Vitals &rarr; <b>Log BP, sugar, oxygen...</b>. Type the top and bottom numbers and the pulse.', 'If the cuff shows a heart symbol with waves, "IHB" or "AFib", tap <b>Irregular heartbeat</b> or <b>AFib</b> to match what the screen showed. It then shows in <b>Needs attention</b> for the day.', 'The symbol on the cuff is a hint, not a diagnosis. Tell the care team, especially if it is new. Chest pain, fainting or trouble breathing: call 911.']],
   ['colors', 'What the colours mean', ['<b>Amber/red card</b> on Today: something to look at now, like a dose not marked or a weight gain over the alert level the care team set.', 'The app only flags limits the family or care team typed in. It does not give medical advice. When in doubt, call the care team.']],
   ['visit', 'After a visit', ['File &rarr; Visits &rarr; <b>+ Visit</b>: who, when, what they said, what changed, medicines changed, next appointment.', 'Save, then photograph the After Visit Summary (photos or PDFs attach under the visit).', 'Medicines changed? Update them in File &rarr; Summary the same day.']],

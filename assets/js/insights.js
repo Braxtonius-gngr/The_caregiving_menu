@@ -11,10 +11,10 @@ function fmtOffset(min) { if (min == null) return ''; var a = Math.abs(min), h =
 
 /* ---------- timing review ---------- */
 function timingData(pid) {
-  var days = lastCareDays(INSIGHT_DAYS), doses = dosesOf(pid), cs = careSettingsOf(pid);
+  var days = lastCareDays(INSIGHT_DAYS), doses = dosesOf(pid), cs = careSettingsOf(pid), stays = cs.care_stays || [];
   var meals = Logic.mealTimes(State.diary, pid, days, dayStart());
   var meds = activeMeds(pid).map(function (m) {
-    return { med: m, cues: Logic.labelCues(labelTextOf(m)), slots: Logic.medSlots(m).filter(function (s) { return s !== 'prn'; }).map(function (s) { return { slot: s, t: Logic.doseTiming(m, doses, s, days, dayStart()) }; }) };
+    return { med: m, cues: Logic.labelCues(labelTextOf(m)), slots: Logic.medSlots(m).filter(function (s) { return s !== 'prn'; }).map(function (s) { return { slot: s, t: Logic.doseTiming(m, doses, s, days, dayStart(), stays) }; }) };
   });
   return { days: days, meals: meals, wake: cs.wake_time || null, bed: cs.bed_time || null, meds: meds };
 }
@@ -58,7 +58,7 @@ function renderTiming(arg) {
 
 /* ---------- patterns ---------- */
 function patternsFor(pid) {
-  return Logic.patterns({ measurements: State.measurements || [], meds: medsOf(pid), doses: dosesOf(pid), diary: State.diary }, pid, lastCareDays(28), dayStart());
+  return Logic.patterns({ measurements: State.measurements || [], meds: medsOf(pid), doses: dosesOf(pid), diary: State.diary, stays: careSettingsOf(pid).care_stays || [] }, pid, lastCareDays(28), dayStart());
 }
 function renderPatterns(arg) {
   var pid = filePid(arg || {}), ps = patternsFor(pid);

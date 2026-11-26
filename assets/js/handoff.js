@@ -34,7 +34,7 @@ function renderHandoff(arg) {
     '<div class="btn-row"><button class="btn" onclick="handoffDone()">&#10003; Got it</button>' + (h.empty ? '' : '<button class="btn ghost" onclick="handoffSay()">Say it in a few lines</button><button class="btn ghost" onclick="copyText(handoffText(), \'Copied\')">Copy</button>') + '</div>' +
     '<div id="handoffSay" aria-live="polite"></div></div>';
   if (h.empty && !h.checks.length) return html + '<p class="muted">Nothing was logged for her in this time.</p>';
-  var day = careToday(), att = attentionItems(pid, day, fluidEntriesFor(pid, day), Logic.medPlan(medsOf(pid), dosesOf(pid), day, careHourNow()));
+  var day = careToday(), att = attentionItems(pid, day, fluidEntriesFor(pid, day), planFor(pid, day));
   html += att.length ? '<div class="card attention"><h3>&#9888; Needs attention now</h3><ul>' + att.map(function (f) { return '<li>' + f.text + '</li>'; }).join('') + '</ul></div>' : '';
   html += section('&#128138; Medicines',
     (m.given.length || m.skipped.length || m.refused.length) ? '<ul>' +

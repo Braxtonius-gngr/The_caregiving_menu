@@ -313,14 +313,26 @@ var Logic = (function () {
     var hit = doses.filter(function (d) { var f = d.fields || {}; return !d.deleted && f.med_id === medId && f.day === day && f.slot === slot; });
     return hit.sort(function (a, b) { return a.updated_at < b.updated_at ? 1 : -1; })[0] || null;
   }
-  function medPlan(meds, doses, day, hour) {
+  // In care elsewhere (hospital, rehab, respite): a stay is { org, from_at, to_at, until } with ISO
+  // start, ISO end (null while it lasts) and the day she is expected home. Scheduled doses inside
+  // a stay are the other place's to give, so they read as covered, never as missed.
+  function carePoint(iso, startHour) { return { day: careDay(iso, startHour), hour: minuteOfDay(iso, startHour) / 60 }; }
+  function beforePoint(day, hour, p) { return day < p.day || (day === p.day && hour < p.hour); }
+  function stayOpen(stays) { return (stays || []).filter(function (s) { return s && s.from_at && !s.to_at; })[0] || null; }
+  function stayAt(stays, day, hour, startHour) {
+    return (stays || []).filter(function (s) {
+      return s && s.from_at && !beforePoint(day, hour, carePoint(s.from_at, startHour)) && (!s.to_at || beforePoint(day, hour, carePoint(s.to_at, startHour)));
+    })[0] || null;
+  }
+  function medPlan(meds, doses, day, hour, stays, startHour) {
     var rows = [];
     meds.filter(function (m) { return medActive(m, day); }).forEach(function (m) {
       medSlots(m).forEach(function (slot) {
         if (slot === 'prn') return;
         var h = slotHour(m, slot), d = doseFor(doses, m.id, day, slot);
-        var state = d ? (d.fields.status || 'given') : hour == null ? 'later' : hour >= h + 2 ? 'overdue' : hour >= h - 1 ? 'due' : 'later';
-        rows.push({ med: m, slot: slot, hour: h, time: ((m.fields || {}).slot_times || {})[slot] || null, dose: d, state: state });
+        var stay = d ? null : stayAt(stays, day, h, startHour);
+        var state = d ? (d.fields.status || 'given') : stay ? 'covered' : hour == null ? 'later' : hour >= h + 2 ? 'overdue' : hour >= h - 1 ? 'due' : 'later';
+        rows.push({ med: m, slot: slot, hour: h, time: ((m.fields || {}).slot_times || {})[slot] || null, dose: d, state: state, stay: stay });
       });
     });
     return rows.sort(function (a, b) { return a.hour - b.hour || String(a.med.title).localeCompare(String(b.med.title)); });
@@ -363,17 +375,17 @@ var Logic = (function () {
   function median(xs) { if (!xs.length) return null; var s = xs.slice().sort(function (a, b) { return a - b; }), h = Math.floor(s.length / 2); return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2; }
   function mean(xs) { return xs.length ? xs.reduce(function (a, b) { return a + b; }, 0) / xs.length : null; }
   // How a medicine's doses in one slot actually went over `days` (list of care days).
-  function doseTiming(med, doses, slot, days, startHour) {
-    var sched = slotHour(med, slot) * 60, given = [], skipped = 0, unmarked = 0, late = 0;
+  function doseTiming(med, doses, slot, days, startHour, stays) {
+    var sched = slotHour(med, slot) * 60, given = [], skipped = 0, unmarked = 0, late = 0, covered = 0;
     days.forEach(function (day) {
       if (!medActive(med, day)) return;
       var d = doseFor(doses, med.id, day, slot);
-      if (!d) { unmarked++; return; }
+      if (!d) { if (stayAt(stays, day, sched / 60, startHour)) covered++; else unmarked++; return; }
       if (d.fields.status !== 'given') { skipped++; return; }
       var m = minuteOfDay(d.occurred_at, startHour); given.push(m); if (m - sched >= 120) late++;
     });
     var typ = median(given);
-    return { scheduled: hhmm(sched), given: given.length, skipped: skipped, unmarked: unmarked, late: late,
+    return { scheduled: hhmm(sched), given: given.length, skipped: skipped, unmarked: unmarked, late: late, covered: covered,
       typical: typ == null ? null : hhmm(typ), offsetMin: typ == null ? null : Math.round(typ - sched),
       earliest: given.length ? hhmm(Math.min.apply(null, given)) : null, latest: given.length ? hhmm(Math.max.apply(null, given)) : null };
   }
@@ -407,7 +419,7 @@ var Logic = (function () {
     return r;
   }
   // Patterns. Each: { key, title, text, n, enough }. `enough` only when both sides have data.
-  function bpAfterEveningDose(measurements, meds, doses, profileId, days, startHour) {
+  function bpAfterEveningDose(measurements, meds, doses, profileId, days, startHour, stays) {
     var groups = { ontime: [], off: [] }, evening = ['evening', 'bedtime'];
     days.forEach(function (day, i) {
       if (i === 0) return;
@@ -416,6 +428,8 @@ var Logic = (function () {
       if (!bp) return;
       var due = []; meds.forEach(function (m) { if (medActive(m, prev)) medSlots(m).forEach(function (s) { if (evening.indexOf(s) >= 0) due.push([m, s]); }); });
       if (!due.length) return;
+      // An evening spent in care elsewhere says nothing about doses at home.
+      if (due.some(function (x) { return !doseFor(doses, x[0].id, prev, x[1]) && stayAt(stays, prev, slotHour(x[0], x[1]), startHour); })) return;
       var off = due.some(function (x) { var d = doseFor(doses, x[0].id, prev, x[1]); return !d || d.fields.status !== 'given' || minuteOfDay(d.occurred_at, startHour) - slotHour(x[0], x[1]) * 60 >= 120; });
       groups[off ? 'off' : 'ontime'].push(+bp.value);
     });
@@ -468,7 +482,7 @@ var Logic = (function () {
   }
   function patterns(data, profileId, days, startHour) {
     return [
-      bpAfterEveningDose(data.measurements, data.meds, data.doses, profileId, days, startHour),
+      bpAfterEveningDose(data.measurements, data.meds, data.doses, profileId, days, startHour, data.stays),
       weightVsSodium(data.measurements, data.diary, profileId, days, startHour),
       outVsIn(data.diary, profileId, days, startHour),
       byTimeOfDay(data.measurements, profileId, 'blood_pressure', days, startHour),
@@ -603,6 +617,6 @@ var Logic = (function () {
     return 1;
   }
   return { exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
-    slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
+    slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, stayOpen: stayOpen, stayAt: stayAt, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();

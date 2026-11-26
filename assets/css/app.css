@@ -291,6 +291,11 @@ label.check input { width: auto; margin: 0; }
 .next .when { font-size: var(--fs-caption); color: var(--action-text); font-weight: 650; display: flex; justify-content: space-between; gap: var(--space-2); }
 .next .what { font-size: var(--fs-title); font-weight: 700; margin: var(--space-1) 0 var(--space-2); letter-spacing: -.01em; }
 .next .quiet { color: var(--text-muted); margin: var(--space-2) 0 0; }
+/* Under care elsewhere: the meds panel rests. Warm, still, nothing to do. */
+.under-care { background: radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--status-ok-bg) 70%, transparent), transparent 60%), var(--surface-accent); animation: none; }
+.under-care .when .ico { width: 16px; height: 16px; vertical-align: -3px; }
+.under-care .care-ask { margin: var(--space-3) 0 0; }
+.med-week td.covered { color: var(--status-ok); }
 .dose { display: flex; align-items: center; gap: var(--space-3); min-height: var(--tap-min); padding: var(--space-2) 0; }
 .dose + .dose { border-top: 1px solid var(--divider); }
 .dose .grow { min-width: 0; }
