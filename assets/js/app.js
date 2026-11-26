@@ -472,3 +472,15 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js');
 });
+
+// Saves outside Today get the small green burst too (P-020: green means done). It fires only when the form
+// actually closed, so a save that failed its checks (the form stays open) gets nothing.
+['saveOutput', 'saveWeight', 'saveVital', 'saveLog', 'saveDiaryEdit', 'saveDrink'].forEach(function (name) {
+  var fn = window[name]; if (typeof fn !== 'function') return;
+  window[name] = function () {
+    var at = FX_lastTap, sheet = document.getElementById('sheet'), wasOpen = sheet && !sheet.classList.contains('hidden');
+    var result = fn.apply(this, arguments);
+    setTimeout(function () { if (wasOpen && sheet.classList.contains('hidden')) fxBurst(at.x, at.y, 0.55); }, 350);
+    return result;
+  };
+});

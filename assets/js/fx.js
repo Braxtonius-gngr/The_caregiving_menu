@@ -165,3 +165,7 @@ var FX = (function () {
 })();
 function fxBurst(x, y, k) { FX.burst(x, y, k); }
 function fxFromEl(el, k) { if (el) { var c = FX.centre(el); FX.burst(c[0], c[1], k); } }
+
+// Where the last tap landed, so a save can burst from the button that was pressed.
+var FX_lastTap = { x: innerWidth / 2, y: innerHeight / 2 };
+document.addEventListener('pointerdown', function (e) { FX_lastTap = { x: e.clientX, y: e.clientY }; }, true);

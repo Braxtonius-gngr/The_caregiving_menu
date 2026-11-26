@@ -95,7 +95,8 @@ h3 { font-size: var(--fs-body); font-weight: 680; }
 
 .grid-big { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .big-btn { background: var(--surface-card); border: 0; box-shadow: var(--elevation-1); border-radius: var(--radius-m); padding: var(--space-5) var(--space-3); text-align: center; cursor: pointer; }
-.big-btn .ico { font-size: 30px; display: block; margin-bottom: 6px; }
+.big-btn { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); font-weight: 650; }
+.big-btn .muted { font-weight: 400; }
 
 .dv { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; }
 .dv .tile { background: var(--surface-card); box-shadow: var(--elevation-1); border-radius: var(--radius-s); padding: var(--space-3); }
@@ -254,7 +255,8 @@ label.check input { width: auto; margin: 0; }
 .cap-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 8px 0; }
 .cap-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: var(--space-4); border: 0; box-shadow: var(--elevation-1); border-radius: var(--radius-m); background: var(--surface-card); color: inherit; font: inherit; cursor: pointer; min-height: 72px; transition: transform var(--dur-tap) var(--ease-settle); }
 .cap-tile:active { transform: scale(.97); }
-.cap-tile .cap-ico { font-size: 1.4em; line-height: 1; }
+.cap-tile { gap: var(--space-2); }
+.cap-tile b { line-height: 1.2; }
 .cap-tile .muted { font-size: var(--fs-caption); }
 .wk-row { padding: 8px 0; border-bottom: 1px solid var(--line); }
 .wk-list summary { cursor: pointer; font-size: .9em; }
@@ -386,3 +388,16 @@ label.check input { width: auto; margin: 0; }
 .underglow::after { content: ""; position: absolute; left: 50%; bottom: 3px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--action); box-shadow: 0 0 8px 2px color-mix(in srgb, var(--calm) 70%, transparent); }
 .underglow.none { opacity: 0; }
 @keyframes breathe { 0%, 100% { opacity: .8; } 50% { opacity: 1; } }
+
+/* U3: icons in soft teal circles for tiles; the folded nutrition row; small icons inside text. */
+.ico-dot { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-accent); color: var(--action-text); flex: none; }
+.ico-dot .ico { width: 22px; height: 22px; vertical-align: 0; }
+.card b .ico, .list-item b .ico { width: 18px; height: 18px; vertical-align: -3px; color: var(--action-text); }
+details.nutrition > summary { list-style: none; display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); cursor: pointer; min-height: 32px; }
+details.nutrition > summary::-webkit-details-marker { display: none; }
+details.nutrition > summary::after { content: ""; width: 9px; height: 9px; border-right: 2px solid var(--text-muted); border-bottom: 2px solid var(--text-muted); transform: rotate(45deg); transition: transform var(--dur-tap) var(--ease-settle); flex: none; margin-left: auto; }
+details.nutrition[open] > summary::after { transform: rotate(-135deg); }
+details.nutrition .dv { margin-top: var(--space-4); }
+.sheet-body .cap-tile { background: var(--surface-sunken); box-shadow: none; }
+details.nutrition > summary b { white-space: nowrap; }
+details.nutrition > summary .muted { text-align: right; }

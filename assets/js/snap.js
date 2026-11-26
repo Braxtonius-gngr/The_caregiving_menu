@@ -593,8 +593,8 @@ function addFormSnap() {
   S.formSnap = null;
   if (!body || body.querySelector(FORM_SNAP_SKIP) || !formFields().length) return;
   var h2 = body.querySelector('h2');
-  var box = '<div class="form-snap writer-only"><button type="button" class="btn sm ghost" onclick="document.getElementById(\'fsCam\').click()">&#128247; Fill from a photo</button>' +
-    '<button type="button" class="btn sm ghost" onclick="document.getElementById(\'fsLib\').click()" aria-label="Fill from a saved photo">&#128444;</button>' +
+  var box = '<div class="form-snap writer-only"><button type="button" class="btn sm ghost" onclick="document.getElementById(\'fsCam\').click()">' + icon('camera') + ' Fill from a photo</button>' +
+    '<button type="button" class="btn sm ghost" onclick="document.getElementById(\'fsLib\').click()" aria-label="Fill from a saved photo">' + icon('image') + '</button>' +
     '<input id="fsCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="formSnapFile(this)"><input id="fsLib" type="file" accept="image/*" class="hidden" onchange="formSnapFile(this)">' +
     '<div id="fsOut" class="muted" aria-live="polite"></div></div>';
   if (h2) h2.insertAdjacentHTML('afterend', box); else body.insertAdjacentHTML('afterbegin', box);

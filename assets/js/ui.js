@@ -21,9 +21,27 @@ var ICONS = {
   chat: '<path d="M4 5h16v11H9l-5 4z"/>',
   wave: '<path d="M7 11V6a1.5 1.5 0 0 1 3 0v4M10 10V4.5a1.5 1.5 0 0 1 3 0V10M13 10V5.5a1.5 1.5 0 0 1 3 0V12M16 9.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-12.5 4.3L4 14.5a1.6 1.6 0 0 1 2.4-2L8 14V8.5"/>',
   note: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/>',
+  cup: '<path d="M6 4h12l-1.5 15a2 2 0 0 1-2 1.8h-5a2 2 0 0 1-2-1.8z"/><path d="M6.6 9.5h10.8"/>',
+  output: '<path d="M12 3s-5.5 6.2-5.5 10.2a5.5 5.5 0 0 0 11 0C17.5 9.2 12 3 12 3z"/><path d="M12 10.5v5.5M9.8 13.8l2.2 2.2 2.2-2.2"/>',
+  vitals: '<path d="M20.5 9a5 5 0 0 0-8.5-3.4A5 5 0 0 0 3.5 9c0 5.3 8.5 11 8.5 11s8.5-5.7 8.5-11z"/><path d="M4 12.5h4l1.5-3 3 5.5 1.5-2.5h6"/>',
+  scale: '<rect x="3.5" y="4" width="17" height="16" rx="3.5"/><path d="M8 10a5 5 0 0 1 8 0"/><path d="M12 10l1.6-2.4"/>',
+  pill: '<path d="M10.6 3.6a5 5 0 0 1 7 7l-7 7a5 5 0 0 1-7-7z"/><path d="M7.1 7.1l7 7"/>',
+  meal: '<circle cx="14" cy="12" r="6.5"/><circle cx="14" cy="12" r="3"/><path d="M4 4v5.5a1.5 1.5 0 0 0 3 0V4M5.5 11v9"/>',
+  exercise: '<circle cx="12" cy="4.6" r="1.8"/><path d="M5 9.2l7 1.3 7-1.3M12 10.5v4.5l-3.2 6M12 15l3.2 6"/>',
+  doc: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 12.5h6"/>',
+  update: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/>',
+  receipt: '<path d="M6 3h12v18l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4L6 21z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+  bag: '<path d="M5 8h14l-1 12.5H6z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/>',
+  image: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.7"/><path d="M21 15.5l-5-4.5-8.5 8"/>',
+  barcode: '<path d="M4 6v12M7 6v12M9.5 6v12M13 6v12M15.5 6v12M18 6v12M20.5 6v12"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  books: '<path d="M4 4h5v16H4zM10.5 4h4v16h-4z"/><path d="M16 5.2l3.6-1 2.2 15-3.6 1z"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   heart: '<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/>'
 };
 function icon(name) { return '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>'; }
+// An icon in a soft teal circle, for tiles (the + sheet, Kitchen → Add).
+function iconDot(name) { return '<span class="ico-dot">' + icon(name) + '</span>'; }
 
 function rebuildIndexes() {
   S.ingById = {}; State.ingredients.forEach(function (i) { S.ingById[i.id] = i; });
@@ -325,14 +343,14 @@ function renderScan() {
   var cloud = Sync.enabled();
   return '<p class="muted">' + (cloud ? 'Photos and links are parsed in the cloud; the result always lands on a review screen first.' : 'Cloud not configured, so photo/receipt/link parsing is off. Barcodes, manual and paste entry still work.') + '</p>' +
     '<div class="grid-big">' +
-    '<div class="big-btn" onclick="scanPhoto(\'recipe\')"><span class="ico">&#128247;</span>Recipe photo<div class="muted">card, cookbook, handwriting</div></div>' +
-    '<div class="big-btn" onclick="scanPhoto(\'receipt\')"><span class="ico">&#129534;</span>Receipt<div class="muted">adds to pantry</div></div>' +
-    '<div class="big-btn" onclick="scanGroceries(false)"><span class="ico">&#129387;</span>Groceries photo<div class="muted">fridge, shelf, bags: adds to pantry</div></div>' +
-    '<div class="big-btn" onclick="scanGroceries(true)"><span class="ico">&#128444;</span>Groceries from saved photos<div class="muted">up to 6 at once</div></div>' +
-    '<div class="big-btn" onclick="scanBarcode()"><span class="ico">&#9646;&#9646;&#9646;</span>Barcode<div class="muted">packaged item</div></div>' +
-    '<div class="big-btn" onclick="pasteRecipe()"><span class="ico">&#128279;</span>Link / paste<div class="muted">URL or text</div></div>' +
+    '<div class="big-btn" onclick="scanPhoto(\'recipe\')">' + iconDot('camera') + 'Recipe photo<div class="muted">card, cookbook, handwriting</div></div>' +
+    '<div class="big-btn" onclick="scanPhoto(\'receipt\')">' + iconDot('receipt') + 'Receipt<div class="muted">adds to pantry</div></div>' +
+    '<div class="big-btn" onclick="scanGroceries(false)">' + iconDot('bag') + 'Groceries photo<div class="muted">fridge, shelf, bags: adds to pantry</div></div>' +
+    '<div class="big-btn" onclick="scanGroceries(true)">' + iconDot('image') + 'Groceries from saved photos<div class="muted">up to 6 at once</div></div>' +
+    '<div class="big-btn" onclick="scanBarcode()">' + iconDot('barcode') + 'Barcode<div class="muted">packaged item</div></div>' +
+    '<div class="big-btn" onclick="pasteRecipe()">' + iconDot('link') + 'Link / paste<div class="muted">URL or text</div></div>' +
     '</div>' +
-    '<div class="btn-row"><button class="btn ghost" onclick="scanPhoto(\'recipe\', true)">&#128444; Recipe from saved photo</button><button class="btn ghost" onclick="scanPhoto(\'receipt\', true)">&#128444; Receipt from saved photo</button><button class="btn ghost" onclick="batchImportRecipes()">&#128218; Batch import recipes</button></div>' +
+    '<div class="btn-row"><button class="btn ghost" onclick="scanPhoto(\'recipe\', true)">' + icon('image') + ' Recipe from saved photo</button><button class="btn ghost" onclick="scanPhoto(\'receipt\', true)">' + icon('image') + ' Receipt from saved photo</button><button class="btn ghost" onclick="batchImportRecipes()">' + icon('books') + ' Batch import recipes</button></div>' +
     '<h2>Manual</h2><div class="btn-row"><button class="btn ghost" onclick="editRecipe()">Type a recipe</button><button class="btn ghost" onclick="editPantryItem()">Add pantry item</button><button class="btn ghost" onclick="logFood()">Log a meal</button></div>' +
     '<input id="scanFile" type="file" accept="image/*" capture="environment" class="hidden" onchange="onScanFile(this)">' +
     '<input id="scanLibrary" type="file" accept="image/*" class="hidden" onchange="onScanFile(this)">' +
@@ -697,23 +715,29 @@ function loggedBy(e) {
   var by = names[e.user_id] || 'someone who left', ed = e.edited_by && e.edited_by !== e.user_id ? names[e.edited_by] : null;
   return ' · by ' + esc(by) + (ed ? ' (edited by ' + esc(ed) + ')' : '');
 }
+// Nutrition sits under the entries as one folded row: the totals at a glance, the six tiles on a tap.
+function nutritionRow(entries, prof) {
+  var t = Logic.dayTotals(entries);
+  return '<details class="card nutrition"><summary><b>Nutrition today</b><span class="muted">' + Math.round(t.kcal || 0) + ' kcal · ' + Math.round(t.sodium_mg || 0) + ' mg sodium</span></summary>' +
+    dvTiles(t, prof && prof.daily_targets) + '</details>';
+}
 function renderDiary() {
   var day = State.day || careToday();
   var entries = State.diary.filter(function (e) { return careDayOf(e.eaten_at) === day && (!State.activeProfile || e.for_profile_id === State.activeProfile); }).sort(function (a, b) { return a.eaten_at < b.eaten_at ? -1 : 1; });
   var prof = State.profiles.find(function (p) { return p.id === State.activeProfile; });
   var shift = function (n) { return shiftDay(day, n); };
   return '<div class="row between"><button class="btn ghost sm" onclick="State.day=\'' + shift(-1) + '\';refresh()">&larr;</button><b>' + esc(dayLabel(day)) + '</b><button class="btn ghost sm" onclick="State.day=\'' + shift(1) + '\';refresh()">&rarr;</button></div>' +
-    profileSwitcher() + dvTiles(Logic.dayTotals(entries), prof && prof.daily_targets) +
-    fluidCard(entries, day) +
+    profileSwitcher() + fluidCard(entries, day) +
     (State.role === 'pending' ? '<p class="note"><b>Waiting for approval.</b> An owner of the family needs to approve you before anything is shared with this phone.</p>' : '') +
     ((State.role === 'owner' || State.role == null) && (State.pendingMembers || []).length ? '<p class="note">' + esc(State.pendingMembers.join(', ')) + (State.pendingMembers.length === 1 ? ' is' : ' are') + ' waiting to join the family. <button class="linkish" onclick="showScreen(\'settings\')">Review in Settings</button></p>' : '') +
     (State.role === 'viewer' ? '<p class="note">View only. You can see everything the family logs; ask an owner if you need to add entries.</p>' : '') +
-    '<div class="btn-row writer-only"><button class="btn" onclick="logFood()">+ Log a meal</button><button class="btn ghost" onclick="logDrink()">&#129380; Log a drink</button><button class="btn ghost" onclick="logOutput()">&#128701; Log output</button><button class="btn ghost" onclick="logWeight()">&#9878; Weight</button></div>' + afterInputs() +
+    '<div class="btn-row writer-only"><button class="btn" onclick="logFood()">+ Log a meal</button><button class="btn ghost" onclick="logDrink()">' + icon('cup') + ' Log a drink</button><button class="btn ghost" onclick="logOutput()">' + icon('output') + ' Log output</button><button class="btn ghost" onclick="logWeight()">' + icon('scale') + ' Weight</button></div>' + afterInputs() +
     (entries.length ? entries.map(function (e) {
       var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
       var who = State.profiles.find(function (p) { return p.id === e.for_profile_id; });
-      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===this){event.preventDefault();this.click();}" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + (e.entry_kind === 'drink' ? '&#129380; ' : e.entry_kind === 'output' ? '&#128701; ' : '') + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + loggedBy(e) + '</span><div class="muted">' + (e.entry_kind === 'output' ? '<span class="' + (Logic.outputFlags(e).length ? 'flag-text' : '') + '">Out · ' + outputLine(e) + '</span>' + photoStatus(e) : Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + extraCount(e) + plateNote(e) + (e.entry_kind !== 'drink' && e.fluid_ml ? ' · +' + shortOz(Logic.fluidIn(e)) + ' fluid' : '')) + (e.entry_kind !== 'output' && !(e.kcal > 0) && e.estimate_source !== 'manual' && e.estimate_source !== 'water' && Sync.enabled() ? ' <button class="btn sm writer-only" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + plateButtons(e) + '</div></div><button class="icon-btn writer-only" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
+      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===this){event.preventDefault();this.click();}" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + (e.entry_kind === 'drink' ? icon('cup') + ' ' : e.entry_kind === 'output' ? icon('output') + ' ' : '') + esc(r ? r.title : e.entry_kind === 'output' && !e.free_text ? (OUTPUT_TYPES[e.output_type] || 'Output') : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult && e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + loggedBy(e) + '</span><div class="muted">' + (e.entry_kind === 'output' ? '<span class="' + (Logic.outputFlags(e).length ? 'flag-text' : '') + '">Out · ' + outputLine(e) + '</span>' + photoStatus(e) : Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + extraCount(e) + plateNote(e) + (e.entry_kind !== 'drink' && e.fluid_ml ? ' · +' + shortOz(Logic.fluidIn(e)) + ' fluid' : '')) + (e.entry_kind !== 'output' && !(e.kcal > 0) && e.estimate_source !== 'manual' && e.estimate_source !== 'water' && Sync.enabled() ? ' <button class="btn sm writer-only" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + plateButtons(e) + '</div></div></div>';
     }).join('') : '<div class="empty">Nothing logged.</div>') +
+    nutritionRow(entries, prof) +
     trashLink() +
     (prof ? '<h2>Notes for ' + esc(prof.person_name) + '\'s next appointment</h2><div class="card"><textarea id="profNotes" rows="4" placeholder="Questions to ask, patterns you noticed...">' + esc(prof.notes || '') + '</textarea><div class="btn-row"><button class="btn sm" onclick="saveProfileNotes(\'' + prof.id + '\')">Save notes</button><button class="btn sm ghost" onclick="weeklyDigest(\'' + prof.id + '\')">Weekly digest</button></div></div>' : '');
 }
@@ -962,7 +986,7 @@ function editDiaryEntry(id, focusNote) {
     (Sync.enabled() ? '<div class="btn-row"><button type="button" class="btn ghost" onclick="estimateIntoForm()">Estimate again</button></div><p class="muted">Fills the numbers from the recipe, description and photo. Nothing is saved until you tap Save.</p>' : '') +
     '</fieldset>' +
     (Sync.enabled() ? extraPhotosSection(id) : '') +
-    '<div class="btn-row"><button class="btn" id="eSave" onclick="saveDiaryEdit()">Save</button><button class="btn ghost" onclick="closeSheet()">Close</button>' + (drink ? '<button class="btn ghost writer-only" onclick="convertToOutput(\'' + id + '\')">This was output, not a drink</button>' : '') + '<button class="btn ghost" onclick="showHistory(\'diary_entries\',\'' + id + '\')">History</button><button class="btn danger" onclick="closeSheet();deleteDiaryEntry(\'' + id + '\')">Delete</button></div>');
+    '<div class="btn-row"><button class="btn" id="eSave" onclick="saveDiaryEdit()">Save</button><button class="btn ghost" onclick="closeSheet()">Close</button>' + (drink ? '<button class="btn ghost writer-only" onclick="convertToOutput(\'' + id + '\')">This was output, not a drink</button>' : '') + '<button class="btn ghost" onclick="showHistory(\'diary_entries\',\'' + id + '\')">History</button><button class="btn ghost writer-only" onclick="closeSheet();deleteDiaryEntry(\'' + id + '\')">Delete</button><button class="btn danger" onclick="closeSheet();deleteDiaryEntry(\'' + id + '\')">Delete</button></div>');
   ['eWho', 'eWhen', 'eRecipe', 'eText', 'ePort', 'eOz', 'eNote', 'eFluid'].forEach(function (fid) { var el = document.getElementById(fid); if (el) sess.before[fid] = el.value; });
   Logic.NUTRIENTS.forEach(function (k) { sess.base[k] = e[k] != null ? e[k] : null; sess.shown[k] = nutShown(e[k], mult); });
   if (focusNote) setTimeout(function () { var n = document.getElementById('eNote'); if (n) { n.scrollIntoView({ block: 'center' }); n.focus(); } }, 50);

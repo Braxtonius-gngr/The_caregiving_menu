@@ -9,21 +9,21 @@ function capturePid() {
 function openCapture() {
   var pid = capturePid(), a = pid ? '\'' + pid + '\'' : 'null';
   var prof = State.profiles.find(function (p) { return p.id === pid; });
-  var tile = function (icon, label, sub, js) { return '<button class="cap-tile" onclick="' + js + '"><span class="cap-ico">' + icon + '</span><b>' + label + '</b>' + (sub ? '<span class="muted">' + sub + '</span>' : '') + '</button>'; };
+  var tile = function (ico, label, sub, js) { return '<button class="cap-tile" onclick="' + js + '">' + iconDot(ico) + '<b>' + label + '</b>' + (sub ? '<span class="muted">' + sub + '</span>' : '') + '</button>'; };
   openSheet('<h2 style="margin-top:0" data-nosnap>Log something' + (prof ? ' for ' + esc(prof.person_name) : '') + '</h2>' +
     '<div class="cap-grid">' +
-    tile('&#128247;', 'Snap it', 'any screen, bottle or paper', 'snapIt(' + a + ')') +
-    tile('&#127908;', 'Say it', 'talk, it makes the entries', 'sayIt(' + a + ')') +
-    tile('&#129380;', 'Drink', '', 'logDrink()') +
-    tile('&#128701;', 'Output', 'urine, stool, drain', 'logOutput()') +
-    tile('&#10084;&#65039;', 'BP &amp; vitals', '', 'logVital(' + a + ',\'blood_pressure\')') +
-    tile('&#9878;&#65039;', 'Weight', '', 'logWeight()') +
-    tile('&#128138;', 'Medicines', 'mark doses', 'closeSheet();showScreen(\'meds\',{pid:' + a + '})') +
-    tile('&#127869;', 'Meal', '', 'logFood()') +
-    tile('&#129336;', 'Exercise', 'from her therapy list', 'closeSheet();showScreen(\'home\')') +
-    tile('&#127897;', 'Visit notes', 'Scribe', 'scribeIt(' + a + ')') +
-    tile('&#128221;', 'Note or update', 'for the family', 'editRecord(null,\'update\',' + a + ')') +
-    tile('&#128196;', 'Paper or document', '', 'snapIt(' + a + ')') +
+    tile('camera', 'Snap it', 'any screen, bottle or paper', 'snapIt(' + a + ')') +
+    tile('mic', 'Say it', 'talk, it makes the entries', 'sayIt(' + a + ')') +
+    tile('cup', 'Drink', '', 'logDrink()') +
+    tile('output', 'Output', 'urine, stool, drain', 'logOutput()') +
+    tile('vitals', 'BP &amp; vitals', '', 'logVital(' + a + ',\'blood_pressure\')') +
+    tile('scale', 'Weight', '', 'logWeight()') +
+    tile('pill', 'Medicines', 'mark doses', 'closeSheet();showScreen(\'meds\',{pid:' + a + '})') +
+    tile('meal', 'Meal', '', 'logFood()') +
+    tile('exercise', 'Exercise', 'from her therapy list', 'closeSheet();showScreen(\'home\')') +
+    tile('note', 'Visit notes', 'Scribe', 'scribeIt(' + a + ')') +
+    tile('update', 'Note or update', 'for the family', 'editRecord(null,\'update\',' + a + ')') +
+    tile('doc', 'Paper or document', '', 'snapIt(' + a + ')') +
     '</div><p class="muted">Recipes, receipts and groceries are in <a href="#" onclick="event.preventDefault();closeSheet();showScreen(\'kitchen\',{tab:\'add\'})">Kitchen &rarr; Add</a>.</p>' +
     '<div class="btn-row"><button class="btn ghost" onclick="closeSheet()">Close</button></div>');
 }
