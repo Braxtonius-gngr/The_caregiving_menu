@@ -348,6 +348,17 @@ t('mergeMeds: a forced merge joins times, sources and names, flags a strength cl
   // Same generic: the check had it, so the merge is not a forced one.
   assert.strictEqual(Logic.mergeMeds({ title: 'Lasix', fields: { generic: 'furosemide' } }, { title: 'Furosemide 40 mg', fields: {} }).caught, true);
 });
+t('repointPlan: questions, their time changes and drafted schedule lines follow a merged medicine', function () {
+  var qs = { status: 'to_ask', questions: [{ text: 'Earlier?', med_id: 'd', change: { med_id: 'd', slot: 'evening', time: '16:00' } }, { text: 'Other', med_id: 'x' }, { text: 'General', med_id: null }] };
+  var out = Logic.repointPlan(qs, 'd', 'k');
+  assert.deepEqual(out.questions.map(function (q) { return q.med_id; }), ['k', 'x', null]);
+  assert.strictEqual(out.questions[0].change.med_id, 'k');
+  assert.strictEqual(out.status, 'to_ask');
+  assert.strictEqual(qs.questions[0].med_id, 'd', 'the saved plan is not changed in place');
+  assert.deepEqual(Logic.repointPlan({ status: 'draft', items: [{ med_id: 'd', slot: 'morning' }, { med_id: 'x' }] }, 'd', 'k').items.map(function (i) { return i.med_id; }), ['k', 'x']);
+  assert.strictEqual(Logic.repointPlan(qs, 'nope', 'k'), null);
+  assert.strictEqual(Logic.repointPlan(undefined, 'd', 'k'), null);
+});
 t('reconcileMeds: list vs bottle strength, missing bottle, not on list, duplicates, flags', function () {
   var meds = [
     { id: 'a', title: 'Furosemide 20 mg', fields: { generic: 'furosemide', slots: 'morning', sources: [{ type: 'list', strength: '20 mg', said: 'Furosemide 20mg AM' }, { type: 'bottle', strength: '40 mg', said: 'Take 1 tablet every morning' }] } },
