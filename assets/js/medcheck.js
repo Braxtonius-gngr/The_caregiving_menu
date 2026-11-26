@@ -56,7 +56,7 @@ function printMedCheck() {
 
 /* ---------- Merge two saved medicines by hand ----------
  * For when the duplicate check did not catch that two entries are one medicine (a brand the FDA
- * lookup missed, a misspelling). The other entry's doses, photos, sources and times move into
+ * lookup missed, a misspelling). The other entry's doses, photos, sources, times and plans move into
  * this one and it goes to Deleted for 30 days. When the check had not paired them, the merge was
  * forced: a short note (the two names, generics and strengths) goes to Reports so the matching
  * can be improved. The family can untick that. */
@@ -106,8 +106,10 @@ function mergeMedSave() {
     var doses = dosesOf(pid), mine = doses.filter(function (d) { return (d.fields || {}).med_id === keepId; });
     var move = doses.filter(function (d) { var f = d.fields || {}; return !d.deleted && f.med_id === dropId && (f.slot === 'prn' || !Logic.doseFor(mine, keepId, f.day, f.slot)); });
     var photos = (State.entryPhotos || []).filter(function (p) { return p.entry_id === dropId; });
-    return Promise.all(move.map(function (d) { return DB.update('records', d.id, function (c) { if (!c) return null; c.fields = Object.assign({}, c.fields, { med_id: keepId }); return c; }); })
-      .concat(photos.map(function (p) { return DB.update('entry_photos', p.id, function (c) { if (!c) return null; c.entry_id = keepId; return c; }); })));
+    // Pharmacist questions and drafted schedules that named the other entry now name this one.
+    var plans = recordsOf(pid, ['plan']).filter(function (r) { return !r.deleted && Logic.repointPlan(r.fields, dropId, keepId); });
+    return Promise.all(plans.map(function (r) { return DB.update('records', r.id, function (c) { if (!c) return null; var nf = Logic.repointPlan(c.fields, dropId, keepId); if (nf) c.fields = nf; return c; }); }).concat(move.map(function (d) { return DB.update('records', d.id, function (c) { if (!c) return null; c.fields = Object.assign({}, c.fields, { med_id: keepId }); return c; }); })
+      .concat(photos.map(function (p) { return DB.update('entry_photos', p.id, function (c) { if (!c) return null; c.entry_id = keepId; return c; }); }))));
   }).then(function () { return DB.remove('records', dropId); })
     .then(function () {
       if (out.caught || !tell) return;

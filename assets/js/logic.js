@@ -540,6 +540,15 @@ var Logic = (function () {
    * blanks filled from the other, times of day and sources joined, the other name remembered
    * (so the duplicate check knows it next time), and a flag when the strengths differ.
    * `caught` says whether the duplicate check had paired them; when false the merge was forced. */
+  // A plan (pharmacist questions, or a drafted schedule) that names the merged-away medicine now
+  // names the kept one. Returns the plan's new fields, or null when it never mentioned it.
+  function repointPlan(fields, fromId, toId) {
+    var hit = false, f = JSON.parse(JSON.stringify(fields || {}));
+    var fix = function (o) { if (o && o.med_id === fromId) { o.med_id = toId; hit = true; } };
+    (f.questions || []).forEach(function (q) { fix(q); fix(q && q.change); });
+    (f.items || []).forEach(fix);
+    return hit ? f : null;
+  }
   function mergeMeds(keep, drop) {
     var f = JSON.parse(JSON.stringify(keep.fields || {})), d = drop.fields || {}, own = { slots: 1, slot_times: 1, instructions: 1, sources: 1, check: 1, start: 1, stop: 1, also_called: 1 };
     Object.keys(d).forEach(function (k) { if (!own[k] && (f[k] == null || f[k] === '') && d[k] != null && d[k] !== '') f[k] = d[k]; });
@@ -650,7 +659,7 @@ var Logic = (function () {
     if (m) return +m[1] || words[m[1]] || 1;
     return 1;
   }
-  return { exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, mergeMeds: mergeMeds, medSame: medSame, medBrief: medBrief, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
+  return { exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, mergeMeds: mergeMeds, repointPlan: repointPlan, medSame: medSame, medBrief: medBrief, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
     slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, stayOpen: stayOpen, stayAt: stayAt, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();
