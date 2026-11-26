@@ -305,9 +305,9 @@ var autoSyncStarted = false;
 function startAutoSync() {
   if (autoSyncStarted || !Sync.enabled()) return;
   autoSyncStarted = true;
-  syncNow();
   window.addEventListener('online', syncNow);
   setInterval(syncNow, 5 * 60 * 1000);
+  return syncNow();
 }
 var lastSyncError = null;
 function syncNow() {
