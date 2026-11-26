@@ -36,6 +36,7 @@ var ICONS = {
   barcode: '<path d="M4 6v12M7 6v12M9.5 6v12M13 6v12M15.5 6v12M18 6v12M20.5 6v12"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
   books: '<path d="M4 4h5v16H4zM10.5 4h4v16h-4z"/><path d="M16 5.2l3.6-1 2.2 15-3.6 1z"/>',
+  clip: '<path d="M20.5 11.5l-8.3 8.3a5 5 0 0 1-7-7L13.6 4.4a3.3 3.3 0 0 1 4.7 4.7l-8.4 8.4a1.7 1.7 0 0 1-2.4-2.4l7.7-7.7"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   heart: '<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/>'
 };
@@ -148,6 +149,8 @@ function profileSwitcher() {
 }
 function setProfile(id) { State.activeProfile = id; DB.meta('active_profile', id); refresh(); }
 
+// An empty Kitchen list says what would fill it and offers that step.
+function kitchenEmpty(text, label, tab) { return '<div class="empty">' + text + '<div class="btn-row" style="justify-content:center"><button class="btn sm ghost" onclick="showScreen(\'kitchen\',{tab:\'' + tab + '\'})">' + label + '</button></div></div>'; }
 /* ---------- Kitchen ideas (was Home): what to cook, use up, restock, the shopping list ---------- */
 function renderKitchenIdeas() {
   var cookNow = State.recipes.filter(function (r) { return S.recipeInfo[r.id].cov.pct === 100 && S.recipeInfo[r.id].cov.total > 0; }).sort(function (a, b) { return (a.last_cooked_on || '') < (b.last_cooked_on || '') ? -1 : 1; });
@@ -158,8 +161,8 @@ function renderKitchenIdeas() {
   var restock = Logic.restockSuggestions(State.pantry, S.usageByIng, S.ingById);
   var html = profileSwitcher();
   if (!State.recipes.length) html += '<div class="card"><h3>Welcome</h3><p class="muted">Add a recipe and a few pantry items and this screen fills in with what you can cook tonight. Try <b>Settings &rarr; Load sample data</b> to see it working.</p></div>';
-  html += '<h2>Cook tonight</h2>' + (cookNow.length ? cookNow.slice(0, 6).map(recipeCard).join('') : '<div class="empty">Nothing fully covered yet.</div>');
-  html += '<h2>One trip away</h2>' + (oneTrip.length ? oneTrip.slice(0, 6).map(recipeCard).join('') : '<div class="empty">No near-misses.</div>');
+  html += '<h2>Cook tonight</h2>' + (cookNow.length ? cookNow.slice(0, 6).map(recipeCard).join('') : kitchenEmpty('Nothing you can cook from the pantry yet.', 'Add a recipe', 'add'));
+  html += '<h2>One trip away</h2>' + (oneTrip.length ? oneTrip.slice(0, 6).map(recipeCard).join('') : kitchenEmpty('No recipes one shopping trip away.', 'See the pantry', 'pantry'));
   if (useUp.length) html += '<h2>Use it up</h2><p class="muted">' + expiring.map(function (p) { return esc(S.ingById[p.ingredient_id].name) + ' (' + esc(p.expires_on) + ')'; }).join(', ') + '</p>' + useUp.slice(0, 4).map(recipeCard).join('');
   if (restock.length) html += '<h2>Restock</h2>' + restock.map(function (s) { return '<div class="list-item"><div class="grow"><b>' + esc(S.ingById[s.ingredient_id].name) + '</b><div class="muted">' + esc(s.why) + '</div></div><button class="btn sm" onclick="addToList(\'' + s.ingredient_id + '\',\'low_stock\')">+ list</button></div>'; }).join('');
   var open = State.shopping.filter(function (s) { return !s.done; });

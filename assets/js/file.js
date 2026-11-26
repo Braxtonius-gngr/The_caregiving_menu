@@ -40,9 +40,9 @@ function renderFile(arg) {
   var section = arg.section || S.fileSection || 'summary'; S.fileSection = section;
   var prof = State.profiles.find(function (p) { return p.id === pid; });
   var go = function (o) { return 'showScreen(\'file\',' + JSON.stringify(o).replace(/"/g, '&quot;') + ')'; };
-  var head = '<div class="chips">' + State.profiles.map(function (p) { return '<span class="chip' + (p.id === pid ? ' on' : '') + '" onclick="' + go({ pid: p.id, section: section }) + '">' + esc(p.person_name) + '</span>'; }).join('') + '</div>' +
+  var head = (State.profiles.length < 2 ? '' : '<div class="chips">' + State.profiles.map(function (p) { return '<span class="chip' + (p.id === pid ? ' on' : '') + '" onclick="' + go({ pid: p.id, section: section }) + '">' + esc(p.person_name) + '</span>'; }).join('') + '</div>') +
     (prof ? '' : '<p class="muted">Add the person you care for in Settings first.</p>') +
-    '<div class="seg" role="tablist">' + FILE_SECTIONS.map(function (s) { return '<button role="tab" aria-selected="' + (s[0] === section) + '" class="seg-btn' + (s[0] === section ? ' on' : '') + '" onclick="' + go({ pid: pid, section: s[0] }) + '">' + s[1] + '</button>'; }).join('') + '</div>';
+    '<div class="seg scrolls" role="tablist">' + FILE_SECTIONS.map(function (s) { return '<button role="tab" aria-selected="' + (s[0] === section) + '" class="seg-btn' + (s[0] === section ? ' on' : '') + '" onclick="' + go({ pid: pid, section: s[0] }) + '">' + s[1] + '</button>'; }).join('') + '</div>';
   if (!prof) return head;
   head += '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'ask\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">&#128172; Ask her file</button></div>';
   var body = { summary: fileSummary, team: fileTeam, labs: fileLabs, visits: fileVisits, therapy: fileTherapy, documents: fileDocuments, updates: fileUpdates, export: fileExport }[section] || fileSummary;
@@ -51,8 +51,8 @@ function renderFile(arg) {
 function addBtn(kind, pid, label) { return '<button class="btn sm writer-only" onclick="editRecord(null,\'' + kind + '\',' + (pid ? '\'' + pid + '\'' : 'null') + ')">+ ' + esc(label || RECORD_KINDS[kind].label) + '</button>'; }
 function recordCard(r, sub, extra) {
   var files = extraPhotosOf(r.id).length;
-  return '<div class="card tappable" role="button" tabindex="0" onclick="editRecord(\'' + r.id + '\')" onkeydown="if(event.key===\'Enter\')this.click()"><b>' + esc(r.title || RECORD_KINDS[r.kind].label) + '</b>' + (sub ? ' <span class="muted">' + sub + '</span>' : '') +
-    (extra ? '<div class="muted">' + extra + '</div>' : '') + (files ? '<div class="muted">&#128206; ' + files + ' file' + (files === 1 ? '' : 's') + '</div>' : '') + '</div>';
+  return '<div class="card rec tappable" role="button" tabindex="0" onclick="editRecord(\'' + r.id + '\')" onkeydown="if(event.key===\'Enter\')this.click()"><b>' + esc(r.title || RECORD_KINDS[r.kind].label) + '</b>' + (sub ? ' <span class="muted">' + sub + '</span>' : '') +
+    (extra ? '<div class="muted">' + extra + '</div>' : '') + (files ? '<div class="muted">' + icon('clip') + ' ' + files + ' file' + (files === 1 ? '' : 's') + '</div>' : '') + '</div>';
 }
 
 /* ---------- sections ---------- */

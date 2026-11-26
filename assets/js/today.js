@@ -139,15 +139,23 @@ function dropCare(pid) {
 
 /* ---------- meds now ---------- */
 var DOSE_TEXT = { given: '&#10003; given', skipped: 'skipped', refused: 'refused', due: 'due now', overdue: 'overdue', later: 'later', covered: '&hearts; covered' };
+// One dose on the Daily meds screen, in Today's pattern (P-020): a round check to mark it given, the state in words,
+// a filled check once given (tap to edit), a heart for doses covered by a care stay (nothing to do).
+var DOSE_WORD = { skipped: '<span class="badge">Skipped</span> ', refused: '<span class="badge warn">Refused</span> ', covered: '<span class="badge ok">Covered</span> ' };
 function doseRow(p, pid) {
   var f = p.med.fields || {}, d = p.dose;
   var amt = d && d.fields.amount && d.fields.amount !== f.dose ? ' · <b>' + esc(d.fields.amount) + '</b>' : '';
-  var by = d ? ' ' + esc(localTime(d.occurred_at || d.updated_at)) + amt + (d.edited_by || d.user_id ? ' by ' + esc(whoName(d.edited_by || d.user_id)) : '') : p.stay ? ' · in care at ' + esc(p.stay.org) : (p.time ? ' · ' + esc(p.time) : '');
-  return '<div class="list-item dose-' + p.state + '"><div class="grow tappable" onclick="aboutMed(\'' + p.med.id + '\')"><b>' + esc(p.med.title) + '</b> <span class="muted">' + esc([f.dose, f.with_food && f.with_food !== 'Either' ? f.with_food.toLowerCase() : ''].filter(Boolean).join(' · ')) + '</span>' +
-    '<div class="muted"><span class="dose-state">' + DOSE_TEXT[p.state] + '</span>' + by + (d && d.fields.note ? ' · ' + esc(d.fields.note) : '') + (f.label_boxed ? ' · <span class="flag-text">boxed warning</span>' : '') + '</div></div>' +
-    (d ? '<button class="btn sm ghost writer-only" onclick="editDose(\'' + d.id + '\')">Edit</button><button class="btn sm ghost writer-only" onclick="undoDose(\'' + d.id + '\')">Undo</button>'
-      : p.state === 'covered' ? ''
-      : '<button class="btn sm writer-only" onclick="giveDose(\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')">Given</button><button class="btn sm ghost writer-only" onclick="skipDose(\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')">Not given</button>') + '</div>';
+  var when = d ? (p.state === 'given' ? 'given ' : '') + esc(localTime(d.occurred_at || d.updated_at)) + amt + (d.edited_by || d.user_id ? ' by ' + esc(whoName(d.edited_by || d.user_id)) : '')
+    : p.stay ? 'in care at ' + esc(p.stay.org) : (p.time ? esc(p.time) : '');
+  var meta = (DOSE_TAG[p.state] ? DOSE_TAG[p.state] + ' ' : DOSE_WORD[p.state] || '') + [esc(f.dose || ''), when].filter(Boolean).join(' · ') +
+    (d && d.fields.note ? ' · ' + esc(d.fields.note) : '') + (f.label_boxed ? ' · <span class="flag-text">boxed warning</span>' : '');
+  var mark = p.state === 'covered' ? '<span class="check covered" aria-hidden="true">' + icon('heart') + '</span>'
+    : d ? '<button class="check' + (p.state === 'given' ? '' : ' skip') + ' writer-only" onclick="editDose(\'' + d.id + '\')" aria-label="Edit ' + esc(p.med.title) + ' dose">' + (p.state === 'given' ? icon('tick') : '<span class="dash"></span>') + '</button>'
+    : '<button class="check writer-only" onclick="tickDose(this,\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')" aria-label="Mark ' + esc(p.med.title) + ' given">' + icon('tick') + '</button>';
+  var after = d ? '<button class="linkish writer-only" onclick="undoDose(\'' + d.id + '\')">Undo</button>'
+    : p.state === 'covered' ? '' : '<button class="linkish writer-only" onclick="skipDose(\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')">Not given</button>';
+  return '<div class="dose dose-' + p.state + (p.state === 'given' ? ' done' : '') + '">' + mark +
+    '<div class="grow tappable" onclick="aboutMed(\'' + p.med.id + '\')"><div class="name">' + esc(p.med.title) + '</div><div class="meta">' + meta + '</div></div>' + after + '</div>';
 }
 function todayMeds(pid, day, plan) {
   var meds = medsOf(pid).filter(function (m) { return Logic.medActive(m, day); }), away = careStay(pid);
@@ -279,7 +287,7 @@ function renderMeds(arg) {
   var plan = planFor(pid, day), away = careStay(pid);
   var active = meds.filter(function (m) { return Logic.medActive(m, day); }).sort(function (a, b) { return (a.title || '').localeCompare(b.title || ''); });
   var prn = active.filter(function (m) { return Logic.medSlots(m).indexOf('prn') >= 0; });
-  var html = '<div class="chips">' + State.profiles.map(function (p) { return '<span class="chip' + (p.id === pid ? ' on' : '') + '" onclick="S.filePid=\'' + p.id + '\';showScreen(\'meds\',{pid:\'' + p.id + '\'})">' + esc(p.person_name) + '</span>'; }).join('') + '</div>';
+  var html = State.profiles.length < 2 ? '' : '<div class="chips">' + State.profiles.map(function (p) { return '<span class="chip' + (p.id === pid ? ' on' : '') + '" onclick="S.filePid=\'' + p.id + '\';showScreen(\'meds\',{pid:\'' + p.id + '\'})">' + esc(p.person_name) + '</span>'; }).join('') + '</div>';
   html += '<div class="row between"><h2>' + esc(dayLabel(day)) + '</h2>' + addBtn('medication', pid) + '</div>';
   if (!active.length) html += '<p class="muted">No medicines yet. Add each one with its dose and when it is given; the app then lists what is due each day. ' + helpLink('meds') + '</p>';
   if (away) html += underCareCard(pid, away);
@@ -313,7 +321,7 @@ function medWeek(pid, meds, doses, day) {
     return '<td title=""' + esc(x ? x.fields.status : 'not marked') + '">' + (!x ? '' : x.fields.status === 'given' ? '&#10003;' : '&ndash;') + '</td>';
   };
   var body = rows.map(function (r) { return '<tr><td>' + esc(r.m.title) + ' <span class="muted">' + esc(slotName(r.slot).toLowerCase()) + '</span></td>' + days.map(function (d) { return cell(r.m, r.slot, d); }).join('') + '</tr>'; }).join('');
-  return '<h2>Last 7 days</h2><div class="table-wrap"><table class="io-table med-week"><tr><th></th>' + days.map(function (d) { return '<th>' + esc(new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short' })) + '</th>'; }).join('') + '</tr>' + body +
+  return '<h2>Last 7 days</h2><div class="table-wrap"><table class="io-table med-week"><tr><th></th>' + days.map(function (d) { return '<th>' + esc(new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'narrow' })) + '</th>'; }).join('') + '</tr>' + body +
     '</table></div><p class="muted">&#10003; given · &ndash; skipped or refused' + (anyStay ? ' · &hearts; in care elsewhere' : '') + ' · blank: not marked</p>';
 }
 

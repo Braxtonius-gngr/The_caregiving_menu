@@ -87,8 +87,8 @@ h3 { font-size: var(--fs-body); font-weight: 680; }
 .badge.warn { background: var(--status-warn-bg); color: var(--status-warn-fg); }
 .badge.bad { background: var(--status-bad-bg); color: var(--status-bad-fg); }
 
-.ring { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; background: conic-gradient(var(--status-ok) calc(var(--pct) * 1%), var(--surface-sunken) 0); }
-.ring span { width: 38px; height: 38px; border-radius: 50%; background: var(--surface-card); display: grid; place-items: center; }
+.ring { width: 58px; height: 58px; border-radius: 50%; display: grid; place-items: center; font-size: var(--fs-caption); font-weight: 700; background: conic-gradient(var(--status-ok) calc(var(--pct) * 1%), var(--surface-sunken) 0); }
+.ring span { width: 46px; height: 46px; border-radius: 50%; background: var(--surface-card); display: grid; place-items: center; }
 
 .search { position: sticky; top: 64px; z-index: 4; background: var(--surface-page); padding: var(--space-2) 0; }
 .search input { border-radius: 999px; padding-left: 16px; }
@@ -401,3 +401,21 @@ details.nutrition .dv { margin-top: var(--space-4); }
 .sheet-body .cap-tile { background: var(--surface-sunken); box-shadow: none; }
 details.nutrition > summary b { white-space: nowrap; }
 details.nutrition > summary .muted { text-align: right; }
+
+/* U4: Daily meds rows share Today's check pattern; skipped and covered marks. */
+.check.skip { border-color: var(--text-muted); }
+.check.skip .dash { width: 12px; height: 2px; border-radius: 2px; background: var(--text-muted); }
+.check.covered { border-color: color-mix(in srgb, var(--calm) 60%, transparent); color: var(--calm); cursor: default; }
+.check.covered .ico { width: 16px; height: 16px; stroke-dasharray: none; stroke-dashoffset: 0; }
+h3 + .dose { margin-top: var(--space-1); }
+/* The 7-day grid fits a phone: one-letter days, a wide name column. */
+.med-week { table-layout: fixed; }
+.med-week th:first-child, .med-week td:first-child { width: 44%; }
+.med-week th, .med-week td { padding: 8px 2px; }
+/* File: records in a section read as one grouped list, not a box per line. */
+.card.rec { margin: 0; border-radius: 0; box-shadow: none; border-bottom: 1px solid var(--divider); padding: var(--space-4) var(--card-pad); }
+.card.rec:not(.rec + .rec) { margin-top: var(--space-3); border-top-left-radius: var(--radius-m); border-top-right-radius: var(--radius-m); }
+.card.rec:not(:has(+ .rec)) { margin-bottom: var(--space-3); border-bottom: 0; border-bottom-left-radius: var(--radius-m); border-bottom-right-radius: var(--radius-m); }
+.card.rec .ico { width: 16px; height: 16px; vertical-align: -3px; }
+/* A section bar with more tabs than fit fades at the right edge, so it reads as scrollable. */
+.seg.scrolls { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); padding-right: 36px; }
