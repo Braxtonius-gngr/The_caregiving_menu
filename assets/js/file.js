@@ -159,7 +159,61 @@ function fileUpdates(pid) {
 function postUpdate(pid) {
   var t = document.getElementById('upText').value.trim(); if (!t) return toast('Write something first');
   DB.put('records', { kind: 'update', for_profile_id: pid, title: '', occurred_at: new Date().toISOString(), fields: { text: t } })
-    .then(loadAll).then(function () { toast('Posted'); refresh(); if (Sync.enabled()) syncNow(); }).catch(function (e) { toast(e.message); });
+    .then(loadAll).then(function () { toast('Posted'); refresh(); if (Sync.enabled()) syncNow(); noteOfferSheet(pid, t, '', new Date().toISOString()); }).catch(function (e) { toast(e.message); });
+}
+
+/* ---------- From your note ----------
+ * After a visit, an update or the family notes are saved, anything in the words that belongs
+ * elsewhere in the file (a lab number, a new medicine, a hospital admission; see Logic.noteOffers)
+ * is offered back in one sheet. Nothing is saved from a note without a tap. */
+var NOTE_TEXT_FIELDS = { visit: ['why', 'said', 'changed', 'meds_changed', 'tests'], update: ['text'] };
+function noteTextOf(kind, title, fields) { return (kind === 'update' ? [title] : []).concat((NOTE_TEXT_FIELDS[kind] || []).map(function (k) { return (fields || {})[k]; })).filter(Boolean).join('. '); }
+function noteOfferSheet(pid, text, before, when) {
+  var o = Logic.noteOffersNew(text, before), day = careDayOf(when || new Date().toISOString());
+  var labs = recordsOf(pid, ['lab']), meds = recordsOf(pid, ['medication']).filter(function (r) { return !r.deleted; }).map(Logic.medBrief);
+  o.labs = o.labs.filter(function (l) { return !labs.some(function (r) { return !r.deleted && r.title === l.test && +(r.fields || {}).value === l.value; }); });
+  o.meds = o.meds.filter(function (m) { return !meds.some(function (x) { return Logic.medSame({ title: m.name, also: [] }, x); }); });
+  if (o.stay && (!pid || careStay(pid))) o.stay = null;
+  if (!o.labs.length && !o.meds.length && !o.stay) return false;
+  S.noteOffer = { pid: pid, o: o, when: when || new Date().toISOString(), day: day };
+  var a = pid ? '\'' + pid + '\'' : 'null';
+  openSheet('<h2 style="margin-top:0" data-nosnap>From your note</h2><p class="muted">Your note is saved. It also mentions things that have their own place in the file. Nothing below is saved unless you tap it.</p>' +
+    (o.labs.length ? '<div id="noLabs"><h3>Lab results</h3>' + o.labs.map(function (l, i) { return '<label class="check"><input type="checkbox" name="noLab" value="' + i + '" checked> ' + esc(l.test) + ' <b>' + esc(l.value) + '</b> <span class="muted">' + esc(LAB_UNITS[l.test] || '') + '</span></label>'; }).join('') +
+      '<label for="noLabDay">Date of the test</label><input id="noLabDay" type="date" value="' + esc(day) + '">' +
+      '<p class="muted">Check the numbers against the report. Add the unit and range later by opening each result.</p>' +
+      '<div class="btn-row"><button type="button" class="btn sm" onclick="noteOfferLabs()">Save as lab results</button></div></div>' : '') +
+    (o.meds.length ? '<h3>Medicines</h3>' + o.meds.map(function (m, i) { return '<div class="btn-row"><button type="button" class="btn sm" onclick="noteOfferMed(' + i + ')">Add ' + esc(m.name) + (m.strength ? ' ' + esc(m.strength) : '') + ' to the medicines</button></div>'; }).join('') +
+      '<p class="muted">Opens the medicine form with the name filled in, so you can put the exact name and dose from the bottle.</p>' : '') +
+    (o.stay ? '<h3>In care elsewhere</h3><div class="btn-row"><button type="button" class="btn sm" onclick="noteOfferStay()">' + icon('heart') + ' Start a stay' + (o.stay.org ? ' at ' + esc(o.stay.org) : '') + '</button></div>' +
+      '<p class="muted">Medicine reminders rest while their team is giving them, and nothing is counted as missed.</p>' : '') +
+    '<div class="btn-row"><button type="button" class="btn ghost" onclick="closeSheet()">Not now</button></div>');
+  return true;
+}
+function noteOfferLabs() {
+  var n = S.noteOffer; if (!n) return;
+  var picks = [].map.call(document.querySelectorAll('input[name="noLab"]:checked'), function (x) { return n.o.labs[+x.value]; });
+  var day = document.getElementById('noLabDay').value || n.day;
+  if (!picks.length) return toast('Tick at least one result');
+  Promise.all(picks.map(function (l) {
+    return DB.put('records', { kind: 'lab', for_profile_id: n.pid, title: l.test, occurred_at: new Date(day + 'T12:00:00').toISOString(), fields: { value: l.value, unit: LAB_UNITS[l.test] || null, notes: 'From a typed note. Check against the report.' } });
+  })).then(loadAll).then(function () {
+    var box = document.getElementById('noLabs'); if (box) box.innerHTML = '<p class="ok-note">&#10003; ' + picks.length + ' lab result' + (picks.length === 1 ? '' : 's') + ' saved.</p>';
+    n.o.labs = []; refresh(); if (Sync.enabled()) syncNow();
+    if (!n.o.meds.length && !n.o.stay) { closeSheet(); toast(picks.length + ' lab result' + (picks.length === 1 ? '' : 's') + ' saved'); }
+  }).catch(function (e) { toast('Could not save: ' + e.message); });
+}
+function noteOfferMed(i) {
+  var n = S.noteOffer, m = n && n.o.meds[i]; if (!m) return;
+  editRecord(null, 'medication', n.pid);
+  var set = function (id, v) { var el = document.getElementById(id); if (el && v) el.value = v; };
+  set('rTitle', m.name); set('rf-dose', m.strength); set('rf-start', n.day);
+}
+function noteOfferStay() {
+  var n = S.noteOffer; if (!n || !n.o.stay) return;
+  careSheet(n.pid);
+  var org = document.getElementById('careOrg'), from = document.getElementById('careFrom');
+  if (org && n.o.stay.org) org.value = n.o.stay.org;
+  if (from) from.value = localStamp(n.when);
 }
 
 /* ---------- editing a record ---------- */
@@ -253,6 +307,7 @@ function saveRecord(id, kind, pid, force) {
   }
   var chk = S.phoneCheck;
   if (fields.phone && chk && chk.id === 'rf-phone' && chk.res.valid) { fields.phone = chk.res.national || fields.phone; fields.phone_e164 = chk.res.e164; fields.phone_type = chk.res.line_type; fields.phone_carrier = chk.res.carrier; }
+  var noteBefore = NOTE_TEXT_FIELDS[kind] && id ? (function (r) { return r ? noteTextOf(kind, r.title, r.fields) : ''; })((State.records || []).find(function (r) { return r.id === id; })) : '';
   var whenEl = document.getElementById('rWhen'), when = whenEl && whenEl.value ? new Date(K.date === 'date' ? whenEl.value + 'T12:00:00' : whenEl.value).toISOString() : null;
   var write = id
     ? DB.update('records', id, function (cur) {
@@ -266,9 +321,12 @@ function saveRecord(id, kind, pid, force) {
     S.phoneCheck = null; toast(saved ? 'Saved' : 'This was deleted elsewhere');
     if (saved && kind === 'visit' && S.scribe && S.scribe.pendingClear) { scribeClear(); S.scribe = null; }
     return (!id && saved ? snapAfterSave(saved) : Promise.resolve()).then(loadAll).then(function () {
-      if (!id && saved && Sync.enabled() && (kind === 'visit' || kind === 'document' || kind === 'lab')) { editRecord(saved.id); toast('Saved. Attach photos or PDFs below.'); }
+      var offered = saved && NOTE_TEXT_FIELDS[kind] && noteOfferSheet(saved.for_profile_id || null, noteTextOf(kind, title, fields), noteBefore, when);
+      if (offered) { /* the offers sheet replaces this one; photos can be attached by opening the entry */ }
+      else if (!id && saved && Sync.enabled() && (kind === 'visit' || kind === 'document' || kind === 'lab')) { editRecord(saved.id); toast('Saved. Attach photos or PDFs below.'); }
       else closeSheet();
-      refresh(); if (Sync.enabled()) syncNow();
+      refresh();
+      if (Sync.enabled()) syncNow();
     });
   }).catch(function (e) { toast('Could not save: ' + e.message); });
 }

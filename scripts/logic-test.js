@@ -370,6 +370,22 @@ t('medTimingIssues: no time of day, and times that disagree with the words, each
   var r = Logic.reconcileMeds([{ id: 'a', title: 'Amiodarone', fields: { slots: 'morning', when: 'Twice a day' } }], '2026-11-25');
   assert.ok(r.items[0].issues.some(function (i) { return i.level === 'warn' && /twice a day, but 1 time of day is picked/.test(i.text); }));
 });
+t('noteOffers: lab numbers, a new medicine and an admission are found in a typed note; plain sentences offer nothing', function () {
+  var o = Logic.noteOffers('Added antibiotic for u t I and referred to primary HEMOGLOBIN @ 8 GFR @ 11');
+  assert.deepEqual(o.labs, [{ test: 'eGFR', value: 11 }, { test: 'Hemoglobin', value: 8 }]);
+  assert.deepEqual(o.meds, [{ name: 'Antibiotic', strength: null }]);
+  assert.strictEqual(o.stay, null);
+  var s = Logic.noteOffers("Called ambulance - Memaw very weak she said 'feeling very very sick' and having trouble speaking taken to North Central Baptist and admitted overnight");
+  assert.deepEqual([s.stay.org, s.labs.length, s.meds.length], ['North Central Baptist', 0, 0]);
+  assert.strictEqual(Logic.noteOffers('She was admitted last night.').stay.org, null);
+  assert.strictEqual(Logic.noteOffers('Went to Connally Urgent Care, sent home.').stay, null, 'a visit that is not an admission is not a stay');
+  assert.deepEqual(Logic.noteOffers('Dr. Lee started lisinopril 10 mg and gave her a steroid. Potassium was 5.4, A1c 7.2, creatinine: 3.1').meds, [{ name: 'Lisinopril', strength: '10 mg' }, { name: 'Steroid', strength: null }]);
+  assert.deepEqual(Logic.noteOffers('Potassium was 5.4, A1c 7.2, creatinine: 3.1').labs.map(function (l) { return l.test + ' ' + l.value; }), ['Creatinine 3.1', 'Potassium 5.4', 'A1c 7.2']);
+  ['Very helpful with physically assisting her and changing.', 'Started feeling better after lunch, added a pillow.', 'Nurse checked sodium intake and gave her water.', 'BP 120/80 at 9:30, glucose check at 11/25', 'Opted not to discharge, cleaned Foley and checked for blockage.']
+    .forEach(function (t) { assert.strictEqual(Logic.noteOffers(t).any, false, t); });
+  var n = Logic.noteOffersNew('GFR 11. Hemoglobin 8. Later: started cephalexin', 'GFR 11. Hemoglobin 8.');
+  assert.deepEqual([n.labs.length, n.meds.map(function (m) { return m.name; }).join()], [0, 'Cephalexin']);
+});
 t('repointPlan: questions, their time changes and drafted schedule lines follow a merged medicine', function () {
   var qs = { status: 'to_ask', questions: [{ text: 'Earlier?', med_id: 'd', change: { med_id: 'd', slot: 'evening', time: '16:00' } }, { text: 'Other', med_id: 'x' }, { text: 'General', med_id: null }] };
   var out = Logic.repointPlan(qs, 'd', 'k');

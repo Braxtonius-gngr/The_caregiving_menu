@@ -1314,7 +1314,7 @@ function deleteDiaryEntry(id) {
   DB.update('diary_entries', id, function (cur) { if (!cur) return null; cur.deleted = true; return cur; })
     .then(loadAll).then(function () { refresh(); toast('Deleted', 'Undo', function () { restoreFromTrash('diary_entries', id); }); });
 }
-function saveProfileNotes(id) { var p = State.profiles.find(function (x) { return x.id === id; }); p.notes = Logic.datedNotes(p.notes, document.getElementById('profNotes').value, todayISO()); DB.put('diet_profiles', p).then(function () { toast('Saved'); var ta = document.getElementById('profNotes'); if (ta) ta.value = p.notes; }); }
+function saveProfileNotes(id) { var p = State.profiles.find(function (x) { return x.id === id; }), before = p.notes || ''; p.notes = Logic.datedNotes(p.notes, document.getElementById('profNotes').value, todayISO()); DB.put('diet_profiles', p).then(function () { toast('Saved'); var ta = document.getElementById('profNotes'); if (ta) ta.value = p.notes; if (typeof noteOfferSheet === 'function') noteOfferSheet(id, p.notes, before, new Date().toISOString()); }); }
 // Everything the digest, the copyable summary and the Claude draft are built from.
 function digestData(pid, span) {
   var since = Date.now() - span * 864e5;

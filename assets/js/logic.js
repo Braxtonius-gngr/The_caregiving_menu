@@ -572,6 +572,44 @@ var Logic = (function () {
    * blanks filled from the other, times of day and sources joined, the other name remembered
    * (so the duplicate check knows it next time), and a flag when the strengths differ.
    * `caught` says whether the duplicate check had paired them; when false the merge was forced. */
+  /* ---------- Reading a typed note for things that belong elsewhere in the file ----------
+   * A visit note or family update often holds a lab number ("HEMOGLOBIN @ 8 GFR @ 11"), a new
+   * medicine ("added antibiotic") or a hospital admission. These are only ever offered back to
+   * the person who typed them; nothing is saved from a note without a tap. No AI: plain patterns,
+   * kept narrow so an ordinary sentence offers nothing. */
+  var NOTE_LABS = [['eGFR', 'e?gfr'], ['Creatinine', 'creatinine|creat'], ['BUN', 'bun'], ['Potassium', 'potassium'], ['Sodium', 'sodium'], ['Phosphorus', 'phosphorus|phos'],
+    ['Calcium', 'calcium'], ['Albumin', 'albumin'], ['Hemoglobin', 'hemoglobin|haemoglobin|hgb'], ['Hematocrit', 'hematocrit|hct'], ['A1c', 'hba1c|a1c'], ['Glucose', 'glucose|blood sugar'], ['PTH', 'pth']];
+  var NOTE_MED_CLASS = /^(antibiotics?|steroids?|insulin|inhaler|nebulizer|patch|ointment|cream|eye ?drops|ear ?drops|drops|supplement|vitamin|probiotic|painkiller|laxative|stool softener|diuretic|antifungal|antiviral|antacid|blood thinner|water pill|sleeping pill|nausea medicine)$/;
+  var NOTE_MED_SUFFIX = /(cillin|mycin|floxacin|oxacin|cycline|pril|sartan|olol|statin|prazole|dipine|azole|zepam|zolam|tidine|formin|gliptin|gliflozin|lukast|semide|thiazide|parin|xaban|setron|caine|sone|solone|terol|triptan|profen|cephalexin|nitrofurantoin|trimethoprim|bactrim|macrobid|keflex)$/;
+  var NOTE_MED_VERB = '(added|started|start|starting|prescribed|began|begin|put (?:her|him|them|me) on|gave (?:her|him|them|me)|new (?:medicine|med|prescription)(?: is|:)?)';
+  function noteOffers(text) {
+    var t = String(text || ''), labs = [], meds = [], stay = null, seen = {};
+    NOTE_LABS.forEach(function (L) {
+      var re = new RegExp('(?:^|[^a-z0-9])(?:' + L[1] + ')\\s*(?:@|:|=|of|is|was|at|level|came back(?: at)?)?\\s*(\\d+(?:\\.\\d+)?)(?![\\d/:-])', 'i'), m = re.exec(t);
+      if (m) labs.push({ test: L[0], value: +m[1] });
+    });
+    var re = new RegExp('\\b' + NOTE_MED_VERB + '\\s+(?:(?:an?|the|some|on|a new|new|taking)\\s+)*((?:blood thinner|water pill|sleeping pill|stool softener|nausea medicine|eye ?drops|ear ?drops|[a-z][a-z-]{2,}))(\\s+\\d+(?:\\.\\d+)?\\s*(?:mcg|mg|g|ml|units?))?', 'gi'), m;
+    while ((m = re.exec(t))) {
+      var name = m[2].toLowerCase(), strength = (m[3] || '').trim();
+      if (!(NOTE_MED_CLASS.test(name) || NOTE_MED_SUFFIX.test(name) || strength || /^prescribed$/i.test(m[1]) && name.length > 4)) continue;
+      if (/^(feeling|having|being|taking|getting|going|eating|drinking|walking|using|with|more|less|that|this|her|him|them|for|and|but)$/.test(name) || seen[name]) continue;
+      seen[name] = 1; meds.push({ name: name.charAt(0).toUpperCase() + name.slice(1), strength: strength || null });
+    }
+    if (/\b(admitted|hospitali[sz]ed|inpatient|kept (?:her |him |them )?overnight)\b/i.test(t)) {
+      var o = /\b(?:taken to|admitted to|admitted at|transferred to|transported to|went to|brought to|at)\s+((?:(?:the|of)\s+)?[A-Z][\w'&.-]*(?:\s+(?:of\s+)?[A-Z][\w'&.-]*){0,5})/.exec(t);
+      stay = { org: o ? o[1].replace(/^the\s+/i, '').replace(/[.,;]+$/, '') : null };
+    }
+    return { labs: labs, meds: meds, stay: stay, any: !!(labs.length || meds.length || stay) };
+  }
+  // Offers in `now` that were not already in `before`, so editing a note does not ask again.
+  function noteOffersNew(now, before) {
+    var a = noteOffers(now), b = noteOffers(before);
+    a.labs = a.labs.filter(function (x) { return !b.labs.some(function (y) { return y.test === x.test && y.value === x.value; }); });
+    a.meds = a.meds.filter(function (x) { return !b.meds.some(function (y) { return y.name === x.name; }); });
+    if (b.stay) a.stay = null;
+    a.any = !!(a.labs.length || a.meds.length || a.stay);
+    return a;
+  }
   // A plan (pharmacist questions, or a drafted schedule) that names the merged-away medicine now
   // names the kept one. Returns the plan's new fields, or null when it never mentioned it.
   function repointPlan(fields, fromId, toId) {
@@ -691,7 +729,7 @@ var Logic = (function () {
     if (m) return +m[1] || words[m[1]] || 1;
     return 1;
   }
-  return { exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, medKey: medKey, medFrequency: medFrequency, medTimingIssues: medTimingIssues, mergeMeds: mergeMeds, repointPlan: repointPlan, medSame: medSame, medBrief: medBrief, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
+  return { exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, noteOffers: noteOffers, noteOffersNew: noteOffersNew, medKey: medKey, medFrequency: medFrequency, medTimingIssues: medTimingIssues, mergeMeds: mergeMeds, repointPlan: repointPlan, medSame: medSame, medBrief: medBrief, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
     slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, stayOpen: stayOpen, stayAt: stayAt, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();
