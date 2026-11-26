@@ -12,6 +12,19 @@ function localTime(iso) { var d = new Date(iso); return pad2(d.getHours()) + ':'
 function todayISO() { return localDay(); }
 function shiftDay(day, n) { var d = new Date(day + 'T12:00:00'); d.setDate(d.getDate() + n); return localDay(d.toISOString()); }
 
+// Line icons drawn on one 24px grid (P-020). icon('camera') returns inline SVG that follows the text colour.
+var ICONS = {
+  camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  tick: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  alert: '<path d="M12 4L2.5 20h19z"/><path d="M12 10v4M12 17h.01"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+  wave: '<path d="M7 11V6a1.5 1.5 0 0 1 3 0v4M10 10V4.5a1.5 1.5 0 0 1 3 0V10M13 10V5.5a1.5 1.5 0 0 1 3 0V12M16 9.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-12.5 4.3L4 14.5a1.6 1.6 0 0 1 2.4-2L8 14V8.5"/>',
+  note: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/>',
+  heart: '<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/>'
+};
+function icon(name) { return '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>'; }
+
 function rebuildIndexes() {
   S.ingById = {}; State.ingredients.forEach(function (i) { S.ingById[i.id] = i; });
   S.pantryByIng = {}; State.pantry.forEach(function (p) { (S.pantryByIng[p.ingredient_id] = S.pantryByIng[p.ingredient_id] || []).push(p); });
@@ -42,18 +55,30 @@ function toast(msg, actionLabel, actionFn) {
   t.classList.remove('hidden'); clearTimeout(t._h);
   t._h = setTimeout(function () { t.classList.add('hidden'); }, actionLabel ? 6000 : 2200);
 }
-function openSheet(html) { document.getElementById('sheetBody').innerHTML = html; document.getElementById('sheet').classList.remove('hidden'); }
+// Lists longer than `limit` rows scroll inside their own box so a card or window stays short.
+function scrollList(rows, limit, tall) {
+  rows = rows.filter(Boolean);
+  if (rows.length <= (limit || 4)) return rows.join('');
+  return '<div class="scroll-box' + (tall ? ' tall' : '') + '" tabindex="0" role="region" aria-label="List, scrolls">' + rows.join('') + '</div><div class="scroll-hint muted">' + rows.length + ' in all &middot; scroll for more</div>';
+}
+function openSheet(html) { if (typeof aiWrongAppend === 'function') html = aiWrongAppend(html); document.getElementById('sheetBody').innerHTML = html; document.getElementById('sheet').classList.remove('hidden'); }
 var scanSession = 0; // bumped when the scanner opens or a sheet closes; late lookups compare against it
 function closeSheet() { scanSession++; S.sharedPhoto = null; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
 
-var TITLES = { simple: '', home: 'Home', recipes: 'Recipes', scan: 'Add', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe' };
+var TITLES = { simple: '', home: 'Today', meds: 'Daily meds', help: 'How to', timing: 'Timing review', patterns: 'Patterns', plans: 'Pharmacist questions', phototest: 'Photo reader test', medcheck: 'Compare medicines', handoff: 'Catch me up', ask: 'Ask her file', reports: 'Reports', plan: 'Question sheet',  recipes: 'Recipes', scan: 'Kitchen', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted', file: 'Patient file', kitchen: 'Kitchen' };
 var currentScreen = 'home';
 function showScreen(name, arg) {
+  if (name !== 'help') S.lastScreen = name;
+  var entering = name !== currentScreen || !S.shownOnce; S.shownOnce = true;
   currentScreen = name;
   document.getElementById('screenTitle').textContent = TITLES[name] || name;
-  document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
-  var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe }[name];
-  document.getElementById('screen').innerHTML = fn ? fn(arg) : '';
+  var tab = { scan: 'kitchen', ask: 'home', handoff: 'home', medcheck: 'file', phototest: 'settings', recipes: 'kitchen', pantry: 'kitchen', recipe: 'kitchen', fluids: 'diary', trash: 'diary', meds: 'home', help: 'home', timing: 'home', patterns: 'home', plans: 'home', plan: 'home', reports: 'settings' }[name] || name;
+  document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === tab); });
+  var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe, fluids: renderFluids, trash: renderTrash, file: renderFile, kitchen: renderKitchen, meds: renderMeds, help: renderHelp, timing: renderTiming, patterns: renderPatterns, plans: renderPlans, plan: renderPlan, phototest: renderPhotoTest, medcheck: renderMedCheck, handoff: renderHandoff, ask: renderAsk, reports: renderReports }[name];
+  var el = document.getElementById('screen');
+  el.innerHTML = fn ? fn(arg) : '';
+  // A new screen settles in once; a re-render of the same screen (after a save) stays still.
+  if (entering) { el.classList.remove('entering'); void el.offsetWidth; el.classList.add('entering'); clearTimeout(S.enterTimer); S.enterTimer = setTimeout(function () { el.classList.remove('entering'); }, 1200); }
   window.scrollTo(0, 0);
 }
 function refresh() { rebuildIndexes(); showScreen(currentScreen, S.lastArg); }
@@ -92,18 +117,15 @@ function profileSwitcher() {
 }
 function setProfile(id) { State.activeProfile = id; DB.meta('active_profile', id); refresh(); }
 
-/* ---------- Home ---------- */
-function renderHome() {
+/* ---------- Kitchen ideas (was Home): what to cook, use up, restock, the shopping list ---------- */
+function renderKitchenIdeas() {
   var cookNow = State.recipes.filter(function (r) { return S.recipeInfo[r.id].cov.pct === 100 && S.recipeInfo[r.id].cov.total > 0; }).sort(function (a, b) { return (a.last_cooked_on || '') < (b.last_cooked_on || '') ? -1 : 1; });
   var oneTrip = State.recipes.filter(function (r) { var c = S.recipeInfo[r.id].cov; return c.pct >= 80 && c.pct < 100; });
   var expiring = Logic.expiringSoon(State.pantry, 4);
   var expIds = {}; expiring.forEach(function (p) { expIds[p.ingredient_id] = true; });
   var useUp = State.recipes.filter(function (r) { return (S.linesByRecipe[r.id] || []).some(function (l) { return expIds[l.ingredient_id]; }); });
   var restock = Logic.restockSuggestions(State.pantry, S.usageByIng, S.ingById);
-  var todays = State.diary.filter(function (e) { return localDay(e.eaten_at) === todayISO() && (!State.activeProfile || e.for_profile_id === State.activeProfile); });
-  var prof = State.profiles.find(function (p) { return p.id === State.activeProfile; });
   var html = profileSwitcher();
-  html += '<h2>Today so far</h2>' + dvTiles(Logic.dayTotals(todays), prof && prof.daily_targets);
   if (!State.recipes.length) html += '<div class="card"><h3>Welcome</h3><p class="muted">Add a recipe and a few pantry items and this screen fills in with what you can cook tonight. Try <b>Settings &rarr; Load sample data</b> to see it working.</p></div>';
   html += '<h2>Cook tonight</h2>' + (cookNow.length ? cookNow.slice(0, 6).map(recipeCard).join('') : '<div class="empty">Nothing fully covered yet.</div>');
   html += '<h2>One trip away</h2>' + (oneTrip.length ? oneTrip.slice(0, 6).map(recipeCard).join('') : '<div class="empty">No near-misses.</div>');
@@ -655,20 +677,31 @@ function savePantryForm(id) {
 }
 
 /* ---------- Diary ---------- */
+// "logged by Mom" once more than one person shares the diary; "edited by" when someone else changed it.
+function loggedBy(e) {
+  var names = State.memberNames || {};
+  if ((State.memberCount || 0) < 2 || !e.user_id) return '';
+  var by = names[e.user_id] || 'someone who left', ed = e.edited_by && e.edited_by !== e.user_id ? names[e.edited_by] : null;
+  return ' · by ' + esc(by) + (ed ? ' (edited by ' + esc(ed) + ')' : '');
+}
 function renderDiary() {
-  var day = State.day || todayISO();
-  var entries = State.diary.filter(function (e) { return localDay(e.eaten_at) === day && (!State.activeProfile || e.for_profile_id === State.activeProfile); }).sort(function (a, b) { return a.eaten_at < b.eaten_at ? -1 : 1; });
+  var day = State.day || careToday();
+  var entries = State.diary.filter(function (e) { return careDayOf(e.eaten_at) === day && (!State.activeProfile || e.for_profile_id === State.activeProfile); }).sort(function (a, b) { return a.eaten_at < b.eaten_at ? -1 : 1; });
   var prof = State.profiles.find(function (p) { return p.id === State.activeProfile; });
   var shift = function (n) { return shiftDay(day, n); };
-  return '<div class="row between"><button class="btn ghost sm" onclick="State.day=\'' + shift(-1) + '\';refresh()">&larr;</button><b>' + (day === todayISO() ? 'Today' : day) + '</b><button class="btn ghost sm" onclick="State.day=\'' + shift(1) + '\';refresh()">&rarr;</button></div>' +
+  return '<div class="row between"><button class="btn ghost sm" onclick="State.day=\'' + shift(-1) + '\';refresh()">&larr;</button><b>' + esc(dayLabel(day)) + '</b><button class="btn ghost sm" onclick="State.day=\'' + shift(1) + '\';refresh()">&rarr;</button></div>' +
     profileSwitcher() + dvTiles(Logic.dayTotals(entries), prof && prof.daily_targets) +
-    fluidsLine(entries) +
-    '<div class="btn-row"><button class="btn" onclick="logFood()">+ Log a meal</button><button class="btn ghost" onclick="logDrink()">&#129380; Log a drink</button></div>' + afterInputs() +
+    fluidCard(entries, day) +
+    (State.role === 'pending' ? '<p class="note"><b>Waiting for approval.</b> An owner of the family needs to approve you before anything is shared with this phone.</p>' : '') +
+    ((State.role === 'owner' || State.role == null) && (State.pendingMembers || []).length ? '<p class="note">' + esc(State.pendingMembers.join(', ')) + (State.pendingMembers.length === 1 ? ' is' : ' are') + ' waiting to join the family. <button class="linkish" onclick="showScreen(\'settings\')">Review in Settings</button></p>' : '') +
+    (State.role === 'viewer' ? '<p class="note">View only. You can see everything the family logs; ask an owner if you need to add entries.</p>' : '') +
+    '<div class="btn-row writer-only"><button class="btn" onclick="logFood()">+ Log a meal</button><button class="btn ghost" onclick="logDrink()">&#129380; Log a drink</button><button class="btn ghost" onclick="logOutput()">&#128701; Log output</button><button class="btn ghost" onclick="logWeight()">&#9878; Weight</button></div>' + afterInputs() +
     (entries.length ? entries.map(function (e) {
       var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
       var who = State.profiles.find(function (p) { return p.id === e.for_profile_id; });
-      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===this){event.preventDefault();this.click();}" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + (e.entry_kind === 'drink' ? '&#129380; ' : '') + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + '</span><div class="muted">' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + plateNote(e) + (!(e.kcal > 0) && e.estimate_source !== 'manual' && e.estimate_source !== 'water' && Sync.enabled() ? ' <button class="btn sm" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + plateButtons(e) + '</div></div><button class="icon-btn" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
+      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===this){event.preventDefault();this.click();}" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + (e.entry_kind === 'drink' ? '&#129380; ' : e.entry_kind === 'output' ? '&#128701; ' : '') + esc(r ? r.title : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + loggedBy(e) + '</span><div class="muted">' + (e.entry_kind === 'output' ? '<span class="' + (Logic.outputFlags(e).length ? 'flag-text' : '') + '">Out · ' + outputLine(e) + '</span>' + photoStatus(e) : Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + extraCount(e) + plateNote(e) + (e.entry_kind !== 'drink' && e.fluid_ml ? ' · +' + shortOz(Logic.fluidIn(e)) + ' fluid' : '')) + (e.entry_kind !== 'output' && !(e.kcal > 0) && e.estimate_source !== 'manual' && e.estimate_source !== 'water' && Sync.enabled() ? ' <button class="btn sm writer-only" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + plateButtons(e) + '</div></div><button class="icon-btn writer-only" aria-label="Delete entry" onclick="deleteDiaryEntry(\'' + e.id + '\')">&times;</button></div>';
     }).join('') : '<div class="empty">Nothing logged.</div>') +
+    trashLink() +
     (prof ? '<h2>Notes for ' + esc(prof.person_name) + '\'s next appointment</h2><div class="card"><textarea id="profNotes" rows="4" placeholder="Questions to ask, patterns you noticed...">' + esc(prof.notes || '') + '</textarea><div class="btn-row"><button class="btn sm" onclick="saveProfileNotes(\'' + prof.id + '\')">Save notes</button><button class="btn sm ghost" onclick="weeklyDigest(\'' + prof.id + '\')">Weekly digest</button></div></div>' : '');
 }
 // Log a meal for whoever is eating it. The caregiver usually logs for someone else, so
@@ -684,9 +717,10 @@ function logFood() {
       '<input id="lPhotoCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="previewLogPhoto(this)"><input id="lPhoto" type="file" accept="image/*" class="hidden" onchange="previewLogPhoto(this)">' +
       '<img id="lPhotoPrev" class="photo-thumb hidden" alt="Meal photo preview">' +
       '<label>Recipe (if it was one of yours)</label><select id="lRecipe"><option value="">—</option>' + State.recipes.map(function (r) { return '<option value="' + r.id + '">' + esc(r.title) + '</option>'; }).join('') + '</select>' +
-      '<label>Or describe it</label><input id="lText" placeholder="chili with garlic bread">' +
+      '<label>Or describe it</label><input id="lText" placeholder="chili with garlic bread" oninput="suggestMealFluid()">' +
       '<label>What was in it, with amounts (optional, sharpens the estimate)</label><textarea id="lIng" rows="3" placeholder="1 cup chili&#10;1 slice garlic bread"></textarea>' +
       '<div class="row"><div class="grow"><label>Servings eaten</label><select id="lPort"><option value="0.5">½</option><option value="1" selected>1</option><option value="1.5">1½</option><option value="2">2</option></select></div><div class="grow"><label>Portion size (optional)</label><input id="lSize" placeholder="1 cup, half a plate"></div></div>' +
+      amountField('lFluid', 'Fluid in one serving (soup, Jell-O, ice cream...), if any', null, [4, 8]) +
       '<details><summary class="muted">Know the numbers?</summary><div class="row"><div class="grow"><label>kcal</label><input id="lKcal" type="number"></div><div class="grow"><label>sodium mg</label><input id="lNa" type="number"></div></div></details>' +
       '<p class="muted">With no recipe or numbers, calories are estimated from the ingredients, portion and photo.</p>' +
       '<div class="btn-row"><button class="btn" onclick="saveLog()">Log</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>');
@@ -694,6 +728,13 @@ function logFood() {
   });
 }
 // The newest pick wins: clear the other photo input so the one shown is the one saved.
+// Soup, Jell-O, ice cream: suggest the fluid in a serving once, without overwriting a typed amount.
+function suggestMealFluid() {
+  var f = document.getElementById('lFluid'); if (!f || f.dataset.typed) return;
+  var ml = Logic.suggestFluidMl(document.getElementById('lText').value);
+  f.value = ml ? Math.round(Logic.fromMl(ml, document.getElementById('lFluidU').value) * 10) / 10 : '';
+  document.getElementById('lFluidHint').textContent = ml ? 'Suggested for one cup. Change it to what was served.' : '';
+}
 function previewLogPhoto(input) {
   if (!input.files[0]) return;
   var other = document.getElementById(input.id === 'lPhotoCam' ? 'lPhoto' : 'lPhotoCam');
@@ -801,7 +842,7 @@ function saveLog() {
   if (isNaN(when)) when = new Date();
   var r = rid ? State.recipes.find(function (x) { return x.id === rid; }) : null;
   // A recipe meal stays 'recipe' until estimated, so it can still be estimated later (offline now).
-  var e = { eaten_at: when.toISOString(), recipe_id: rid || null, free_text: text || (ingLines.length ? ingLines.join(', ') : (r ? '' : 'Meal')), portion_mult: port, for_profile_id: who || null, estimate_source: rid ? 'recipe' : 'manual' };
+  var e = { eaten_at: when.toISOString(), recipe_id: rid || null, free_text: text || (ingLines.length ? ingLines.join(', ') : (r ? '' : 'Meal')), portion_mult: port, for_profile_id: who || null, estimate_source: rid ? 'recipe' : 'manual', fluid_ml: readAmountMl('lFluid') || null };
   // A recipe's own numbers are used only when every ingredient has nutrition data;
   // scanned recipes usually have none, so those meals are estimated instead.
   var recipeKnown = !!rid && recipeNutritionComplete(rid);
@@ -831,7 +872,7 @@ function saveLog() {
     var writes = [DB.put('diary_entries', e)];
     if (rid) (S.linesByRecipe[rid] || []).forEach(function (l) { writes.push(DB.put('usage_log', { ingredient_id: l.ingredient_id, qty: 1, unit: l.unit, event: 'logged', at: e.eaten_at })); });
     return Promise.all(writes);
-  }).then(function () { closeSheet(); toast(warnings.length ? 'Logged, but ' + warnings.join(' and ') : 'Logged'); State.day = localDay(e.eaten_at); return loadAll(); }).then(function () {
+  }).then(function () { closeSheet(); toast(warnings.length ? 'Logged, but ' + warnings.join(' and ') : 'Logged'); State.day = careDayOf(e.eaten_at); return loadAll(); }).then(function () {
     showScreen('diary');
     if (e.photo_data && Sync.enabled()) syncNow().then(function () { return loadAll(); }).then(function () { if (currentScreen === 'diary') refresh(); });
   });
@@ -852,7 +893,7 @@ function photoStatus(e) {
 function hydratePhotos() {
   document.querySelectorAll('img[data-photo]:not([src])').forEach(function (img) {
     var store = img.dataset.store || 'diary_entries';
-    var list = store === 'recipes' ? State.recipes : State.diary;
+    var list = store === 'recipes' ? State.recipes : store === 'entry_photos' ? (State.entryPhotos || []) : State.diary;
     var rec = list.find(function (x) { return x.id === img.dataset.photo; });
     if (!rec) return;
     Sync.photoSrc(rec, store).then(function (src) { if (src && img.isConnected) img.src = src; });
@@ -883,6 +924,7 @@ function nutShown(v, mult) { return v != null ? String(Math.round(v * mult * 10)
 function editDiaryEntry(id, focusNote) {
   var e = State.diary.find(function (x) { return x.id === id; });
   if (!e) return;
+  if (e.entry_kind === 'output') return logOutput(id);
   var mult = e.portion_mult || 1;
   var sess = S.editSession = { id: id, seq: ++editSeq, photo: undefined, photoReq: 0, pending: null, estReq: 0, fromEstimate: false, confidence: null, before: {}, base: {}, shown: {}, edited: {} };
   var drink = e.entry_kind === 'drink';
@@ -899,14 +941,16 @@ function editDiaryEntry(id, focusNote) {
     '<label for="eRecipe">Recipe</label><select id="eRecipe"><option value="">—</option>' + State.recipes.map(function (r) { return '<option value="' + r.id + '"' + (e.recipe_id === r.id ? ' selected' : '') + '>' + esc(r.title) + '</option>'; }).join('') + '</select>' +
     '<label for="eText">Description</label><input id="eText" value="' + esc(e.free_text || '') + '">' +
     (drink ? '<label for="eOz">Amount poured (oz)</label><input id="eOz" type="number" step="any" min="0" value="' + (e.volume_ml ? Math.round(e.volume_ml / OZ_ML * 10) / 10 : '') + '">' : '') +
+    (drink ? '' : amountField('eFluid', 'Fluid in one serving (soup, Jell-O, ice cream...)', e.fluid_ml || null)) +
     '<label for="ePort">' + (drink ? 'How much was drunk' : 'Servings eaten') + '</label><select id="ePort" onchange="onEditServings()">' + ports.map(function (v) { return '<option value="' + v + '"' + (String(mult) === v ? ' selected' : '') + '>' + v + '</option>'; }).join('') + '</select>' +
     afterSection(e) +
     '<h3>Nutrition for this meal <span class="muted" id="eSource">(' + esc(e.estimate_source || 'not set') + (e.confidence != null ? ', ' + Math.round(e.confidence * 100) + '% confident' : '') + ')</span></h3>' +
     '<div class="grid-2">' + Logic.NUTRIENTS.map(function (k) { return '<div><label for="eN-' + k + '">' + NUT_LABELS[k] + '</label><input id="eN-' + k + '" type="number" step="any" value="' + nutShown(e[k], mult) + '" oninput="markNutEdited(\'' + k + '\')"></div>'; }).join('') + '</div>' +
     (Sync.enabled() ? '<div class="btn-row"><button type="button" class="btn ghost" onclick="estimateIntoForm()">Estimate again</button></div><p class="muted">Fills the numbers from the recipe, description and photo. Nothing is saved until you tap Save.</p>' : '') +
     '</fieldset>' +
-    '<div class="btn-row"><button class="btn" id="eSave" onclick="saveDiaryEdit()">Save</button><button class="btn ghost" onclick="closeSheet()">Close</button><button class="btn danger" onclick="closeSheet();deleteDiaryEntry(\'' + id + '\')">Delete</button></div>');
-  ['eWho', 'eWhen', 'eRecipe', 'eText', 'ePort', 'eOz', 'eNote'].forEach(function (fid) { var el = document.getElementById(fid); if (el) sess.before[fid] = el.value; });
+    (Sync.enabled() ? extraPhotosSection(id) : '') +
+    '<div class="btn-row"><button class="btn" id="eSave" onclick="saveDiaryEdit()">Save</button><button class="btn ghost" onclick="closeSheet()">Close</button>' + (drink ? '<button class="btn ghost writer-only" onclick="convertToOutput(\'' + id + '\')">This was output, not a drink</button>' : '') + '<button class="btn ghost" onclick="showHistory(\'diary_entries\',\'' + id + '\')">History</button><button class="btn danger" onclick="closeSheet();deleteDiaryEntry(\'' + id + '\')">Delete</button></div>');
+  ['eWho', 'eWhen', 'eRecipe', 'eText', 'ePort', 'eOz', 'eNote', 'eFluid'].forEach(function (fid) { var el = document.getElementById(fid); if (el) sess.before[fid] = el.value; });
   Logic.NUTRIENTS.forEach(function (k) { sess.base[k] = e[k] != null ? e[k] : null; sess.shown[k] = nutShown(e[k], mult); });
   if (focusNote) setTimeout(function () { var n = document.getElementById('eNote'); if (n) { n.scrollIntoView({ block: 'center' }); n.focus(); } }, 50);
   if (e.after_photo_data || e.after_photo_path) {
@@ -1009,6 +1053,8 @@ function saveDiaryEdit() {
     if (v('ePort') !== sess.before.ePort || sess.fromEstimate) set.portion_mult = draft.portion_mult;
     var oz = document.getElementById('eOz');
     if (oz && oz.value !== sess.before.eOz) set.volume_ml = +oz.value > 0 ? Math.round(+oz.value * OZ_ML) : null;
+    var fl = document.getElementById('eFluid');
+    if (fl && (fl.value !== sess.before.eFluid || document.getElementById('eFluidU').value !== fluidUnit())) set.fluid_ml = readAmountMl('eFluid');
     Logic.NUTRIENTS.forEach(function (k) {
       var raw = v('eN-' + k);
       if (!sess.edited[k]) { if (sess.fromEstimate) keep[k] = sess.base[k]; return; } // not typed in: per-serving value, unrounded
@@ -1031,7 +1077,7 @@ function saveDiaryEdit() {
       return cur;
     }).then(function (saved) {
       // Only this sheet is closed; if another entry was opened meanwhile, it stays open.
-      if (editLive(sess)) { closeSheet(); if (saved) State.day = localDay(saved.eaten_at); }
+      if (editLive(sess)) { closeSheet(); if (saved) State.day = careDayOf(saved.eaten_at); }
       toast(saved ? 'Saved' : 'This entry was deleted elsewhere');
       return loadAll().then(function () { refresh(); if (photo && Sync.enabled()) syncNow().then(loadAll).then(function () { if (currentScreen === 'diary') refresh(); }); });
     }, function (err) { if (editLive(sess)) lockEditFields(false); toast('Could not save: ' + err.message); });
@@ -1074,7 +1120,7 @@ function saveDrink() {
   if (water) { Logic.NUTRIENTS.forEach(function (k) { e[k] = 0; }); e.estimate_source = 'water'; e.confidence = 1; }
   var est = water || !Sync.enabled() ? Promise.resolve() : estimateEntry(e, { text: what }).catch(function (err) { toast('Logged without an estimate: ' + err.message); });
   closeSheet(); if (!water && Sync.enabled()) toast('Estimating...');
-  est.then(function () { return DB.put('diary_entries', e); }).then(function () { State.day = localDay(e.eaten_at); return loadAll(); }).then(function () { toast('Drink logged'); showScreen('diary'); });
+  est.then(function () { return DB.put('diary_entries', e); }).then(function () { State.day = careDayOf(e.eaten_at); return loadAll(); }).then(function () { toast('Drink logged'); showScreen('diary'); });
 }
 
 /* ---------- before / after the meal ---------- */
@@ -1091,13 +1137,13 @@ function plateNote(e) {
   return e.served_kcal > 0 ? ' · ate ~' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' of ~' + Math.round(e.served_kcal) + ' kcal served' : ' · ate part';
 }
 function plateButtons(e) {
-  if (e.entry_kind === 'drink' || e.plate_status) return '';
-  return ((e.photo_data || e.photo_path) ? ' <button class="btn sm ghost" onclick="event.stopPropagation();pickAfterPhoto(\'' + e.id + '\')">&#128247; After photo</button>' : '') +
-    ' <button class="btn sm ghost" onclick="event.stopPropagation();editDiaryEntry(\'' + e.id + '\', true)">&#9998; Ate part</button>' +
-    ' <button class="btn sm ghost" onclick="event.stopPropagation();markPlateFinished(\'' + e.id + '\')">&#10003; Finished plate</button>';
+  if (e.entry_kind === 'drink' || e.entry_kind === 'output' || e.plate_status) return '';
+  return ((e.photo_data || e.photo_path) ? ' <button class="btn sm ghost writer-only" onclick="event.stopPropagation();pickAfterPhoto(\'' + e.id + '\')">&#128247; After photo</button>' : '') +
+    ' <button class="btn sm ghost writer-only" onclick="event.stopPropagation();editDiaryEntry(\'' + e.id + '\', true)">&#9998; Ate part</button>' +
+    ' <button class="btn sm ghost writer-only" onclick="event.stopPropagation();markPlateFinished(\'' + e.id + '\')">&#10003; Finished plate</button>';
 }
 function afterSection(e) {
-  if (e.entry_kind === 'drink') return '';
+  if (e.entry_kind === 'drink' || e.entry_kind === 'output') return '';
   var has = !!(e.after_photo_data || e.after_photo_path);
   return '<h3>After the meal</h3>' +
     (has ? '<img id="eAfterPhoto" class="photo-big" alt="Plate after the meal">' : '') +
@@ -1213,11 +1259,12 @@ function clearPlateStatus(id) {
 }
 function deleteDiaryEntry(id) {
   var e = State.diary.find(function (x) { return x.id === id; });
-  if (!e || !confirm('Delete this diary entry' + (e.photo_data || e.photo_path || e.after_photo_data || e.after_photo_path ? ' and its photos' : '') + '?')) return;
-  DB.update('diary_entries', id, function (cur) { if (!cur) return null; cur.deleted = true; cur.photo_data = null; cur.after_photo_data = null; return cur; })
-    .then(function () { return Sync.removeRecordPhotos('diary_entries', id); }).then(loadAll).then(refresh);
+  if (!e || !confirm('Delete this diary entry? It goes to Deleted for 30 days, photos included.')) return;
+  // Soft delete only: photos stay in the cloud so Restore brings everything back.
+  DB.update('diary_entries', id, function (cur) { if (!cur) return null; cur.deleted = true; return cur; })
+    .then(loadAll).then(function () { refresh(); toast('Deleted', 'Undo', function () { restoreFromTrash('diary_entries', id); }); });
 }
-function saveProfileNotes(id) { var p = State.profiles.find(function (x) { return x.id === id; }); p.notes = document.getElementById('profNotes').value; DB.put('diet_profiles', p).then(function () { toast('Saved'); }); }
+function saveProfileNotes(id) { var p = State.profiles.find(function (x) { return x.id === id; }); p.notes = Logic.datedNotes(p.notes, document.getElementById('profNotes').value, todayISO()); DB.put('diet_profiles', p).then(function () { toast('Saved'); var ta = document.getElementById('profNotes'); if (ta) ta.value = p.notes; }); }
 // Everything the digest, the copyable summary and the Claude draft are built from.
 function digestData(pid, span) {
   var since = Date.now() - span * 864e5;
@@ -1242,6 +1289,8 @@ function digestText(d) {
   if (d.top.length) { L.push('', 'Eaten most:'); d.top.forEach(function (x) { L.push('- ' + x.name + ' x' + x.times); }); }
   if (d.hits.length) { L.push('', 'Dishes outside the current rules:'); d.hits.forEach(function (h) { L.push('- ' + h.dish + ': ' + h.reasons.join('; ')); }); }
   if (d.rules.length) { L.push('', 'Rules in the app:'); d.rules.forEach(function (r) { L.push('- ' + r); }); }
+  var fl = fluidsText(d.prof.id, careToday(), d.span);
+  if (fl.split('\n').length > 2) L.push('', fl);
   if (d.prof.notes) L.push('', 'Caregiver notes:', d.prof.notes);
   L.push('', 'Estimates from a home food diary, not a medical record.');
   return L.join('\n');
@@ -1314,6 +1363,7 @@ function renderSettings() {
       '<label>Project URL</label><input id="cfgUrl" placeholder="https://abcd1234.supabase.co" autocomplete="off">' +
       '<label>Anon (public) key</label><input id="cfgKey" placeholder="eyJ..." autocomplete="off">' +
       '<div class="btn-row"><button class="btn sm" onclick="connectCloud()">Connect</button></div>') + '</div>' +
+    (cloud ? '<h2>Family</h2><div class="card" id="familyBox">Loading...</div>' : '') +
     '<h2>Diet profiles</h2>' + State.profiles.map(function (p) {
       var rules = S.rulesByProfile[p.id] || [];
       return '<div class="card"><div class="row between"><h3>' + esc(p.person_name) + '</h3><button class="btn sm ghost" onclick="editProfile(\'' + p.id + '\')">Edit</button></div><div class="muted">' + (Object.keys(p.daily_targets || {}).length ? Object.keys(p.daily_targets).map(function (k) { return esc(k.replace('_', ' ') + ' ≤ ' + p.daily_targets[k]); }).join(', ') : 'no daily targets') + '</div>' +
@@ -1324,7 +1374,7 @@ function renderSettings() {
     '<h2>Store aisle order</h2><div class="card"><p class="muted">The shopping list follows this order so you can walk the store once.</p>' + aisleOrder().map(function (a, i, all) {
       return '<div class="list-item"><div class="grow">' + esc(a) + '</div><button class="icon-btn" aria-label="Move ' + a + ' up" ' + (i === 0 ? 'disabled' : '') + ' onclick="moveAisle(\'' + a + '\',-1)">&uarr;</button><button class="icon-btn" aria-label="Move ' + a + ' down" ' + (i === all.length - 1 ? 'disabled' : '') + ' onclick="moveAisle(\'' + a + '\',1)">&darr;</button></div>';
     }).join('') + '</div>' +
-    '<h2>Data</h2><div class="card"><div class="btn-row"><button class="btn ghost" onclick="exportJSON()">Export JSON</button><button class="btn ghost" onclick="document.getElementById(\'importFile\').click()">Restore from backup</button><input id="importFile" type="file" accept="application/json,.json" class="hidden" onchange="importJSON(this)"><button class="btn ghost" onclick="loadSample()">Load sample data</button><button class="btn danger" onclick="if(confirm(\'Erase everything on this device?\'))DB.wipe().then(function(){location.reload()})">Erase local data</button></div><p class="muted">v' + TCM_CONFIG.APP_VERSION + '</p></div>';
+    '<h2>Family AI balance</h2><div class="card"><p id="aiUse" class="muted">Sign in to see this month&rsquo;s AI use.</p></div>' + '<h2>Photo reader</h2><div class="card"><p class="muted">Check how well Snap it reads your own photos before relying on it.</p><div class="btn-row"><button class="btn ghost" onclick="showScreen(\'phototest\')">Photo reader test</button></div></div>' + renderYourData();
 }
 function connectCloud() {
   try { Sync.saveConfig(document.getElementById('cfgUrl').value, document.getElementById('cfgKey').value); }
@@ -1351,6 +1401,7 @@ function editProfile(id) {
   openSheet('<h2 style="margin-top:0">' + (id ? 'Edit' : 'Add') + ' person</h2><label>Name</label><input id="prName" value="' + esc(p.person_name) + '">' +
     '<p class="muted">Daily targets (blank = FDA default). These drive the % bars.</p>' +
     ['kcal', 'sodium_mg', 'sugar_g', 'fiber_g', 'protein_g', 'potassium_mg'].map(function (k) { return '<label>' + k.replace('_', ' ') + ' <span class="muted">(default ' + Logic.DV[k] + ')</span></label><input id="pr-' + k + '" type="number" value="' + (t[k] != null ? t[k] : '') + '">'; }).join('') +
+    careSettingsFields(p) +
     '<div class="btn-row"><button class="btn" onclick="saveProfile(' + (id ? '\'' + id + '\'' : 'null') + ')">Save</button><button class="btn ghost" onclick="closeSheet()">Cancel</button>' + (id ? '<button class="btn danger" onclick="DB.remove(\'diet_profiles\',\'' + id + '\').then(function(){closeSheet();return loadAll();}).then(refresh)">Remove</button>' : '') + '</div>');
 }
 function saveProfile(id) {
@@ -1358,6 +1409,7 @@ function saveProfile(id) {
   p.person_name = document.getElementById('prName').value.trim(); if (!p.person_name) return toast('Name required');
   p.daily_targets = {};
   ['kcal', 'sodium_mg', 'sugar_g', 'fiber_g', 'protein_g', 'potassium_mg'].forEach(function (k) { var v = document.getElementById('pr-' + k).value; if (v !== '') p.daily_targets[k] = +v; });
+  p.care_settings = readCareSettings(p.care_settings);
   DB.put('diet_profiles', p).then(function () { closeSheet(); return loadAll(); }).then(refresh);
 }
 function addRule(pid) {

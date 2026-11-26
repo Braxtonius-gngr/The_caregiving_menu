@@ -27,9 +27,9 @@ function renderSimple() {
   var p = simpleProfile();
   if (!p) { State.simple = null; applySimpleChrome(); return renderHome(); }
   document.getElementById('screenTitle').textContent = p.person_name;
-  var day = todayISO(), hour = new Date().getHours();
+  var day = careToday(), hour = new Date().getHours();
   var greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-  var eaten = State.diary.filter(function (e) { return e.for_profile_id === p.id && localDay(e.eaten_at) === day; }).sort(function (a, b) { return a.eaten_at < b.eaten_at ? -1 : 1; });
+  var eaten = State.diary.filter(function (e) { return e.for_profile_id === p.id && careDayOf(e.eaten_at) === day; }).sort(function (a, b) { return a.eaten_at < b.eaten_at ? -1 : 1; });
   var totals = Logic.dayTotals(eaten);
   var bars = simpleNutrients(p).map(function (k) {
     var tgt = (p.daily_targets || {})[k] || Logic.DV[k], val = Math.round(totals[k] || 0), pct = Math.round(100 * val / tgt);

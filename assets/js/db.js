@@ -2,8 +2,8 @@
  * All records carry: id (uuid), updated_at (ISO), deleted (bool). */
 var DB = (function () {
   var NAME = 'tcm';
-  var VERSION = 1;
-  var STORES = ['ingredients', 'recipes', 'recipe_ingredients', 'recipe_variations', 'pantry_items', 'diet_profiles', 'profile_rules', 'diary_entries', 'shopping_list', 'usage_log', 'intake_jobs', 'outbox', 'meta'];
+  var VERSION = 4; // 2: measurements (weights); 3: entry_photos; 4: records (patient file)
+  var STORES = ['ingredients', 'recipes', 'recipe_ingredients', 'recipe_variations', 'pantry_items', 'diet_profiles', 'profile_rules', 'diary_entries', 'shopping_list', 'usage_log', 'intake_jobs', 'outbox', 'meta', 'measurements', 'entry_photos', 'records'];
   var dbp = null;
 
   function open() {
@@ -49,6 +49,48 @@ var DB = (function () {
   function all(store) {
     return tx(store, 'readonly', function (os) { return os.getAll(); }).then(function (rows) { return (rows || []).filter(function (r) { return !r.deleted; }); });
   }
+  // Every row, deleted ones too (the Trash reads tombstones).
+  function allRaw(store) { return tx(store, 'readonly', function (os) { return os.getAll(); }).then(function (rows) { return rows || []; }); }
+  // Remove a row from this device for good, with any upload still queued for it.
+  function purge(store, id) {
+    return open().then(function (d) {
+      return new Promise(function (resolve, reject) {
+        var t = d.transaction([store, 'outbox'], 'readwrite');
+        t.objectStore(store).delete(id); t.objectStore('outbox').delete(store + ':' + id);
+        t.oncomplete = function () { resolve(); }; t.onerror = function () { reject(t.error); };
+      });
+    });
+  }
+  // Forget rows deleted before `cutoff` (ISO), and the extra photos attached to them, so this
+  // device matches the server's 30-day erase. A row still waiting to upload is kept: the
+  // server must hear about the deletion first.
+  function dropDeletedBefore(cutoff) {
+    var stores = STORES.filter(function (s) { return LOCAL_ONLY.indexOf(s) < 0; });
+    return open().then(function (d) {
+      return new Promise(function (resolve, reject) {
+        var t = d.transaction(stores.concat('outbox'), 'readwrite'), ob = t.objectStore('outbox'), gone = {}, n = 0;
+        ob.getAllKeys().onsuccess = function (ev) {
+          var pending = {};
+          (ev.target.result || []).forEach(function (k) { pending[k] = true; });
+          var left = stores.length;
+          stores.forEach(function (s) {
+            var os = t.objectStore(s);
+            os.getAll().onsuccess = function (e) {
+              (e.target.result || []).forEach(function (r) {
+                if (r.deleted && (r.deleted_at || r.updated_at) < cutoff && !pending[s + ':' + r.id]) { os.delete(r.id); gone[r.id] = true; n++; }
+              });
+              if (--left) return;
+              var ep = t.objectStore('entry_photos');
+              ep.getAll().onsuccess = function (e2) {
+                (e2.target.result || []).forEach(function (p) { if (gone[p.entry_id] && !gone[p.id] && !pending['entry_photos:' + p.id]) { ep.delete(p.id); n++; } });
+              };
+            };
+          });
+        };
+        t.oncomplete = function () { resolve(n); }; t.onerror = function () { reject(t.error); };
+      });
+    });
+  }
   function get(store, id) { return tx(store, 'readonly', function (os) { return os.get(id); }); }
   function byIndex(store, index, value) {
     return open().then(function (d) {
@@ -60,9 +102,21 @@ var DB = (function () {
     });
   }
 
+  // Viewers in a shared family can read but not change anything. Writes made by sync
+  // itself (silent) still go through, so the shared file keeps arriving.
+  var readOnly = false, LOCAL_ONLY = ['meta', 'outbox', 'intake_jobs'];
+  var readOnlyMsg = '';
+  function setReadOnly(on, msg) { readOnly = !!on; readOnlyMsg = msg || ''; }
+  function blocked(store, opts) {
+    if (!readOnly || (opts && opts.silent) || LOCAL_ONLY.indexOf(store) >= 0) return null;
+    if (typeof toast === 'function') toast(readOnlyMsg || 'View only: ask an owner to make you a caregiver to add or change things.');
+    return Promise.reject(new Error('View only'));
+  }
+
   // put() stamps updated_at and queues the change for cloud sync.
   function put(store, rec, opts) {
     opts = opts || {};
+    var no = blocked(store, opts); if (no) return no;
     if (!rec.id) rec.id = uuid();
     rec.updated_at = new Date().toISOString();
     if (rec.deleted == null) rec.deleted = false;
@@ -85,6 +139,7 @@ var DB = (function () {
   // the network can never overwrite a change (such as a deletion) made in the meantime.
   function update(store, id, fn, opts) {
     opts = opts || {};
+    var no = blocked(store, opts); if (no) return no;
     return open().then(function (d) {
       return new Promise(function (resolve, reject) {
         var t = d.transaction([store, 'outbox'], 'readwrite');
@@ -156,5 +211,5 @@ var DB = (function () {
   function clearOutbox(ids) { return tx('outbox', 'readwrite', function (os) { ids.forEach(function (id) { os.delete(id); }); }); }
   function wipe() { return open().then(function (d) { d.close(); dbp = null; return new Promise(function (res) { var r = indexedDB.deleteDatabase(NAME); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; }); }); }
 
-  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, metaUpdate: metaUpdate, update: update, reconcile: reconcile, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe };
+  return { STORES: STORES, uuid: uuid, all: all, get: get, byIndex: byIndex, put: put, remove: remove, bulkPut: bulkPut, meta: meta, metaUpdate: metaUpdate, update: update, reconcile: reconcile, outbox: outbox, clearOutbox: clearOutbox, wipe: wipe, setReadOnly: setReadOnly, allRaw: allRaw, purge: purge, dropDeletedBefore: dropDeletedBefore };
 })();

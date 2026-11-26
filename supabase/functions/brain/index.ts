@@ -8,6 +8,36 @@
 import Anthropic from "npm:@anthropic-ai/sdk@1.3.0";
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
 import { corsHeaders, json } from "../_shared/cors.ts";
+import { AsyncLocalStorage } from "node:async_hooks";
+
+/* ---------- AI cost per family ----------
+ * Every Claude call adds its token usage to the current request's meter; the request handler
+ * writes one ai_usage row per call (server key) and refuses new calls once a family has used its
+ * monthly allowance. Prices are US dollars per million tokens (Anthropic pricing, 2026-11-24). */
+const PRICES: Record<string, { in: number; out: number; cacheRead: number; cacheWrite: number }> = {
+  "claude-opus-5-5": { in: 4, out: 20, cacheRead: 0.2, cacheWrite: 5 },
+  "claude-sonnet-5-5": { in: 2, out: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+  "claude-haiku-5-5": { in: 0.1, out: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+};
+const WEB_SEARCH_CENTS = 1; // $10 per 1,000 searches
+type Use = { model: string; input: number; cacheRead: number; cacheWrite: number; output: number; searches: number };
+const meter = new AsyncLocalStorage<Use[]>();
+// Model comparison (Photo reader test, Ask her file): a request may ask for one of these instead of the default.
+const TRY_MODELS: Record<string, string> = { opus: "claude-opus-5-5", sonnet: "claude-sonnet-5-5", haiku: "claude-haiku-5-5" };
+const modelCtx = new AsyncLocalStorage<string>();
+function currentModel() { return modelCtx.getStore() ?? MODEL; }
+// deno-lint-ignore no-explicit-any
+function meterAdd(res: any) {
+  const u = res?.usage ?? {}, list = meter.getStore();
+  if (!list) return;
+  list.push({ model: String(res?.model ?? MODEL), input: u.input_tokens ?? 0, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0,
+    output: u.output_tokens ?? 0, searches: u.server_tool_use?.web_search_requests ?? 0 });
+}
+function costCents(x: Use) {
+  const p = PRICES[Object.keys(PRICES).find((k) => x.model.startsWith(k)) ?? "claude-opus-5-5"];
+  return ((x.input * p.in + x.output * p.out + x.cacheRead * p.cacheRead + x.cacheWrite * p.cacheWrite) / 1e6) * 100 + x.searches * WEB_SEARCH_CENTS;
+}
+const admin = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 
 const MODEL = Deno.env.get("CLAUDE_MODEL") ?? "claude-opus-5-5";
 const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
@@ -163,12 +193,280 @@ const summarySchema = {
   },
 };
 
+const mealIdeasSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["ideas", "caveat"],
+  properties: {
+    ideas: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "why", "uses", "fluid_oz", "sodium_mg"],
+        properties: {
+          name: str,
+          why: { type: "string", description: "One sentence on why it fits her rules and today's numbers" },
+          uses: strList("Pantry items it uses"),
+          fluid_oz: num,
+          sodium_mg: num,
+        },
+      },
+    },
+    caveat: { type: "string", description: "One sentence: ideas to check against her diet plan" },
+  },
+};
+
 const SYSTEM = `You help a family caregiver run their kitchen: recipes, pantry, and a food diary, including for an older relative whose diet may need adjusting.
 Return only what the schema asks for. Use generic, lowercase, singular ingredient names ("yellow onion", not "Vidalia Onions 3lb").
 Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
 Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
 
-type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary";
+type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "timing_questions" | "guidance" | "read_vitals" | "read_photo" | "fill_form" | "scribe" | "handoff" | "quick_log" | "ask_file";
+
+/* ---------- current guidance: search trusted sites first, then answer in a fixed shape ---------- */
+// Web search stays on public health sources; the answer step cites them by number.
+const TRUSTED = ["fda.gov", "nih.gov", "medlineplus.gov", "kdigo.org", "kidney.org", "diabetes.org", "diabetesjournals.org", "heart.org", "ahajournals.org", "acc.org", "cdc.gov", "cancer.gov", "ashp.org", "drugs.com", "mayoclinic.org", "clevelandclinic.org"];
+const RESEARCH_SYSTEM = `You research current medical guidance for a family caregiver, using only the search tool's results.
+Prefer official labels (FDA, DailyMed), clinical guidelines (KDIGO, ADA Standards of Care, AHA/ACC) and NIH sources; note each source's year.
+Never search for or mention the patient's name. Describe the person only by age range and conditions.
+Write plain notes of what the sources say, with each claim tied to its source. Say clearly where sources disagree or where nothing was found.`;
+type Source = { url: string; title: string; age: string | null };
+async function research(question: string): Promise<{ notes: string; sources: Source[] }> {
+  // deno-lint-ignore no-explicit-any
+  let messages: any[] = [{ role: "user", content: question }];
+  const sources: Source[] = [];
+  let notes = "";
+  for (let turn = 0; turn < 4; turn++) {
+    const params = {
+      model: currentModel(), max_tokens: 16000, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
+      system: RESEARCH_SYSTEM, output_config: { effort: "medium" },
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 6, allowed_domains: TRUSTED }],
+      messages,
+    };
+    // deno-lint-ignore no-explicit-any
+    const res: any = await anthropic.beta.messages.create(params as any);
+    meterAdd(res);
+    if (res.stop_reason === "refusal") throw new Error("The model declined this request.");
+    for (const b of res.content) {
+      if (b.type === "web_search_tool_result" && Array.isArray(b.content)) {
+        for (const r of b.content) if (r.url && !sources.some((x) => x.url === r.url)) sources.push({ url: r.url, title: r.title ?? r.url, age: r.page_age ?? null });
+      }
+      if (b.type === "text") notes += b.text;
+    }
+    if (res.stop_reason !== "pause_turn") break;
+    messages = [...messages, { role: "assistant", content: res.content }];
+  }
+  return { notes: notes.slice(0, 30000), sources: sources.slice(0, 30) };
+}
+function numbered(sources: Source[]) { return sources.map((s, i) => `[${i + 1}] ${s.title} (${s.url})${s.age ? ", " + s.age : ""}`).join("\n"); }
+
+// Medicine timing: questions for the pharmacist only (P-007). Never times, doses or advice.
+const timingQSchema = {
+  type: "object", additionalProperties: false,
+  required: ["summary", "questions", "caveat"],
+  properties: {
+    summary: { type: "string", description: "One or two plain sentences: what the questions are about. No advice." },
+    questions: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["text", "why", "med_ref", "sources"],
+        properties: {
+          text: { type: "string", description: "One question the family can read out to the pharmacist, e.g. 'Is it OK that her amlodipine is given at breakfast?' or 'Does her gabapentin need to be spaced from her antacid?'. A question, never an instruction, never a proposed time" },
+          why: { type: "string", description: "Facts only: what the label or sources say and how her day compares. Never what to do, avoid or prefer" },
+          med_ref: { type: "string", description: "The medicine's ref from the input (e.g. m1), or empty when it is about several or none" },
+          sources: { type: "array", items: { type: "integer" }, description: "Numbers of the sources used, from the numbered list" },
+        },
+      },
+    },
+    caveat: { type: "string", description: "One sentence: these are questions to ask, and only her pharmacist or doctor decides" },
+  },
+};
+const vitalsSchema = {
+  type: "object", additionalProperties: false,
+  required: ["readable", "kind", "systolic", "diastolic", "pulse", "value", "irregular_symbol", "afib_symbol", "time_shown", "confidence", "notes"],
+  properties: {
+    readable: { type: "boolean", description: "False if the numbers cannot be read with confidence" },
+    kind: { type: "string", enum: ["blood_pressure", "glucose", "oxygen", "temperature", "unknown"] },
+    systolic: num, diastolic: num, pulse: num,
+    value: { ...num, description: "For glucose, oxygen or temperature: the main number" },
+    irregular_symbol: { type: "boolean", description: "The screen shows an irregular heartbeat symbol (heart with waves, IHB)" },
+    afib_symbol: { type: "boolean", description: "The screen shows an AFib indicator" },
+    time_shown: { type: ["string", "null"], description: "Date/time shown on the screen, as printed, or null" },
+    confidence: { type: "string", enum: ["low", "medium", "high"] },
+    notes: { type: "string", description: "Short note if anything is unclear (glare, cut off, error code); else empty" },
+  },
+};
+const nstr = { type: ["string", "null"] };
+const photoSchema = {
+  type: "object", additionalProperties: false,
+  required: ["kind", "decision", "retake_reason", "retake_tip", "summary", "uncertain", "vitals", "weight", "medication", "labs", "appointment", "contacts", "document", "med_list", "list_source", "exercises", "more_pages", "more_pages_hint"],
+  properties: {
+    kind: { type: "string", enum: ["bp_monitor", "glucose_meter", "pulse_oximeter", "thermometer", "scale", "med_label", "lab_report", "appointment", "care_team", "med_list", "therapy_plan", "document", "food_label", "other"] },
+    decision: { type: "string", enum: ["use", "retake"], description: "retake unless every value you report is clearly legible" },
+    retake_reason: { type: "string", description: "If retake: what is wrong, in plain words (glare over the top number, screen cut off, blurry). Else empty." },
+    retake_tip: { type: "string", description: "If retake: one specific instruction for the next photo. Else empty." },
+    summary: { type: "string", description: "One line: what the photo shows and what you read" },
+    uncertain: strList("Fields you left empty because they were not clearly readable"),
+    vitals: { type: "object", additionalProperties: false, required: ["systolic", "diastolic", "pulse", "value", "unit", "irregular_symbol", "afib_symbol", "time_shown"],
+      properties: { systolic: num, diastolic: num, pulse: num, value: { ...num, description: "Glucose, oxygen % or temperature" }, unit: nstr, irregular_symbol: { type: "boolean" }, afib_symbol: { type: "boolean" }, time_shown: nstr } },
+    weight: { type: "object", additionalProperties: false, required: ["value", "unit"], properties: { value: num, unit: { anyOf: [{ type: "string", enum: ["lb", "kg"] }, { type: "null" }] } } },
+    medication: { type: "object", additionalProperties: false, required: ["name", "strength", "directions", "prescriber", "pharmacy", "filled_on", "refills", "quantity", "warnings"],
+      properties: { name: nstr, strength: nstr, directions: { ...nstr, description: "Directions exactly as printed" }, prescriber: nstr, pharmacy: nstr, filled_on: { ...nstr, description: "YYYY-MM-DD" }, refills: nstr, quantity: nstr, warnings: strList("Warning stickers, as printed") } },
+    labs: { type: "array", items: { type: "object", additionalProperties: false, required: ["test", "value", "value_text", "unit", "low", "high", "range_text", "flag", "date"],
+      properties: { test: str, value: num, value_text: nstr, unit: nstr, low: num, high: num, range_text: nstr, flag: nstr, date: { ...nstr, description: "YYYY-MM-DD collected" } } } },
+    appointment: { type: "object", additionalProperties: false, required: ["with_whom", "date", "time", "place", "reason", "notes"],
+      properties: { with_whom: nstr, date: { ...nstr, description: "YYYY-MM-DD" }, time: { ...nstr, description: "HH:MM 24h" }, place: nstr, reason: nstr, notes: nstr } },
+    contacts: { type: "array", description: "Every doctor, nurse, pharmacy, agency, insurer or family contact listed, on any kind of photo", items: { type: "object", additionalProperties: false, required: ["name", "role", "phone", "fax", "address", "notes"],
+      properties: { name: { type: "string", description: "Person or place as written, e.g. Dr. Smith or HEB Pharmacy" }, role: { type: "string", description: "e.g. Cardiologist, Pharmacy, Home health agency, Insurance, Family" }, phone: nstr, fax: nstr, address: nstr, notes: { ...nstr, description: "Member/policy numbers, hours, anything else written for this contact" } } } },
+    document: { type: "object", additionalProperties: false, required: ["doc_type", "title", "date", "details"],
+      properties: { doc_type: { type: "string", enum: ["Discharge papers", "Report", "Insurance card", "ID", "Directive", "Bill", "Other"] }, title: { type: "string", description: "Short name for this paper, e.g. Emergency plan, Medicare card" },
+        date: { ...nstr, description: "YYYY-MM-DD shown on the paper" }, details: { type: "string", description: "Everything else important on the paper in short lines (plans, levels, numbers, instructions), not repeating the contacts" },
+        fields: { type: "array", description: "The paper's own key facts as label/value pairs, e.g. Member ID, Group number, Policy, Valid until, Triage level. Labels short; values exactly as written", items: { type: "object", additionalProperties: false, required: ["label", "value"], properties: { label: str, value: str } } } } },
+    med_list: { type: "array", description: "For a handwritten or printed LIST of medicines: one row per line", items: { type: "object", additionalProperties: false, required: ["written", "name", "strength", "dose", "when", "notes", "is_medicine", "doubt"],
+      properties: { written: { type: "string", description: "The line exactly as written" }, name: { type: "string", description: "Medicine name, corrected to the real spelling only if you are sure which medicine it is" }, strength: nstr, dose: { ...nstr, description: "How much per dose, e.g. 1 tablet" }, when: { ...nstr, description: "How often / what time, as written" }, notes: nstr,
+        is_medicine: { type: "string", enum: ["yes", "unsure", "no"], description: "yes only if this is clearly a real medicine or supplement name" }, doubt: { type: "string", description: "If unsure or no: why (hard to read, not a medicine name you know, could be X or Y). Else empty" } } } },
+    list_source: { type: "string", enum: ["handwritten list", "printed list", "discharge papers", "pharmacy printout", "other"], description: "For a medicine list: where it comes from" },
+    exercises: { type: "array", description: "For a physical or occupational therapy home exercise sheet: one row per exercise", items: { type: "object", additionalProperties: false, required: ["name", "how", "how_often", "notes"],
+      properties: { name: str, how: { ...nstr, description: "Sets, reps, hold time, as written" }, how_often: { ...nstr, description: "e.g. twice a day" }, notes: { ...nstr, description: "How to do it, cautions, equipment" } } } },
+    more_pages: { type: "boolean", description: "True if the paper clearly continues beyond what the photos show (Page 1 of 3, continued, text cut off at the bottom, a list that runs off the page)" },
+    more_pages_hint: { type: "string", description: "If more_pages: what suggests it, e.g. Page 1 of 3. Else empty" },
+  },
+};
+const formSchema = {
+  type: "object", additionalProperties: false,
+  required: ["decision", "retake_reason", "retake_tip", "summary", "values", "uncertain"],
+  properties: {
+    decision: { type: "string", enum: ["use", "retake"] },
+    retake_reason: str, retake_tip: str,
+    summary: { type: "string", description: "One line: what the photo shows and what you filled" },
+    values: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "value"], properties: { id: str, value: str } } },
+    uncertain: strList("Field labels left empty because the photo was not clear there"),
+  },
+};
+const scribeSchema = {
+  type: "object", additionalProperties: false,
+  required: ["summary", "visit", "to_do", "double_check"],
+  properties: {
+    summary: { type: "string", description: "One or two plain sentences: the most important things from the visit" },
+    visit: { type: "object", additionalProperties: false,
+      required: ["who", "when", "where", "why", "said", "changed", "meds_changed", "tests", "next_appt", "questions"],
+      properties: {
+        who: { ...nstr, description: "Role and name if said, e.g. Home health nurse (Pat)" },
+        when: { ...nstr, description: "Visit start, YYYY-MM-DDTHH:MM local, if known" },
+        where: nstr, why: nstr,
+        said: { ...nstr, description: "Findings and readings they reported, short lines, numbers exactly as said" },
+        changed: { ...nstr, description: "Changes to care, diet, fluids, activity, equipment, with any warning signs to call about" },
+        meds_changed: { ...nstr, description: "Each medicine started, stopped or changed: name, dose, when. Null if none" },
+        tests: { ...nstr, description: "Tests or referrals ordered, with dates" },
+        next_appt: { ...nstr, description: "Next visit, YYYY-MM-DDTHH:MM local, only if a date was said" },
+        questions: { ...nstr, description: "Questions the family raised that were not answered, or worth asking next time" },
+      } },
+    to_do: strList("Concrete follow-ups for the family: calls, refills, appointments to book, things to watch"),
+    double_check: strList("Anything unclear, contradictory or possibly misheard (odd drug names, doses, numbers), phrased so the family can confirm it"),
+  },
+};
+/* read_photo works in two steps (Anthropic limits how large one schema may be): photoKindSchema
+ * says what the photo is, then photoPartSchema(kind) reads it with only the sections that kind
+ * uses. photoEmpty() fills the other sections so the app always gets the full shape. */
+const PHOTO_COMMON = ["decision", "retake_reason", "retake_tip", "summary", "uncertain", "more_pages", "more_pages_hint"];
+const PHOTO_PARTS: Record<string, string[]> = {
+  bp_monitor: ["vitals"], glucose_meter: ["vitals"], pulse_oximeter: ["vitals"], thermometer: ["vitals"],
+  scale: ["weight"], med_label: ["medication"], lab_report: ["labs"], appointment: ["appointment"],
+  care_team: ["contacts", "document"], document: ["contacts", "document"], med_list: ["med_list", "list_source"], therapy_plan: ["exercises", "document"],
+};
+// deno-lint-ignore no-explicit-any
+const PP: Record<string, any> = (photoSchema as any).properties;
+const photoKindSchema = { type: "object", additionalProperties: false, required: ["kind", "summary"], properties: { kind: PP.kind, summary: { type: "string", description: "One line: what the photo shows" } } };
+function photoPartSchema(keys: string[]) {
+  const req = [...PHOTO_COMMON, ...keys];
+  // deno-lint-ignore no-explicit-any
+  const props: Record<string, any> = {}; for (const k of req) props[k] = PP[k];
+  return { type: "object", additionalProperties: false, required: req, properties: props };
+}
+function photoEmpty() {
+  return {
+    decision: "use", retake_reason: "", retake_tip: "", summary: "", uncertain: [], more_pages: false, more_pages_hint: "",
+    vitals: { systolic: null, diastolic: null, pulse: null, value: null, unit: null, irregular_symbol: false, afib_symbol: false, time_shown: null },
+    weight: { value: null, unit: null },
+    medication: { name: null, strength: null, directions: null, prescriber: null, pharmacy: null, filled_on: null, refills: null, quantity: null, warnings: [] },
+    labs: [], appointment: { with_whom: null, date: null, time: null, place: null, reason: null, notes: null },
+    contacts: [], document: { doc_type: "Other", title: "", date: null, details: "", fields: [] }, med_list: [], list_source: "", exercises: [],
+  };
+}
+const quickItem = {
+  type: "object", additionalProperties: false,
+  required: ["type", "what", "amount", "unit", "portion", "output_type", "color", "clots", "vital_kind", "value", "value2", "pulse", "rhythm", "med_ref", "slot", "status", "note", "time", "unsure"],
+  properties: {
+    type: { type: "string", enum: ["drink", "meal", "output", "vital", "weight", "dose", "note"] },
+    what: { type: "string", description: "Drink or food in plain words (water, coffee with milk, half a turkey sandwich); empty otherwise" },
+    amount: { ...num, description: "Amount for a drink or output, as said" },
+    unit: { type: "string", enum: ["oz", "ml", "cup", "lb", "kg", ""] },
+    portion: { ...num, description: "Share actually drunk or eaten, 0-1 (half = 0.5), only if said" },
+    output_type: { type: "string", enum: ["urine", "vomit", "stool", "drain", "none", "other", ""] },
+    color: { type: "string", enum: ["pale", "yellow", "dark_yellow", "amber", "pink_red", "cola", ""] },
+    clots: { type: "boolean" },
+    vital_kind: { type: "string", enum: ["blood_pressure", "glucose", "oxygen", "temperature", ""] },
+    value: { ...num, description: "Main reading: top BP number, sugar, oxygen %, temperature or weight" },
+    value2: { ...num, description: "Bottom BP number" },
+    pulse: num,
+    rhythm: { type: "string", enum: ["irregular", "afib", ""] },
+    med_ref: { type: "string", description: "For a dose: the ref of the one medicine named, or 'all' for every medicine of a time of day (the morning pills); empty if none matches" },
+    slot: { type: "string", enum: ["morning", "noon", "evening", "bedtime", "prn", ""] },
+    status: { type: "string", enum: ["given", "skipped", "refused", ""] },
+    note: { type: "string", description: "Anything else said about this entry (why refused, where, how she seemed); for type note, the whole note" },
+    time: { type: "string", description: "HH:MM 24-hour if a time was said (at 2 = 14:00 if that fits the day so far), else empty" },
+    unsure: { type: "string", description: "If any part was unclear or guessed (a number, which medicine), say what; else empty" },
+  },
+};
+const quickSchema = {
+  type: "object", additionalProperties: false, required: ["items", "unclear"],
+  properties: { items: { type: "array", items: quickItem }, unclear: strList("Parts of what was said that could not be turned into an entry") },
+};
+const askSchema = {
+  type: "object", additionalProperties: false, required: ["answer", "found", "sources", "ask_care_team"],
+  properties: {
+    answer: { type: "string", description: "A short plain answer (1-5 sentences, or a short list), with dates. If the facts do not answer it, say what is missing" },
+    found: { type: "boolean", description: "False if the facts do not contain the answer" },
+    sources: { type: "array", items: { type: "integer" }, description: "Numbers of every fact the answer relies on" },
+    ask_care_team: strList("If the question needs a clinician's judgement (should she, is it safe, what does it mean), 1-3 questions to ask her care team; else empty"),
+  },
+};
+const handoffSchema = {
+  type: "object", additionalProperties: false, required: ["summary", "watch", "to_do"],
+  properties: {
+    summary: { type: "string", description: "3-5 plain sentences: how the time went, in the order that matters for the next caregiver" },
+    watch: strList("Only things in the facts worth keeping an eye on: refused or skipped medicines, flagged output, readings marked irregular, open questions. Empty if none"),
+    to_do: strList("Open to-dos and things to double-check, from the facts. Empty if none"),
+  },
+};
+const PHOTO_RULES = `You read photos for a family caring for an elderly relative. Wrong numbers are worse than no numbers: the family would rather take another photo.
+- First decide what the photo is (kind).
+- Read only what is clearly printed or lit. Never guess or "correct" a digit. Seven-segment displays: check each segment (a 1 vs 7, 3 vs 8, 5 vs 6).
+- decision = "retake" if ANY value the family needs is unclear, partly cut off, under glare, blurry, or if it is unclear which number is which. Say exactly what was wrong and give one specific tip (move closer, tilt to remove the reflection, include the whole label, turn on a light, hold still).
+- If several photos are given, they are tries of the same thing; combine them and only report a value that at least one photo shows clearly. If photos disagree, retake.
+- Blood pressure cuff: SYS top, DIA middle, pulse bottom. Report the irregular-heartbeat or AFib symbol only if it is lit. Ignore memory averages.
+- Medicine label: the drug name and strength must be clearly readable, else retake.
+- Care team: a list of doctors, pharmacy, agencies or emergency contacts (an emergency plan, a care team sheet, business cards). kind = care_team; put each one in contacts with whatever phone, fax and address is written. Handwriting: copy names as written; list a contact even if its phone is unreadable, and note that in uncertain. Do not ask for a retake just because some numbers are unclear.
+- Other papers worth keeping (insurance card, ID, directive, discharge papers, bills, plans): kind = document; fill document, and contacts if any are listed. A care team sheet with other information on it also fills document (title and details).
+- A LIST of medicines (handwritten or printed, several medicines, not a single pharmacy label), including the medicine section of discharge papers or a pharmacy printout: kind = med_list, and say which in list_source. One row per medicine: when the same medicine and strength is written under more than one time (an AM column and a PM column, or morning and bedtime), give ONE row with every time in when (e.g. "AM and PM") and the lines in written joined with " / ". Copy what is written in written. Never invent a medicine: if a word is hard to read or is not a medicine name you know, set is_medicine to unsure (or no) and say why in doubt, e.g. "could be metoprolol or metolazone". Do not retake just because one line is unclear.
+- A therapy home exercise sheet (physical, occupational or speech therapy): kind = therapy_plan; fill exercises, and document (title, details) for anything else on it.
+- Papers that fit nowhere else: kind = document. In document.fields list the paper's own key facts as label/value pairs, so the family can find them later.
+- Several photos may be retakes of the same page OR further pages of one document; combine them into one answer. Set more_pages when the paper clearly continues past what you have.
+- Lab report: report every test row you can read clearly; leave unreadable rows out and list them in uncertain. Retake only if the main results are unreadable.
+- Fill only the sections asked for.`;
+const guidanceSchema = {
+  type: "object", additionalProperties: false,
+  required: ["answer", "key_points", "sources", "questions_for_care_team", "caveat"],
+  properties: {
+    answer: { type: "string", description: "Plain-language answer, 3-6 sentences, as currently recommended" },
+    key_points: { type: "array", items: { type: "object", additionalProperties: false, required: ["point", "sources"], properties: { point: str, sources: { type: "array", items: { type: "integer" } } } } },
+    sources: { type: "array", items: { type: "integer" }, description: "All source numbers relied on" },
+    questions_for_care_team: strList("2-5 questions to ask her doctors"),
+    caveat: str,
+  },
+};
 
 function imageBlock(dataUrl: string): Anthropic.ImageBlockParam {
   const m = dataUrl.match(/^data:(image\/[a-z+]+);base64,(.*)$/);
@@ -176,25 +474,67 @@ function imageBlock(dataUrl: string): Anthropic.ImageBlockParam {
   return { type: "image", source: { type: "base64", media_type: m[1] as "image/jpeg", data: m[2] } };
 }
 
+/* Anthropic allows at most 16 union-typed ("may be null") fields per schema. relax() keeps the
+ * schemas readable here and rewrites them before sending: nullable strings become plain strings
+ * ("" = unknown), nullable enums gain "", and nullable numbers stay nullable until the budget runs
+ * out, after which they use -1 for unknown. restore() turns ""/-1 back into null in the answer, so
+ * the app sees the same shape as before. */
+const UNION_BUDGET = 14;
+// deno-lint-ignore no-explicit-any
+type J = any;
+function nullableOf(n: J): "string" | "number" | "enum" | null {
+  if (!n || typeof n !== "object") return null;
+  if (Array.isArray(n.type) && n.type.includes("null")) { const t = n.type.find((x: string) => x !== "null"); return t === "string" ? "string" : (t === "number" || t === "integer") ? "number" : null; }
+  if (Array.isArray(n.anyOf) && n.anyOf.length === 2 && n.anyOf.some((x: J) => x.type === "null") && n.anyOf.some((x: J) => x.type === "string" && Array.isArray(x.enum))) return "enum";
+  return null;
+}
+function relax(n: J, budget = { left: UNION_BUDGET }): J {
+  if (!n || typeof n !== "object" || Array.isArray(n)) return n;
+  const kind = nullableOf(n);
+  const note = (d: string | undefined, add: string) => (d ? d + " " : "") + add;
+  if (kind === "string") { const { type: _t, ...rest } = n; return { ...rest, type: "string", description: note(n.description, "Empty string if unknown.") }; }
+  if (kind === "enum") { const e = n.anyOf.find((x: J) => x.type === "string"); return { type: "string", enum: [...e.enum, ""], description: note(n.description ?? e.description, "Empty string if unknown.") }; }
+  if (kind === "number") {
+    if (budget.left > 0) { budget.left--; return n; }
+    const base = n.type.find((x: string) => x !== "null"); const { type: _t, ...rest } = n;
+    return { ...rest, type: base, description: note(n.description, "Use -1 if unknown or not shown.") };
+  }
+  const out: J = { ...n };
+  if (n.properties) { out.properties = {}; for (const k of Object.keys(n.properties)) out.properties[k] = relax(n.properties[k], budget); }
+  if (n.items) out.items = relax(n.items, budget);
+  if (n.anyOf) out.anyOf = n.anyOf.map((x: J) => relax(x, budget));
+  return out;
+}
+function restore(orig: J, v: J): J {
+  if (v == null || !orig || typeof orig !== "object") return v;
+  const kind = nullableOf(orig);
+  if ((kind === "string" || kind === "enum") && v === "") return null;
+  if (kind === "number" && v === -1) return null;
+  if (Array.isArray(v) && orig.items) return v.map((x) => restore(orig.items, x));
+  if (typeof v === "object" && !Array.isArray(v) && orig.properties) { const o: J = {}; for (const k of Object.keys(v)) o[k] = restore(orig.properties[k], v[k]); return o; }
+  return v;
+}
+
 async function ask(schema: object, content: Anthropic.ContentBlockParam[], effort: "low" | "medium" | "high") {
   // fallbacks:"default" re-runs a request on Anthropic's recommended model if a safety
   // classifier declines it, instead of returning a bare refusal.
   const params = {
-    model: MODEL,
+    model: currentModel(),
     max_tokens: 16000,
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
     system: SYSTEM,
-    output_config: { effort, format: { type: "json_schema", schema } },
+    output_config: { effort, format: { type: "json_schema", schema: relax(schema) } },
     messages: [{ role: "user", content }],
   };
   // deno-lint-ignore no-explicit-any
   const res = await anthropic.beta.messages.create(params as any);
+  meterAdd(res);
   if (res.stop_reason === "refusal") throw new Error("The model declined this request.");
   if (res.stop_reason === "max_tokens") throw new Error("Response was cut off; try a smaller input.");
   const text = res.content.find((b) => b.type === "text");
   if (!text || text.type !== "text") throw new Error("No structured output returned.");
-  return JSON.parse(text.text);
+  return restore(schema, JSON.parse(text.text));
 }
 
 // Most recipe sites embed schema.org/Recipe as JSON-LD; read it directly when present.
@@ -268,6 +608,146 @@ async function handle(mode: Mode, body: Record<string, any>) {
       return await ask(canonSchema, [{ type: "text", text: `Map each input to an existing ingredient name if it is the same thing, otherwise propose a new generic name.\nInputs: ${JSON.stringify(body.inputs)}\nKnown: ${known}` }], "low");
     case "appointment_summary":
       return await ask(summarySchema, [{ type: "text", text: `Draft a short brief a family caregiver can bring to an appointment, from this home food diary summary. Use only the data given; do not diagnose or recommend treatment. Frame concerns as questions for the clinician. Write in plain language.\n${JSON.stringify(body.digest)}` }], "medium");
+    case "meal_ideas":
+      return await ask(mealIdeasSchema, [{ type: "text", text: `Suggest 3 simple meal ideas for ${body.profile?.name ?? "this person"} for ${body.meal ?? "the next meal"}. Prefer what is on hand. Respect their diet rules strictly (sodium, potassium, phosphorus, fluid). Count soups, gelatin, ice and sauces as fluid. Keep each idea easy for a tired caregiver.
+Their rules: ${JSON.stringify(body.profile?.rules ?? [])}
+Daily targets: ${JSON.stringify(body.profile?.targets ?? {})}
+Fluid left today (oz): ${body.fluid_left_oz ?? "no limit set"}
+Eaten so far today: ${JSON.stringify(body.today ?? [])}
+On hand: ${(body.pantry ?? []).join(", ")}` }], "low");
+    case "timing_questions": {
+      // body.context: meds (with refs, slots, times, label timing text), actual timings,
+      // meals, wake/bed times, conditions, kidney labs, patterns, the app's own timing questions. No names.
+      const ctx = JSON.stringify(body.context ?? {}).slice(0, 40000);
+      const found = await research(`Find current guidance on WHEN to take each of these medicines (time of day, with or without food, spacing from other medicines or binders, bedtime vs morning) for an older adult with: ${(body.context?.conditions ?? []).join(", ") || "chronic illness"}. Note anything about kidney disease. Medicines: ${(body.context?.meds ?? []).map((m: { name: string }) => m.name).join(", ")}.`);
+      const out = await ask(timingQSchema, [{ type: "text", text: `A family caregiver is preparing for a visit with her pharmacist. Write the QUESTIONS worth asking about the timing of her medicines: time of day, food, spacing from other medicines, and how her real day (wake, meals, bed, actual dose times) fits the labels.
+Rules:
+- Only questions. Never propose a time, a slot, a dose or a change; never write "should", "recommend" or "best"; never tell the family what to do. The pharmacist or doctor decides.
+- 3 to 8 questions, most useful first. Skip anything already covered by timing_questions in her data unless the sources add something.
+- Each question gets a short "why" that states facts only: what the label or the numbered sources say, and how her day and real dose times compare. Never say what to do, avoid, prefer or aim for. Cite the source numbers it relies on. If nothing supports a question, leave it out.
+- Never ask about stopping a medicine or changing a dose.
+
+Her data:
+${ctx}
+
+Research notes:
+${found.notes}
+
+Numbered sources:
+${numbered(found.sources)}` }], "high");
+      return { ...out, source_list: found.sources };
+    }
+    case "read_vitals":
+      return await ask(vitalsSchema, [imageBlock(body.image), { type: "text", text: "This is a photo of a home health monitor's screen (usually a blood pressure cuff: SYS top, DIA middle, pulse bottom). Read exactly what the screen shows. Do not guess digits you cannot see; set readable=false instead. Report whether an irregular heartbeat or AFib symbol is lit. Ignore stored-memory averages unless they are the only reading shown, and say so in notes." }], "low");
+    case "fill_form": {
+      const images: string[] = (body.images ?? []).filter(Boolean).slice(-3);
+      if (!images.length) throw new Error("No photo sent.");
+      const fields = (body.fields ?? []).slice(0, 50).map((f: Record<string, unknown>) =>
+        `- id=${String(f.id).slice(0, 40)} | ${String(f.label ?? "").slice(0, 120)} | type=${String(f.type ?? "text").slice(0, 20)}` +
+        (Array.isArray(f.options) && f.options.length ? ` | one of: ${f.options.slice(0, 30).map((o) => String(o).slice(0, 40)).join(" / ")}` : "")).join("\n");
+      const text = PHOTO_RULES.split("\n- First decide")[0] + `
+The family is filling in a form called "${String(body.form ?? "").slice(0, 80)}". Fill its fields from the photo(s).
+Fields:
+${fields}
+- Fill only fields the photo clearly answers; leave the rest out. Never guess a digit or a word you cannot read.
+- Formats: date YYYY-MM-DD, datetime-local YYYY-MM-DDTHH:MM, time HH:MM, number = digits only (convert units only if the field label names a unit and the photo uses another, and say so in summary). A field with "one of" must use one of those options exactly.
+- If several photos are given they are tries of the same thing; combine them. If they disagree on a value, leave it out and retake.
+- decision = "retake" if the main thing this form needs is unclear (glare, cut off, blurry), with the reason and one specific tip. Use "use" when everything you report is clear, even if some fields stay empty.
+- If the photo has nothing to do with this form, decision = "use", no values, and say so in summary.
+Today is ${new Date().toISOString().slice(0, 10)}.`;
+      return await ask(formSchema, [...images.map(imageBlock), { type: "text", text }], "medium");
+    }
+    case "scribe": {
+      // body.text: the family's notes or a speech-to-text transcript of the visit (may be messy).
+      const text = String(body.text ?? "").slice(-80000);
+      if (text.trim().length < 15) throw new Error("No notes sent.");
+      const meds = (body.meds ?? []).slice(0, 60).map((m: unknown) => String(m).slice(0, 80)).join(", ");
+      const focus = String(body.focus ?? "").slice(0, 1500).trim();
+      return await ask(scribeSchema, [{ type: "text", text: `You are a careful medical scribe for a family caring for an elderly relative at home. Below are notes about a care visit (home health nurse, doctor, therapist, hospice, pharmacist): either typed by the family or an automatic speech-to-text transcript of the whole visit, with no speaker labels and possible mishearings.
+This is care talk. Pull out what matters for her care, in short plain lines a tired family member can act on: findings and readings, what the clinician said to do or watch for, when to call them, changes to medicines, diet, fluids, activity, wound care or equipment, tests and referrals, the next visit. Leave out small talk, greetings and chatter about other things.
+The family's own instructions to you come first and override the defaults below, as long as they do not ask you to invent anything.
+- Sentences in the notes that speak to you directly ("scribe, note that...", "make a note...", "remind me to...", "put down that...", "don't include...") are the family's instructions or to-dos, not things the clinician said. Follow them.${focus ? `
+The family's instructions: ${focus}` : ""}
+- Use only what the notes say. Never add advice, diagnoses or doses that were not said.
+- Keep numbers (blood pressure, weight, doses, dates) exactly as said. If a number or drug name may have been misheard, still record it as heard and add it to double_check.
+- Speech-to-text often garbles drug names; compare with her current medicines and say in double_check if a heard name probably means one of them.
+- Medicine changes go in meds_changed, never only in changed.
+- Relative dates ("next Tuesday") become real dates using today; if unsure, keep the words and add to double_check.
+- Fields with nothing in the notes are null.
+Today is ${String(body.today ?? new Date().toISOString().slice(0, 10)).slice(0, 10)}. Notes started ${String(body.started ?? "").slice(0, 25)} (UTC).
+Her current medicines: ${meds || "none listed"}.
+
+Notes:
+${text}` }], "medium");
+    }
+    case "quick_log": {
+      // body.text: what a caregiver said or typed; body.meds: [{ref, name, slots}] (her medicines, no person names).
+      const text = String(body.text ?? "").slice(0, 2000);
+      if (text.trim().length < 3) throw new Error("Nothing was said.");
+      const meds = (body.meds ?? []).slice(0, 60).map((m: Record<string, unknown>) => `${String(m.ref).slice(0, 6)}: ${String(m.name).slice(0, 80)} (${String(m.slots ?? "").slice(0, 60) || "no set time"})`).join("\n");
+      return await ask(quickSchema, [{ type: "text", text: `A family caregiver said this about the elderly relative they care for. Turn it into log entries.
+- One item per thing that happened: a drink, food eaten, urine or other output, a reading (blood pressure, sugar, oxygen, temperature), a weight, a medicine given/skipped/refused, or a note.
+- Use only what was said. Never invent an amount, number, colour or time. If a number may have been misheard, still record it and say so in unsure.
+- "142 over 80" is blood pressure 142/80. "Pee", "went to the bathroom" with an amount is urine output.
+- Medicines: match to her list below by name (brand or generic). "The morning pills" = med_ref all with slot morning. If no medicine matches, leave med_ref empty and say which in unsure.
+- A sentence that is not an entry (how she slept, her mood) is a note.
+Time now: ${String(body.now ?? "").slice(0, 5)}.
+Her medicines:
+${meds || "(none saved)"}
+
+What was said:
+${text}` }], "low");
+    }
+    case "ask_file": {
+      // body.facts: numbered lines built by the app from saved entries (her and family names replaced).
+      const q = String(body.question ?? "").slice(0, 500), facts = String(body.facts ?? "").slice(0, 90000);
+      if (!q.trim() || !facts.trim()) throw new Error("Nothing to look through.");
+      return await ask(askSchema, [{ type: "text", text: `A family caregiver is asking about the elderly relative they care for. Answer ONLY from the numbered facts below, which are everything saved in the family's app.
+- Never use outside knowledge to fill gaps, never guess, and never invent dates, numbers or names. If the facts do not answer it, set found false and say plainly what is not in the file.
+- Cite every fact you use in sources. Prefer the newest fact when they differ, and say when sources disagree (e.g. list says 20 mg, bottle says 40 mg).
+- Do not give medical advice or tell them to change treatment. For questions that need a clinician, give what the file says and put the questions for her care team in ask_care_team.
+- "Her" is the relative; "a family member" is one of the caregivers.
+Today is ${String(body.today ?? "").slice(0, 10)}.
+
+Question: ${q}
+
+Facts:
+${facts}` }], "medium");
+    }
+    case "handoff": {
+      // body.facts: plain lines from the app's own entries, without anyone's name.
+      const facts = String(body.facts ?? "").slice(0, 12000);
+      if (!facts.trim()) throw new Error("Nothing to summarize.");
+      return await ask(handoffSchema, [{ type: "text", text: `A family caregiver is handing over care of an elderly relative to the next family member. Write a short handoff from these logged facts only.
+- Use only the facts below. Never add events, numbers, causes or advice that are not there. If the facts are thin, say so briefly.
+- Plain, calm words a tired family member can read in 20 seconds. Times as given.
+- Do not diagnose. A refused medicine, a flagged output or an irregular reading goes in watch, described as logged.
+
+Facts:
+${facts}` }], "low");
+    }
+    case "read_photo": {
+      const images: string[] = (body.images ?? [body.image]).filter(Boolean).slice(-6);
+      if (!images.length) throw new Error("No photo sent.");
+      const expect = body.expect ? `
+The family expects: ${String(body.expect).slice(0, 40)}.` : "";
+      const blocks = images.map(imageBlock), today = `
+Today is ${new Date().toISOString().slice(0, 10)}.`;
+      // Step 1: what is it? A tiny schema, so the full reader never has to describe every kind at once.
+      const first = await ask(photoKindSchema, [...blocks, { type: "text", text: PHOTO_RULES + expect + "\nStep 1 of 2: only say what kind of photo this is, in one line of summary." }], "low");
+      const kind = String(first.kind);
+      const part = PHOTO_PARTS[kind];
+      if (!part) return { ...photoEmpty(), kind, decision: "use", summary: first.summary };
+      // Step 2: read it with only the sections this kind needs.
+      const out = await ask(photoPartSchema(part), [...blocks, { type: "text", text: PHOTO_RULES + expect + `\nStep 2 of 2: this photo is a ${kind.replace(/_/g, " ")}. Read it.` + today }], "medium");
+      return { ...photoEmpty(), ...out, kind };
+    }
+    case "guidance": {
+      const q = String(body.question ?? "").slice(0, 600);
+      const found = await research(`${q}\nContext (no names): ${JSON.stringify(body.context ?? {}).slice(0, 4000)}`);
+      const out = await ask(guidanceSchema, [{ type: "text", text: `Answer the caregiver's question from the research notes, as currently recommended, citing the numbered sources. If the sources do not answer it, say so. Do not tell them to change treatment; turn anything treatment-related into questions for her care team.\nQuestion: ${q}\n\nResearch notes:\n${found.notes}\n\nNumbered sources:\n${numbered(found.sources)}` }], "medium");
+      return { ...out, source_list: found.sources };
+    }
     default:
       throw new Error("unknown mode");
   }
@@ -282,10 +762,45 @@ Deno.serve(async (req) => {
     const { data: { user } } = await sb.auth.getUser();
     if (!user) return json({ error: "sign in first" }, 401);
     const body = await req.json();
-    return json(await handle(body.mode, body));
+    // Which family is asking, and has it used this month's AI allowance?
+    const { data: mem } = await sb.from("members").select("household_id").eq("user_id", user.id).limit(1);
+    const hid = mem && mem[0] ? mem[0].household_id : null;
+    if (!hid) return json({ error: "Join or create a family first." }, 403);
+    const db = admin();
+    const since = new Date(); since.setUTCDate(1); since.setUTCHours(0, 0, 0, 0);
+    const [{ data: hh }, { data: used }] = await Promise.all([
+      db.from("households").select("ai_allowance_cents, erase_after").eq("id", hid).single(),
+      db.from("ai_usage").select("cost_cents").eq("household_id", hid).gte("created_at", since.toISOString()),
+    ]);
+    if (hh && hh.erase_after) return json({ error: "This family is set to be deleted, so the AI is off. An owner can cancel the deletion in Settings." }, 423);
+    const spent = (used ?? []).reduce((t: number, r: { cost_cents: number }) => t + Number(r.cost_cents), 0);
+    if (hh && hh.ai_allowance_cents != null && spent >= hh.ai_allowance_cents) return json({ error: "Your family has used this month's AI allowance. Everything can still be typed in by hand; the allowance resets on the 1st.", limit: true }, 402);
+    const uses: Use[] = [];
+    try {
+      const tryModel = TRY_MODELS[String(body.try_model ?? "")];
+      const out = await meter.run(uses, () => tryModel ? modelCtx.run(tryModel, () => handle(body.mode, body)) : handle(body.mode, body));
+      // For comparisons, say which model answered and what it cost.
+      if (tryModel && out && typeof out === "object") Object.assign(out, { _model: uses.map((u) => u.model).join(", "), _cost_cents: +uses.reduce((t, u) => t + costCents(u), 0).toFixed(3) });
+      return json(out);
+    } finally {
+      // Record what was spent, even when the request failed part-way.
+      if (uses.length) {
+        const rows = uses.map((x) => ({ household_id: hid, user_id: user.id, feature: String(body.mode ?? "").slice(0, 40), model: x.model,
+          input_tokens: x.input, cache_read_tokens: x.cacheRead, cache_write_tokens: x.cacheWrite, output_tokens: x.output, web_searches: x.searches, cost_cents: +costCents(x).toFixed(3) }));
+        const { error } = await db.from("ai_usage").insert(rows);
+        if (error) console.error("ai_usage", error.message);
+      }
+    }
   } catch (e) {
     if (e instanceof Anthropic.RateLimitError) return json({ error: "Busy, try again in a minute." }, 429);
-    if (e instanceof Anthropic.APIError) return json({ error: `AI service error ${e.status}` }, 502);
+    if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) return json({ error: "The AI key was rejected (" + e.status + "). The app owner needs to put a new Anthropic API key in Supabase (ANTHROPIC_API_KEY)." }, 502);
+    if (e instanceof Anthropic.APIError) {
+      // Anthropic's own message says what was wrong with the request (never contains the key).
+      // deno-lint-ignore no-explicit-any
+      const detail = String((e as any).error?.error?.message ?? e.message ?? "").slice(0, 300);
+      console.error("anthropic", e.status, detail);
+      return json({ error: `AI service error ${e.status}${detail ? ": " + detail : ""}` }, 502);
+    }
     return json({ error: (e as Error).message }, 400);
   }
 });

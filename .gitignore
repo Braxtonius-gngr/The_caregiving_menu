@@ -2,3 +2,6 @@ node_modules/
 .DS_Store
 supabase/.temp/
 .env
+
+# Private planning notes (health details about the person we care for). Never commit.
+docs/private/

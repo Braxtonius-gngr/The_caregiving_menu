@@ -1,10 +1,12 @@
 /* Service worker: cache the app shell, network-first for everything else. */
-var CACHE = 'tcm-shell-v13';
+var CACHE = 'tcm-shell-v54';
 var CDN = 'https://cdn.jsdelivr.net/npm/';
 var SHELL = [
   './',
   './index.html',
   './manifest.webmanifest',
+  './assets/vendor/supabase-2.49.4.js',
+  './assets/css/tokens.css',
   './assets/css/app.css',
   './assets/js/config.js',
   './assets/js/units.js',
@@ -13,6 +15,24 @@ var SHELL = [
   './assets/js/sync.js',
   './assets/js/scanner.js',
   './assets/js/ui.js',
+  './assets/js/fluids.js',
+  './assets/js/history.js',
+  './assets/js/file.js',
+  './assets/js/today.js',
+  './assets/js/insights.js',
+  './assets/js/cuff.js',
+  './assets/js/snap.js',
+  './assets/js/scribe.js',
+  './assets/js/phototest.js',
+  './assets/js/medcheck.js',
+  './assets/js/handoff.js',
+  './assets/js/voice.js',
+  './assets/js/ask.js',
+  './assets/js/capture.js',
+  './assets/js/onboarding.js',
+  './assets/js/yourdata.js',
+  './assets/js/reports.js',
+  './assets/js/nav.js',
   './assets/js/simple.js',
   './assets/js/app.js',
   './assets/icons/icon.svg'
