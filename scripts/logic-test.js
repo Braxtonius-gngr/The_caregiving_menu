@@ -330,6 +330,24 @@ t('upcoming: visits, follow-ups, yearly and monthly days, refills, within the wi
   assert.deepEqual(u.map(function (x) { return x.day + ' ' + x.title + ' ' + x.inDays; }), ['2026-11-24 Refill: Furosemide 1', '2026-11-25 Kidney doctor 2', '2026-11-28 Labs 5', '2026-12-01 Birthday 8']);
 });
 
+t('mergeMeds: a forced merge joins times, sources and names, flags a strength clash, and is caught next time', function () {
+  var keep = { id: 'k', title: 'Furosemide', fields: { dose: '40 mg', slots: 'morning', start: '2026-11-01', sources: [{ type: 'list', said: 'furosemide 40 mg AM' }] } };
+  var drop = { id: 'd', title: 'Lasix 20 mg', fields: { slots: 'morning,evening', slot_times: { evening: '18:00' }, purpose: 'water pill', instructions: 'Take with breakfast' } };
+  assert.strictEqual(Logic.medSame(Logic.medBrief(keep), Logic.medBrief(drop)), false);
+  var m = Logic.mergeMeds(keep, drop), f = m.fields;
+  assert.strictEqual(m.caught, false);
+  assert.deepEqual([f.dose, f.slots, f.purpose, f.instructions, f.slot_times.evening], ['40 mg', 'morning,evening', 'water pill', 'Take with breakfast', '18:00']);
+  assert.strictEqual(f.start, undefined, 'the other one had no start, so the merged one has none');
+  assert.deepEqual(f.also_called, ['Lasix 20 mg']);
+  assert.deepEqual(f.sources.map(function (s) { return s.type + ':' + s.said; }), ['list:furosemide 40 mg AM', 'form:Lasix 20 mg']);
+  assert.ok(/Strength differs: Furosemide 40 mg, Lasix 20 mg \(merged/.test(m.clash) && f.check === m.clash);
+  assert.strictEqual(keep.fields.slots, 'morning', 'the saved record is not changed in place');
+  // The remembered name makes the duplicate check pair a new "Lasix" entry by itself.
+  var again = Logic.reconcileMeds([{ id: 'k', title: 'Furosemide', fields: f }, { id: 'n', title: 'Lasix', fields: {} }], '2026-11-25');
+  assert.deepEqual(again.duplicates, [['k', 'n']]);
+  // Same generic: the check had it, so the merge is not a forced one.
+  assert.strictEqual(Logic.mergeMeds({ title: 'Lasix', fields: { generic: 'furosemide' } }, { title: 'Furosemide 40 mg', fields: {} }).caught, true);
+});
 t('reconcileMeds: list vs bottle strength, missing bottle, not on list, duplicates, flags', function () {
   var meds = [
     { id: 'a', title: 'Furosemide 20 mg', fields: { generic: 'furosemide', slots: 'morning', sources: [{ type: 'list', strength: '20 mg', said: 'Furosemide 20mg AM' }, { type: 'bottle', strength: '40 mg', said: 'Take 1 tablet every morning' }] } },

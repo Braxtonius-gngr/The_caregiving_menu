@@ -532,6 +532,41 @@ var Logic = (function () {
     return out;
   }
   var SOURCE_NAME = { list: 'list', discharge: 'discharge papers', bottle: 'bottle', form: 'typed in' };
+  // The names one medicine goes by: the first word of its title, its generic, and names merged into it.
+  function medKeys(x) { return [x.title, x.generic].concat(x.also || []).map(medKey).filter(Boolean); }
+  function medSame(a, b) { var kb = medKeys(b); return medKeys(a).some(function (k) { return kb.indexOf(k) >= 0; }); }
+  function medBrief(rec) { var f = rec.fields || {}; return { title: rec.title, generic: f.generic || null, also: f.also_called || [], dose: f.dose || null }; }
+  /* Two saved medicines the family says are one. Returns the kept medicine's new fields:
+   * blanks filled from the other, times of day and sources joined, the other name remembered
+   * (so the duplicate check knows it next time), and a flag when the strengths differ.
+   * `caught` says whether the duplicate check had paired them; when false the merge was forced. */
+  function mergeMeds(keep, drop) {
+    var f = JSON.parse(JSON.stringify(keep.fields || {})), d = drop.fields || {}, own = { slots: 1, slot_times: 1, instructions: 1, sources: 1, check: 1, start: 1, stop: 1, also_called: 1 };
+    Object.keys(d).forEach(function (k) { if (!own[k] && (f[k] == null || f[k] === '') && d[k] != null && d[k] !== '') f[k] = d[k]; });
+    var slots = String(f.slots || '').split(',').filter(Boolean);
+    String(d.slots || '').split(',').filter(Boolean).forEach(function (s) { if (slots.indexOf(s) < 0) slots.push(s); });
+    if (slots.length) f.slots = slots.join(',');
+    if (d.slot_times || f.slot_times) f.slot_times = Object.assign({}, d.slot_times || {}, f.slot_times || {});
+    var lines = String(f.instructions || '').split('\n').filter(Boolean);
+    String(d.instructions || '').split('\n').filter(Boolean).forEach(function (l) { if (lines.indexOf(l) < 0) lines.push(l); });
+    if (lines.length) f.instructions = lines.join('\n');
+    var typed = [drop.title, d.dose].filter(Boolean).join(' ');
+    f.sources = (f.sources || []).concat(d.sources && d.sources.length ? d.sources : medSources(drop).length ? [] : [{ type: 'form', label: 'Typed in', strength: medStrength(typed), said: typed }]);
+    if (!f.sources.length) delete f.sources;
+    // Active for as long as either one was.
+    if (f.start && (!d.start || d.start < f.start)) { if (d.start) f.start = d.start; else delete f.start; }
+    if (f.stop && (!d.stop || d.stop > f.stop)) { if (d.stop) f.stop = d.stop; else delete f.stop; }
+    var names = (f.also_called || []).concat([drop.title], d.also_called || []).filter(function (n, i, all) {
+      return n && String(n).toLowerCase() !== String(keep.title || '').toLowerCase() && all.map(function (x) { return String(x).toLowerCase(); }).indexOf(String(n).toLowerCase()) === i;
+    });
+    if (names.length) f.also_called = names;
+    var named = function (title, st) { return medStrength(title) ? title : title + ' ' + st; };
+    var sk = medStrength(keep.title) || medStrength((keep.fields || {}).dose), sd = medStrength(drop.title) || medStrength(d.dose);
+    var clash = sk && sd && sk !== sd ? 'Strength differs: ' + named(keep.title, sk) + ', ' + named(drop.title, sd) + ' (merged by hand). Check with the pharmacist which is right.' : null;
+    var checks = [f.check, d.check, clash].filter(Boolean).join('\n').split('\n').filter(function (l, i, all) { return l && all.indexOf(l) === i; });
+    if (checks.length) f.check = checks.join('\n');
+    return { fields: f, clash: clash, caught: medSame(medBrief(keep), medBrief(drop)) };
+  }
   // meds: medication records (not deleted). Returns one item per medicine plus possible duplicates.
   function reconcileMeds(meds, today) {
     var active = meds.filter(function (r) { var f = r.fields || {}; return !(f.stop && today && f.stop < today); });
@@ -549,13 +584,12 @@ var Logic = (function () {
       if ((types.indexOf('list') >= 0 || types.indexOf('discharge') >= 0) && types.indexOf('bottle') < 0) issues.push({ level: 'info', text: 'No bottle photographed yet.' });
       if (!f.slots) issues.push({ level: 'info', text: 'No time of day set.' });
       if (f.check) issues.push({ level: 'bad', text: 'Flagged: ' + String(f.check).split('\n').join(' ') });
-      return { id: r.id, title: r.title, generic: f.generic || null, dose: f.dose || null, sources: src, issues: issues };
+      return { id: r.id, title: r.title, generic: f.generic || null, also: f.also_called || [], dose: f.dose || null, sources: src, issues: issues };
     });
     var dups = [];
     for (var i = 0; i < items.length; i++) for (var j = i + 1; j < items.length; j++) {
       var a = items[i], b = items[j];
-      var ka = [medKey(a.title), medKey(a.generic)].filter(Boolean), kb = [medKey(b.title), medKey(b.generic)].filter(Boolean);
-      if (ka.some(function (k) { return kb.indexOf(k) >= 0; })) {
+      if (medSame(a, b)) {
         dups.push([a.id, b.id]);
         var t = 'Possible duplicate of ' + b.title + ' (same medicine' + (a.generic && a.generic === b.generic ? ', ' + a.generic : '') + ').';
         a.issues.unshift({ level: 'bad', text: t }); b.issues.unshift({ level: 'bad', text: 'Possible duplicate of ' + a.title + '.' });
@@ -616,7 +650,7 @@ var Logic = (function () {
     if (m) return +m[1] || words[m[1]] || 1;
     return 1;
   }
-  return { exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
+  return { exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, mergeMeds: mergeMeds, medSame: medSame, medBrief: medBrief, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
     slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, stayOpen: stayOpen, stayAt: stayAt, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();

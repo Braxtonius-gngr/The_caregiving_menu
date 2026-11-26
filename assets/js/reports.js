@@ -95,7 +95,7 @@ function fillReports(s) {
 }
 function reportRow(r) {
   var st = REPORT_STATUS[r.status] || [r.status, ''];
-  var what = r.kind === 'ai' ? (AI_FEATURES[r.feature] || r.feature) : 'App problem' + (r.feature ? ' (' + r.feature + ')' : '');
+  var what = r.kind === 'ai' ? (AI_FEATURES[r.feature] || r.feature) : r.feature === 'med_merge' ? 'Medicines merged by hand' : 'App problem' + (r.feature ? ' (' + r.feature + ')' : '');
   var picks = (r.choices || []).map(function (k) { return (REPORT_CHOICES.find(function (c) { return c[0] === k; }) || [k, k])[1]; });
   return '<div class="list-item"><div class="grow"><b>' + esc(what) + '</b> <span class="badge ' + st[1] + '">' + st[0] + '</span>' +
     '<div class="muted">' + esc((r.who || 'A former member') + ' · ' + new Date(r.created_at).toLocaleString()) + '</div>' +

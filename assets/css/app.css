@@ -303,14 +303,14 @@ label.check input { width: auto; margin: 0; }
 .dose .meta { font-size: var(--fs-caption); color: var(--text-muted); }
 .dose .meta .badge { padding: 0 8px; margin-right: 2px; }
 .dose .linkish { padding: 8px 4px; }
-.check { width: var(--check-size); height: var(--check-size); min-width: var(--check-size); border-radius: var(--radius-full); border: 2px solid var(--action); background: transparent; padding: 0; display: grid; place-items: center; color: var(--text-on-action); cursor: pointer; flex: none;
+button.check { width: var(--check-size); height: var(--check-size); min-width: var(--check-size); border-radius: var(--radius-full); border: 2px solid var(--action); background: transparent; padding: 0; display: grid; place-items: center; color: var(--text-on-action); cursor: pointer; flex: none;
   transition: background-color var(--dur-check) var(--ease-settle), transform var(--dur-tap) var(--ease-settle); }
 /* the tap target is larger than the circle */
-.check { box-shadow: 0 0 0 8px transparent; }
-.check .ico { width: 18px; height: 18px; stroke-width: 2.4; stroke-dasharray: 24; stroke-dashoffset: 24; vertical-align: 0; transition: stroke-dashoffset var(--dur-check) var(--ease-settle) 80ms; }
-.check:active { transform: scale(.92); }
-.dose.done .check { background: var(--action); }
-.dose.done .check .ico { stroke-dashoffset: 0; }
+button.check { box-shadow: 0 0 0 8px transparent; }
+button.check .ico { width: 18px; height: 18px; stroke-width: 2.4; stroke-dasharray: 24; stroke-dashoffset: 24; vertical-align: 0; transition: stroke-dashoffset var(--dur-check) var(--ease-settle) 80ms; }
+button.check:active { transform: scale(.92); }
+.dose.done button.check { background: var(--action); }
+.dose.done button.check .ico { stroke-dashoffset: 0; }
 .dose.done .name { color: var(--text-muted); }
 .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); }
 .tile-stat { background: var(--surface-card); border-radius: var(--radius-m); box-shadow: var(--elevation-1); padding: var(--space-4) var(--space-3); border: 0; text-align: left; color: inherit; font: inherit; cursor: pointer; min-width: 0; transition: transform var(--dur-tap) var(--ease-settle); }
