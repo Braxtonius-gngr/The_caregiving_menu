@@ -229,7 +229,8 @@ function readExtraFields() {
 }
 // Picking a known test fills its usual unit, if the unit box is still empty.
 function fillLabUnit(test) { var u = LAB_UNITS[test], el = document.getElementById('rf-unit'); if (u && el && !el.value) el.value = u; }
-function saveRecord(id, kind, pid) {
+// force: 'asis' saves a medicine whose times were questioned without changing them.
+function saveRecord(id, kind, pid, force) {
   var K = RECORD_KINDS[kind], title = document.getElementById('rTitle').value.trim();
   if (!title && kind !== 'update') return toast('Fill in "' + K.title + '" first');
   var fields = {};
@@ -246,6 +247,10 @@ function saveRecord(id, kind, pid) {
     else fields[f[0]] = v || null;
   });
   var ex = readExtraFields(); if (ex !== undefined) fields.extra = ex.length ? ex : null;
+  if (kind === 'medication') {
+    fields.slots_none = !fields.slots && force === 'asis' ? true : null;
+    if (force !== 'asis' && medAsk(id, pid, title, fields)) return;
+  }
   var chk = S.phoneCheck;
   if (fields.phone && chk && chk.id === 'rf-phone' && chk.res.valid) { fields.phone = chk.res.national || fields.phone; fields.phone_e164 = chk.res.e164; fields.phone_type = chk.res.line_type; fields.phone_carrier = chk.res.carrier; }
   var whenEl = document.getElementById('rWhen'), when = whenEl && whenEl.value ? new Date(K.date === 'date' ? whenEl.value + 'T12:00:00' : whenEl.value).toISOString() : null;
@@ -266,6 +271,32 @@ function saveRecord(id, kind, pid) {
       refresh(); if (Sync.enabled()) syncNow();
     });
   }).catch(function (e) { toast('Could not save: ' + e.message); });
+}
+/* Before a medicine is saved: no time of day, times that disagree with its own words ("twice a
+ * day" with only morning picked), or the same medicine already saved. Asked once, in the sheet;
+ * the family can fix it in one tap or save it as it is. Returns true when it asked. */
+function medAsk(id, pid, title, fields) {
+  var box = document.getElementById('medAsk');
+  if (!box) { var row = document.querySelector('#sheetBody > .btn-row:last-child'); if (!row) return false; row.insertAdjacentHTML('beforebegin', '<div id="medAsk" role="alert"></div>'); box = document.getElementById('medAsk'); }
+  var asks = Logic.medTimingIssues({ title: title, fields: fields }).map(function (t) {
+    return '<p><b>' + esc(t.text) + '</b></p><div class="btn-row">' +
+      (t.fix ? '<button type="button" class="btn sm" onclick="medAskSlots(\'' + t.fix + '\')">Set ' + esc(t.fix.split(',').map(slotName).join(' and ').toLowerCase()) + '</button>' : '') +
+      (t.key === 'no_time' ? '<button type="button" class="btn sm ghost" onclick="medAskSlots(\'prn\')">Only when needed</button>' : '') + '</div>';
+  });
+  var day = careToday(), me = { title: title, generic: fields.generic || null, also: [] };
+  var twin = id ? null : recordsOf(pid || null, ['medication']).find(function (r) { var f = r.fields || {}; return !r.deleted && !(f.stop && f.stop < day) && Logic.medSame(me, Logic.medBrief(r)); });
+  if (twin) asks.push('<p><b>' + esc(twin.title) + ' is already saved and looks like the same medicine.</b> Saving this makes a second entry.</p>' +
+    '<div class="btn-row"><button type="button" class="btn sm" onclick="editRecord(\'' + twin.id + '\')">Open ' + esc(twin.title) + ' instead</button></div>');
+  if (!asks.length) { box.innerHTML = ''; return false; }
+  box.innerHTML = '<div class="note med-ask">' + asks.join('') + '<p class="muted">Or change it above and tap Save again.</p>' +
+    '<button type="button" class="linkish" onclick="saveRecord(' + (id ? '\'' + id + '\'' : 'null') + ',\'medication\',' + (pid ? '\'' + pid + '\'' : 'null') + ',\'asis\')">Save it as it is</button></div>';
+  box.scrollIntoView({ block: 'center' });
+  return true;
+}
+function medAskSlots(slots) {
+  var on = slots.split(',');
+  Array.prototype.forEach.call(document.querySelectorAll('#rf-slots .chip'), function (c) { var sel = on.indexOf(c.dataset.v) >= 0; c.classList.toggle('on', sel); c.setAttribute('aria-pressed', sel); });
+  var save = document.querySelector('#sheetBody > .btn-row:last-child .btn.writer-only'); if (save) save.click();
 }
 function deleteRecord(id) {
   if (!confirm('Delete this? It goes to Deleted for 30 days.')) return;

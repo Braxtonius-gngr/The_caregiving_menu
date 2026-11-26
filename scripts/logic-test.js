@@ -348,6 +348,28 @@ t('mergeMeds: a forced merge joins times, sources and names, flags a strength cl
   // Same generic: the check had it, so the merge is not a forced one.
   assert.strictEqual(Logic.mergeMeds({ title: 'Lasix', fields: { generic: 'furosemide' } }, { title: 'Furosemide 40 mg', fields: {} }).caught, true);
 });
+t('medKey: store brands and marketing words do not hide the medicine; vitamins keep their letter', function () {
+  assert.deepEqual(['Low Dose Aspirin (H-E-B)', 'Aspirin 81 mg', 'H-E-B Ultra Strength Probiotic (20 billion live cells)', 'Furosemide 40 mg tablet', 'Vitamin D3 1000 IU', 'Vitamin B12', 'Equate Extra Strength Acetaminophen', ''].map(Logic.medKey),
+    ['aspirin', 'aspirin', 'probiotic', 'furosemide', 'vitamind3', 'vitaminb12', 'acetaminophen', '']);
+  var r = Logic.reconcileMeds([{ id: 'a', title: 'Low Dose Aspirin (H-E-B)', fields: { dose: '81 mg', slots: 'morning' } }, { id: 'b', title: 'Aspirin', fields: { dose: '81 mg', slots: 'morning' } },
+    { id: 'c', title: 'Vitamin D', fields: { slots: 'morning' } }, { id: 'd', title: 'Vitamin C', fields: { slots: 'morning' } }], '2026-11-25');
+  assert.deepEqual(r.duplicates, [['a', 'b']]);
+});
+t('medTimingIssues: no time of day, and times that disagree with the words, each with a fix when there is one answer', function () {
+  assert.deepEqual(['twice a day', 'BID', '1 tablet 2x a day', 'every 8 hours', 'once daily', 'Once a day, by mouth', 'QID', '40 mg', 'every 5 hours', 'AM and PM'].map(Logic.medFrequency), [2, 2, 2, 3, 1, 1, 4, null, null, null]);
+  var t = function (f) { return Logic.medTimingIssues({ title: 'X', fields: f }).map(function (i) { return i.key + ':' + i.fix; }); };
+  assert.deepEqual(t({ slots: 'morning', when: 'Twice a day' }), ['freq:morning,evening']);
+  assert.deepEqual(t({ slots: 'bedtime', when: 'Twice a day' }), ['freq:null'], 'bedtime is not half of morning and evening, so it asks');
+  assert.deepEqual(t({ slots: 'morning,evening', when: 'Once daily (2 capsules together)' }), ['freq:null']);
+  assert.deepEqual(t({ slots: 'morning,evening', when: 'Twice a day' }), []);
+  assert.deepEqual(t({ slots: 'morning,prn', dose: '1 tablet once a day' }), []);
+  assert.deepEqual(t({ dose: '100 mcg tablet' }), ['no_time:null']);
+  assert.deepEqual(t({ when: 'three times a day' }), ['no_time:morning,noon,evening']);
+  assert.deepEqual(t({ slots: 'prn' }), []);
+  assert.deepEqual(t({ slots_none: true }), []);
+  var r = Logic.reconcileMeds([{ id: 'a', title: 'Amiodarone', fields: { slots: 'morning', when: 'Twice a day' } }], '2026-11-25');
+  assert.ok(r.items[0].issues.some(function (i) { return i.level === 'warn' && /twice a day, but 1 time of day is picked/.test(i.text); }));
+});
 t('repointPlan: questions, their time changes and drafted schedule lines follow a merged medicine', function () {
   var qs = { status: 'to_ask', questions: [{ text: 'Earlier?', med_id: 'd', change: { med_id: 'd', slot: 'evening', time: '16:00' } }, { text: 'Other', med_id: 'x' }, { text: 'General', med_id: null }] };
   var out = Logic.repointPlan(qs, 'd', 'k');
