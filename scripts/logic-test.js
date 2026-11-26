@@ -395,6 +395,10 @@ t('noteOffers: lab numbers, a new medicine and an admission are found in a typed
   assert.deepEqual(Logic.noteOffers('Potassium was 5.4, A1c 7.2, creatinine: 3.1').labs.map(function (l) { return l.test + ' ' + l.value; }), ['Creatinine 3.1', 'Potassium 5.4', 'A1c 7.2']);
   ['Very helpful with physically assisting her and changing.', 'Started feeling better after lunch, added a pillow.', 'Nurse checked sodium intake and gave her water.', 'BP 120/80 at 9:30, glucose check at 11/25', 'Opted not to discharge, cleaned Foley and checked for blockage.']
     .forEach(function (t) { assert.strictEqual(Logic.noteOffers(t).any, false, t); });
+  // Spoken words: no capitals or punctuation to lean on.
+  var v = Logic.noteOffers('the nurse said her hemoglobin was 8 and her gfr is 11 and they started her on cephalexin and she got admitted to north central baptist');
+  assert.deepEqual([v.labs.map(function (l) { return l.test + ' ' + l.value; }).join(), v.meds.map(function (m) { return m.name; }).join(), v.stay.org], ['eGFR 11,Hemoglobin 8', 'Cephalexin', 'North Central Baptist']);
+  assert.strictEqual(Logic.noteOffers('she was admitted to the hospital last night').stay.org, null);
   var n = Logic.noteOffersNew('GFR 11. Hemoglobin 8. Later: started cephalexin', 'GFR 11. Hemoglobin 8.');
   assert.deepEqual([n.labs.length, n.meds.map(function (m) { return m.name; }).join()], [0, 'Cephalexin']);
 });
