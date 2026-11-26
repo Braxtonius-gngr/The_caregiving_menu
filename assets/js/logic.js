@@ -519,7 +519,50 @@ var Logic = (function () {
     var m = String(t || '').toLowerCase().replace(/,/g, '').match(/(\d+(?:\.\d+)?)\s*(mcg|mg|g|ml|units?|iu|%)/);
     return m ? (+m[1]) + ' ' + m[2].replace(/s$/, '') : null;
   }
-  function medKey(n) { return String(n || '').toLowerCase().split(/[\s,(]/)[0].replace(/[^a-z]/g, ''); }
+  // The word a medicine is matched by: its first real word, past store brands and marketing words
+  // ("Low Dose Aspirin (H-E-B)" and "Aspirin" are both "aspirin"). Vitamins keep their letter.
+  var MED_NOISE = /^(low|lo|dose|ultra|extra|regular|maximum|max|strength|adult|adults|childrens|children|baby|junior|chewable|coated|enteric|ec|safety|daily|generic|brand|otc|original|advanced|complete|plus|tablet|tablets|tab|tabs|capsule|capsules|cap|caps|caplet|caplets|softgel|softgels|liquid|oral|heb|cvs|walgreens|walgreen|equate|kirkland|kroger|target|walmart|riteaid|rite|aid|goodsense|good|sense|neighbor|members|mark|great|value|up|upup|amazon|basic|care|signature|sunmark|topcare|wellness|well|at)$/;
+  function medKey(n) {
+    var words = String(n || '').toLowerCase().replace(/[()]/g, ' ').split(/[\s,]+/).map(function (w) { return w.replace(/[^a-z0-9]/g, ''); })
+      .filter(function (w) { return w && !/^\d/.test(w) && !MED_NOISE.test(w); });
+    if (!words.length) return String(n || '').toLowerCase().split(/[\s,(]/)[0].replace(/[^a-z]/g, '');
+    return (words[0] === 'vitamin' && words[1] ? 'vitamin' + words[1] : words[0]).replace(/[^a-z0-9]/g, '');
+  }
+  /* What the words say about how often ("twice a day", "BID", "every 8 hours"), as times a day. */
+  function medFrequency(text) {
+    var s = ' ' + String(text || '').toLowerCase().replace(/[.,;()]/g, ' ') + ' ', m;
+    if ((m = s.match(/ every (\d+) ?(?:hours|hrs|hr|h) /))) { var n = 24 / +m[1]; return n >= 1 && n <= 6 && n === Math.round(n) ? n : null; }
+    if (/ (four times|4 times|4x|4 x|qid) /.test(s)) return 4;
+    if (/ (three times|3 times|3x|3 x|tid) /.test(s)) return 3;
+    if (/ (twice|two times|2 times|2x|2 x|bid) /.test(s)) return 2;
+    if (/ (once|one time|1 time|1x|qd|daily|every day|each day|a day|per day) /.test(s) && !/ (twice|times) /.test(s)) return 1;
+    return null;
+  }
+  var FREQ_SLOTS = { 1: 'morning', 2: 'morning,evening', 3: 'morning,noon,evening', 4: 'morning,noon,evening,bedtime' };
+  var FREQ_WORDS = { 1: 'once a day', 2: 'twice a day', 3: 'three times a day', 4: 'four times a day', 6: 'six times a day' };
+  /* Where a medicine's times of day and its own words disagree, or no time is set at all.
+   * Each: { key, text, fix } where fix is the slots that would settle it (when there is one answer). */
+  // What the family has already looked at and chosen to keep: asked about once, not on every save.
+  function medSig(f) { f = f || {}; return [f.slots || '', f.dose || '', f.when || '', f.per_dose == null ? '' : f.per_dose].join('|'); }
+  function medGive(f) { return f && f.per_dose ? f.per_dose + ' each time' : ''; }
+  function medTimingIssues(med) {
+    var f = med.fields || {}, all = String(f.slots || '').split(',').filter(Boolean), timed = all.filter(function (s) { return s !== 'prn'; }), out = [];
+    if (f.timing_ok && f.timing_ok === medSig(f)) return out;
+    var freq = medFrequency([f.dose, f.when].filter(Boolean).join(' '));
+    // "2 tablets" with two times of day: two each time, or two a day in total?
+    var cnt = /(\d+(?:\.\d+)?)\s*(tablets?|tabs?|capsules?|caps?|caplets?|pills?|puffs?|drops?|sprays?|patch(?:es)?)\b/i.exec(f.dose || '');
+    if (cnt && +cnt[1] > 1 && timed.length >= 2 && f.per_dose == null) {
+      var n = +cnt[1], unit = cnt[2].toLowerCase().replace(/e?s$/, ''), each = n / timed.length;
+      out.push({ key: 'per_dose', text: 'Is that ' + n + ' ' + cnt[2].toLowerCase() + ' each time, or ' + n + ' a day in total?', fix: null,
+        options: [{ label: n + ' each time (' + n * timed.length + ' a day)', per_dose: n }].concat(each === Math.round(each) ? [{ label: each + ' each time (' + n + ' a day)', per_dose: each }] : []), unit: unit });
+    }
+    if (!all.length) out.push({ key: 'no_time', text: 'No time of day is picked, so it will not show in the daily medicines.', fix: freq && FREQ_SLOTS[freq] ? FREQ_SLOTS[freq] : null });
+    else if (freq && timed.length && freq !== timed.length) {
+      out.push({ key: 'freq', text: 'It says ' + (FREQ_WORDS[freq] || freq + ' times a day') + ', but ' + timed.length + ' time' + (timed.length === 1 ? ' of day is' : 's of day are') + ' picked.',
+        fix: freq > timed.length && FREQ_SLOTS[freq] && timed.every(function (s) { return FREQ_SLOTS[freq].split(',').indexOf(s) >= 0; }) ? FREQ_SLOTS[freq] : null });
+    }
+    return out;
+  }
   function medSources(rec) {
     var f = rec.fields || {}, out = (f.sources || []).slice();
     var have = function (type, said) { return out.some(function (s) { return s.type === type && (s.said || '') === (said || ''); }); };
@@ -540,6 +583,44 @@ var Logic = (function () {
    * blanks filled from the other, times of day and sources joined, the other name remembered
    * (so the duplicate check knows it next time), and a flag when the strengths differ.
    * `caught` says whether the duplicate check had paired them; when false the merge was forced. */
+  /* ---------- Reading a typed note for things that belong elsewhere in the file ----------
+   * A visit note or family update often holds a lab number ("HEMOGLOBIN @ 8 GFR @ 11"), a new
+   * medicine ("added antibiotic") or a hospital admission. These are only ever offered back to
+   * the person who typed them; nothing is saved from a note without a tap. No AI: plain patterns,
+   * kept narrow so an ordinary sentence offers nothing. */
+  var NOTE_LABS = [['eGFR', 'e?gfr'], ['Creatinine', 'creatinine|creat'], ['BUN', 'bun'], ['Potassium', 'potassium'], ['Sodium', 'sodium'], ['Phosphorus', 'phosphorus|phos'],
+    ['Calcium', 'calcium'], ['Albumin', 'albumin'], ['Hemoglobin', 'hemoglobin|haemoglobin|hgb'], ['Hematocrit', 'hematocrit|hct'], ['A1c', 'hba1c|a1c'], ['Glucose', 'glucose|blood sugar'], ['PTH', 'pth']];
+  var NOTE_MED_CLASS = /^(antibiotics?|steroids?|insulin|inhaler|nebulizer|patch|ointment|cream|eye ?drops|ear ?drops|drops|supplement|vitamin|probiotic|painkiller|laxative|stool softener|diuretic|antifungal|antiviral|antacid|blood thinner|water pill|sleeping pill|nausea medicine)$/;
+  var NOTE_MED_SUFFIX = /(cillin|mycin|floxacin|oxacin|cycline|pril|sartan|olol|statin|prazole|dipine|azole|zepam|zolam|tidine|formin|gliptin|gliflozin|lukast|semide|thiazide|parin|xaban|setron|caine|sone|solone|terol|triptan|profen|cephalexin|nitrofurantoin|trimethoprim|bactrim|macrobid|keflex)$/;
+  var NOTE_MED_VERB = '(added|started|start|starting|prescribed|began|begin|put (?:her|him|them|me) on|gave (?:her|him|them|me)|new (?:medicine|med|prescription)(?: is|:)?)';
+  function noteOffers(text) {
+    var t = String(text || ''), labs = [], meds = [], stay = null, seen = {};
+    NOTE_LABS.forEach(function (L) {
+      var re = new RegExp('(?:^|[^a-z0-9])(?:' + L[1] + ')\\s*(?:@|:|=|of|is|was|at|level|came back(?: at)?)?\\s*(\\d+(?:\\.\\d+)?)(?![\\d/:-])', 'i'), m = re.exec(t);
+      if (m) labs.push({ test: L[0], value: +m[1] });
+    });
+    var re = new RegExp('\\b' + NOTE_MED_VERB + '\\s+(?:(?:an?|the|some|on|a new|new|taking)\\s+)*((?:blood thinner|water pill|sleeping pill|stool softener|nausea medicine|eye ?drops|ear ?drops|[a-z][a-z-]{2,}))(\\s+\\d+(?:\\.\\d+)?\\s*(?:mcg|mg|g|ml|units?))?', 'gi'), m;
+    while ((m = re.exec(t))) {
+      var name = m[2].toLowerCase(), strength = (m[3] || '').trim();
+      if (!(NOTE_MED_CLASS.test(name) || NOTE_MED_SUFFIX.test(name) || strength || /^prescribed$/i.test(m[1]) && name.length > 4)) continue;
+      if (/^(feeling|having|being|taking|getting|going|eating|drinking|walking|using|with|more|less|that|this|her|him|them|for|and|but)$/.test(name) || seen[name]) continue;
+      seen[name] = 1; meds.push({ name: name.charAt(0).toUpperCase() + name.slice(1), strength: strength || null });
+    }
+    if (/\b(admitted|hospitali[sz]ed|inpatient|kept (?:her |him |them )?overnight)\b/i.test(t)) {
+      var o = /\b(?:taken to|admitted to|admitted at|transferred to|transported to|went to|brought to|at)\s+((?:(?:the|of)\s+)?[A-Z][\w'&.-]*(?:\s+(?:of\s+)?[A-Z][\w'&.-]*){0,5})/.exec(t);
+      stay = { org: o ? o[1].replace(/^the\s+/i, '').replace(/[.,;]+$/, '') : null };
+    }
+    return { labs: labs, meds: meds, stay: stay, any: !!(labs.length || meds.length || stay) };
+  }
+  // Offers in `now` that were not already in `before`, so editing a note does not ask again.
+  function noteOffersNew(now, before) {
+    var a = noteOffers(now), b = noteOffers(before);
+    a.labs = a.labs.filter(function (x) { return !b.labs.some(function (y) { return y.test === x.test && y.value === x.value; }); });
+    a.meds = a.meds.filter(function (x) { return !b.meds.some(function (y) { return y.name === x.name; }); });
+    if (b.stay) a.stay = null;
+    a.any = !!(a.labs.length || a.meds.length || a.stay);
+    return a;
+  }
   // A plan (pharmacist questions, or a drafted schedule) that names the merged-away medicine now
   // names the kept one. Returns the plan's new fields, or null when it never mentioned it.
   function repointPlan(fields, fromId, toId) {
@@ -591,7 +672,7 @@ var Logic = (function () {
       var types = src.map(function (s) { return s.type; });
       if (anyList && types.indexOf('list') < 0 && types.indexOf('discharge') < 0) issues.push({ level: 'warn', text: 'Not on any medicine list or discharge papers.' });
       if ((types.indexOf('list') >= 0 || types.indexOf('discharge') >= 0) && types.indexOf('bottle') < 0) issues.push({ level: 'info', text: 'No bottle photographed yet.' });
-      if (!f.slots) issues.push({ level: 'info', text: 'No time of day set.' });
+      medTimingIssues(r).forEach(function (t) { issues.push(t.key === 'no_time' ? { level: 'info', text: 'No time of day set.' } : { level: 'warn', text: t.text + ' Open it and set which is right.' }); });
       if (f.check) issues.push({ level: 'bad', text: 'Flagged: ' + String(f.check).split('\n').join(' ') });
       return { id: r.id, title: r.title, generic: f.generic || null, also: f.also_called || [], dose: f.dose || null, sources: src, issues: issues };
     });
@@ -659,7 +740,7 @@ var Logic = (function () {
     if (m) return +m[1] || words[m[1]] || 1;
     return 1;
   }
-  return { exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, mergeMeds: mergeMeds, repointPlan: repointPlan, medSame: medSame, medBrief: medBrief, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
+  return { exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, noteOffers: noteOffers, noteOffersNew: noteOffersNew, medSig: medSig, medGive: medGive, medKey: medKey, medFrequency: medFrequency, medTimingIssues: medTimingIssues, mergeMeds: mergeMeds, repointPlan: repointPlan, medSame: medSame, medBrief: medBrief, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
     slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, stayOpen: stayOpen, stayAt: stayAt, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();

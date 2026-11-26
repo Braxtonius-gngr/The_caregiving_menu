@@ -169,6 +169,8 @@ body.simple .photo-thumb { width: 64px; height: 64px; }
 .fluid-card .bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 4px; }
 .fluid-card .bar span { display: block; height: 100%; background: var(--accent); }
 .fluid-card .bar.over span { background: var(--status-bad); }
+.med-ask p { margin: 0 0 var(--space-2); }
+.med-ask .btn-row { margin: 0 0 var(--space-3); }
 .note.flag { background: var(--status-bad-bg); color: var(--status-bad-fg); margin-top: var(--space-3); }
 .flag-text { color: var(--status-bad-fg); font-weight: 650; }
 .unit-select { width: auto; flex: 0 0 auto; margin-left: 8px; }

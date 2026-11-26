@@ -348,6 +348,56 @@ t('mergeMeds: a forced merge joins times, sources and names, flags a strength cl
   // Same generic: the check had it, so the merge is not a forced one.
   assert.strictEqual(Logic.mergeMeds({ title: 'Lasix', fields: { generic: 'furosemide' } }, { title: 'Furosemide 40 mg', fields: {} }).caught, true);
 });
+t('medKey: store brands and marketing words do not hide the medicine; vitamins keep their letter', function () {
+  assert.deepEqual(['Low Dose Aspirin (H-E-B)', 'Aspirin 81 mg', 'H-E-B Ultra Strength Probiotic (20 billion live cells)', 'Furosemide 40 mg tablet', 'Vitamin D3 1000 IU', 'Vitamin B12', 'Equate Extra Strength Acetaminophen', ''].map(Logic.medKey),
+    ['aspirin', 'aspirin', 'probiotic', 'furosemide', 'vitamind3', 'vitaminb12', 'acetaminophen', '']);
+  var r = Logic.reconcileMeds([{ id: 'a', title: 'Low Dose Aspirin (H-E-B)', fields: { dose: '81 mg', slots: 'morning' } }, { id: 'b', title: 'Aspirin', fields: { dose: '81 mg', slots: 'morning' } },
+    { id: 'c', title: 'Vitamin D', fields: { slots: 'morning' } }, { id: 'd', title: 'Vitamin C', fields: { slots: 'morning' } }], '2026-11-25');
+  assert.deepEqual(r.duplicates, [['a', 'b']]);
+});
+t('medTimingIssues: no time of day, and times that disagree with the words, each with a fix when there is one answer', function () {
+  assert.deepEqual(['twice a day', 'BID', '1 tablet 2x a day', 'every 8 hours', 'once daily', 'Once a day, by mouth', 'QID', '40 mg', 'every 5 hours', 'AM and PM'].map(Logic.medFrequency), [2, 2, 2, 3, 1, 1, 4, null, null, null]);
+  var t = function (f) { return Logic.medTimingIssues({ title: 'X', fields: f }).map(function (i) { return i.key + ':' + i.fix; }); };
+  assert.deepEqual(t({ slots: 'morning', when: 'Twice a day' }), ['freq:morning,evening']);
+  assert.deepEqual(t({ slots: 'bedtime', when: 'Twice a day' }), ['freq:null'], 'bedtime is not half of morning and evening, so it asks');
+  assert.deepEqual(t({ slots: 'morning,evening', when: 'Once daily (2 capsules together)' }), ['freq:null']);
+  assert.deepEqual(t({ slots: 'morning,evening', when: 'Twice a day' }), []);
+  assert.deepEqual(t({ slots: 'morning,prn', dose: '1 tablet once a day' }), []);
+  assert.deepEqual(t({ dose: '100 mcg tablet' }), ['no_time:null']);
+  assert.deepEqual(t({ when: 'three times a day' }), ['no_time:morning,noon,evening']);
+  assert.deepEqual(t({ slots: 'prn' }), []);
+  // Saved as it is: not asked again until the dose or times change.
+  var kept = { slots: 'morning', when: 'Twice a day' }; kept.timing_ok = Logic.medSig(kept);
+  assert.deepEqual(t(kept), []);
+  assert.deepEqual(t(Object.assign({}, kept, { when: 'Three times a day' })), ['freq:morning,noon,evening']);
+  var none = {}; none.timing_ok = Logic.medSig(none); assert.deepEqual(t(none), []);
+  // "2 tablets" at two times of day: each time, or in total?
+  var q = Logic.medTimingIssues({ title: 'amlodipine 2.5 mg tablet', fields: { dose: '2 tablets (2.5 mg each)', slots: 'morning,evening', when: 'Twice a day' } });
+  assert.deepEqual(q.map(function (i) { return i.key; }), ['per_dose']);
+  assert.deepEqual(q[0].options, [{ label: '2 each time (4 a day)', per_dose: 2 }, { label: '1 each time (2 a day)', per_dose: 1 }]);
+  assert.deepEqual(t({ dose: '2 tablets', slots: 'morning,evening', per_dose: 1 }), []);
+  assert.deepEqual(t({ dose: '3 capsules', slots: 'morning,evening' }).length, 1);
+  assert.deepEqual(t({ dose: '2 tablets', slots: 'morning' }), [], 'one time of day is not ambiguous');
+  assert.strictEqual(Logic.medGive({ per_dose: 2 }), '2 each time');
+  var r = Logic.reconcileMeds([{ id: 'a', title: 'Amiodarone', fields: { slots: 'morning', when: 'Twice a day' } }], '2026-11-25');
+  assert.ok(r.items[0].issues.some(function (i) { return i.level === 'warn' && /twice a day, but 1 time of day is picked/.test(i.text); }));
+});
+t('noteOffers: lab numbers, a new medicine and an admission are found in a typed note; plain sentences offer nothing', function () {
+  var o = Logic.noteOffers('Added antibiotic for u t I and referred to primary HEMOGLOBIN @ 8 GFR @ 11');
+  assert.deepEqual(o.labs, [{ test: 'eGFR', value: 11 }, { test: 'Hemoglobin', value: 8 }]);
+  assert.deepEqual(o.meds, [{ name: 'Antibiotic', strength: null }]);
+  assert.strictEqual(o.stay, null);
+  var s = Logic.noteOffers("Called ambulance - Memaw very weak she said 'feeling very very sick' and having trouble speaking taken to North Central Baptist and admitted overnight");
+  assert.deepEqual([s.stay.org, s.labs.length, s.meds.length], ['North Central Baptist', 0, 0]);
+  assert.strictEqual(Logic.noteOffers('She was admitted last night.').stay.org, null);
+  assert.strictEqual(Logic.noteOffers('Went to Connally Urgent Care, sent home.').stay, null, 'a visit that is not an admission is not a stay');
+  assert.deepEqual(Logic.noteOffers('Dr. Lee started lisinopril 10 mg and gave her a steroid. Potassium was 5.4, A1c 7.2, creatinine: 3.1').meds, [{ name: 'Lisinopril', strength: '10 mg' }, { name: 'Steroid', strength: null }]);
+  assert.deepEqual(Logic.noteOffers('Potassium was 5.4, A1c 7.2, creatinine: 3.1').labs.map(function (l) { return l.test + ' ' + l.value; }), ['Creatinine 3.1', 'Potassium 5.4', 'A1c 7.2']);
+  ['Very helpful with physically assisting her and changing.', 'Started feeling better after lunch, added a pillow.', 'Nurse checked sodium intake and gave her water.', 'BP 120/80 at 9:30, glucose check at 11/25', 'Opted not to discharge, cleaned Foley and checked for blockage.']
+    .forEach(function (t) { assert.strictEqual(Logic.noteOffers(t).any, false, t); });
+  var n = Logic.noteOffersNew('GFR 11. Hemoglobin 8. Later: started cephalexin', 'GFR 11. Hemoglobin 8.');
+  assert.deepEqual([n.labs.length, n.meds.map(function (m) { return m.name; }).join()], [0, 'Cephalexin']);
+});
 t('repointPlan: questions, their time changes and drafted schedule lines follow a merged medicine', function () {
   var qs = { status: 'to_ask', questions: [{ text: 'Earlier?', med_id: 'd', change: { med_id: 'd', slot: 'evening', time: '16:00' } }, { text: 'Other', med_id: 'x' }, { text: 'General', med_id: null }] };
   var out = Logic.repointPlan(qs, 'd', 'k');

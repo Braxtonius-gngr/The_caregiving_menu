@@ -10,7 +10,7 @@ var LAB_UNITS = { eGFR: 'mL/min/1.73m²', Creatinine: 'mg/dL', BUN: 'mg/dL', Pot
 var RECORD_KINDS = {
   condition: { label: 'Condition', title: 'Condition', fields: [['since', 'Since', 'text'], ['notes', 'Notes', 'textarea']] },
   allergy: { label: 'Allergy', title: 'Allergic to', fields: [['reaction', 'Reaction', 'text'], ['severity', 'Severity', 'select:Mild|Moderate|Severe|Unknown']] },
-  medication: { label: 'Medicine', title: 'Medicine', fields: [['dose', 'Dose (e.g. 40 mg, 1 tablet)', 'text'], ['slots', 'When to give it', 'slots'], ['with_food', 'Food', 'select:With food|Without food|Either'], ['when', 'Other timing notes', 'text'], ['purpose', 'What it is for', 'text'], ['prescriber', 'Prescribed by', 'text'], ['pharmacy', 'Pharmacy', 'text'], ['start', 'Started', 'date'], ['stop', 'Stop on (leave blank if ongoing)', 'date'], ['refill_on', 'Next refill due', 'date'], ['instructions', 'Instructions from the doctor or pharmacist', 'textarea'], ['generic', '', 'hidden'],
+  medication: { label: 'Medicine', title: 'Medicine', fields: [['dose', 'Dose (e.g. 40 mg, 1 tablet)', 'text'], ['per_dose', 'How many each time (tablets, capsules, puffs). Leave blank if unsure', 'number'], ['slots', 'When to give it', 'slots'], ['with_food', 'Food', 'select:With food|Without food|Either'], ['when', 'Other timing notes', 'text'], ['purpose', 'What it is for', 'text'], ['prescriber', 'Prescribed by', 'text'], ['pharmacy', 'Pharmacy', 'text'], ['start', 'Started', 'date'], ['stop', 'Stop on (leave blank if ongoing)', 'date'], ['refill_on', 'Next refill due', 'date'], ['instructions', 'Instructions from the doctor or pharmacist', 'textarea'], ['generic', '', 'hidden'],
     ['label_head', 'From the label', 'heading'], ['label_boxed', 'Boxed warning', 'textarea'], ['label_how', 'How to take it', 'textarea'], ['label_side', 'Side effects to watch for', 'textarea'], ['label_warn', 'Warnings', 'textarea'], ['label_patients', 'For patients and families', 'textarea'], ['label_older', 'Older adults', 'textarea'], ['label_source', '', 'hidden'], ['label_date', '', 'hidden']] },
   directive: { label: 'Directive', title: 'Document (e.g. DNR, POLST, living will, power of attorney)', fields: [['kept', 'Where the original is kept', 'text'], ['notes', 'Notes', 'textarea']] },
   contact: { label: 'Care team', title: 'Name', fields: [['role', 'Role (kidney doctor, hospice nurse, pharmacy...)', 'text'], ['phone', 'Phone', 'tel'], ['fax', 'Fax', 'text'], ['address', 'Address', 'text'], ['portal', 'Patient portal link', 'text'], ['notes', 'Notes', 'textarea']] },
@@ -65,12 +65,25 @@ function fileSummary(pid, prof) {
   var f = function (r, k) { return esc((r.fields || {})[k] || ''); };
   var next = nextAppointment(pid);
   return (next ? '<div class="note"><b>Next appointment:</b> ' + esc(fmtWhen(next.when, true)) + ' · ' + esc(next.with) + '</div>' : '') +
-    group('allergy', 'Allergies', function (r) { return [f(r, 'reaction'), f(r, 'severity')].filter(Boolean).join(' · '); }) +
-    group('condition', 'Conditions', function (r) { return f(r, 'since') ? 'since ' + f(r, 'since') : ''; }) +
-    group('medication', 'Medicines', function (r) { return [f(r, 'dose'), esc(slotsText(r)), f(r, 'purpose'), r.fields && r.fields.stop && r.fields.stop < careToday() ? 'stopped' : ''].filter(Boolean).join(' · '); }) +
+    group('allergy', 'Allergies', function (r) { return [f(r, 'reaction'), f(r, 'severity')].filter(Boolean).join(' · '); }).replace('<p class="muted">None recorded.</p>', allergyAsk(pid)) +
+    group('condition', 'Conditions', function (r) { return f(r, 'since') ? 'since ' + f(r, 'since') : ''; }).replace('<p class="muted">None recorded.</p>', '<p class="muted">None recorded yet. Add the main ones (heart, kidney, diabetes, memory...) so a hospital or a new nurse sees them first.</p>') +
+    group('medication', 'Medicines', function (r) { return [f(r, 'dose'), esc(Logic.medGive(r.fields)), esc(slotsText(r)), f(r, 'purpose'), r.fields && r.fields.stop && r.fields.stop < careToday() ? 'stopped' : ''].filter(Boolean).join(' · '); }) +
     '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'meds\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">Daily meds</button><button class="btn sm ghost" onclick="showScreen(\'medcheck\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">Compare sources</button></div>' +
     group('directive', 'Directives and legal papers', function (r) { return f(r, 'kept') ? 'kept: ' + f(r, 'kept') : ''; }) +
     '<p class="muted">Keep this list the way the doctors and pharmacy have it. The app records; it doesn\'t advise.</p>';
+}
+// "None recorded" could mean no allergies or nobody asked. The family answers once; a hospital asks this first.
+function noAllergiesOn(pid) { return recordsOf(pid, ['allergy']).length ? null : (careSettingsOf(pid).no_known_allergies || null); }
+function allergyAsk(pid) {
+  var on = noAllergiesOn(pid), a = pid ? '\'' + pid + '\'' : 'null';
+  if (on) return '<p><b>No known allergies</b> <span class="muted">(the family confirmed ' + esc(on) + ')</span> <button class="linkish writer-only" onclick="setNoAllergies(' + a + ',false)">Undo</button></p>';
+  if (!pid) return '<p class="muted">None recorded.</p>';
+  return '<div class="note"><b>Not answered yet.</b> A hospital or a new nurse asks this first. Does she have any allergies, to medicines, food or latex?' +
+    '<div class="btn-row writer-only"><button class="btn sm" onclick="setNoAllergies(' + a + ',true)">No known allergies</button>' + addBtn('allergy', pid, 'Add an allergy') + '</div></div>';
+}
+function setNoAllergies(pid, yes) {
+  DB.update('diet_profiles', pid, function (p) { if (!p) return null; var cs = Object.assign({}, p.care_settings || {}); cs.no_known_allergies = yes ? localDay(new Date().toISOString()) : null; p.care_settings = cs; return p; })
+    .then(loadAll).then(function () { refresh(); if (Sync.enabled()) syncNow(); toast(yes ? 'Saved: no known allergies' : 'Cleared'); });
 }
 function fileTeam(pid) {
   var rs = recordsOf(pid, ['contact']).sort(function (a, b) { return (a.title || '').localeCompare(b.title || ''); });
@@ -159,7 +172,61 @@ function fileUpdates(pid) {
 function postUpdate(pid) {
   var t = document.getElementById('upText').value.trim(); if (!t) return toast('Write something first');
   DB.put('records', { kind: 'update', for_profile_id: pid, title: '', occurred_at: new Date().toISOString(), fields: { text: t } })
-    .then(loadAll).then(function () { toast('Posted'); refresh(); if (Sync.enabled()) syncNow(); }).catch(function (e) { toast(e.message); });
+    .then(loadAll).then(function () { toast('Posted'); refresh(); if (Sync.enabled()) syncNow(); noteOfferSheet(pid, t, '', new Date().toISOString()); }).catch(function (e) { toast(e.message); });
+}
+
+/* ---------- From your note ----------
+ * After a visit, an update or the family notes are saved, anything in the words that belongs
+ * elsewhere in the file (a lab number, a new medicine, a hospital admission; see Logic.noteOffers)
+ * is offered back in one sheet. Nothing is saved from a note without a tap. */
+var NOTE_TEXT_FIELDS = { visit: ['why', 'said', 'changed', 'meds_changed', 'tests'], update: ['text'] };
+function noteTextOf(kind, title, fields) { return (kind === 'update' ? [title] : []).concat((NOTE_TEXT_FIELDS[kind] || []).map(function (k) { return (fields || {})[k]; })).filter(Boolean).join('. '); }
+function noteOfferSheet(pid, text, before, when) {
+  var o = Logic.noteOffersNew(text, before), day = careDayOf(when || new Date().toISOString());
+  var labs = recordsOf(pid, ['lab']), meds = recordsOf(pid, ['medication']).filter(function (r) { return !r.deleted; }).map(Logic.medBrief);
+  o.labs = o.labs.filter(function (l) { return !labs.some(function (r) { return !r.deleted && r.title === l.test && +(r.fields || {}).value === l.value; }); });
+  o.meds = o.meds.filter(function (m) { return !meds.some(function (x) { return Logic.medSame({ title: m.name, also: [] }, x); }); });
+  if (o.stay && (!pid || careStay(pid))) o.stay = null;
+  if (!o.labs.length && !o.meds.length && !o.stay) return false;
+  S.noteOffer = { pid: pid, o: o, when: when || new Date().toISOString(), day: day };
+  var a = pid ? '\'' + pid + '\'' : 'null';
+  openSheet('<h2 style="margin-top:0" data-nosnap>From your note</h2><p class="muted">Your note is saved. It also mentions things that have their own place in the file. Nothing below is saved unless you tap it.</p>' +
+    (o.labs.length ? '<div id="noLabs"><h3>Lab results</h3>' + o.labs.map(function (l, i) { return '<label class="check"><input type="checkbox" name="noLab" value="' + i + '" checked> ' + esc(l.test) + ' <b>' + esc(l.value) + '</b> <span class="muted">' + esc(LAB_UNITS[l.test] || '') + '</span></label>'; }).join('') +
+      '<label for="noLabDay">Date of the test</label><input id="noLabDay" type="date" value="' + esc(day) + '">' +
+      '<p class="muted">Check the numbers against the report. Add the unit and range later by opening each result.</p>' +
+      '<div class="btn-row"><button type="button" class="btn sm" onclick="noteOfferLabs()">Save as lab results</button></div></div>' : '') +
+    (o.meds.length ? '<h3>Medicines</h3>' + o.meds.map(function (m, i) { return '<div class="btn-row"><button type="button" class="btn sm" onclick="noteOfferMed(' + i + ')">Add ' + esc(m.name) + (m.strength ? ' ' + esc(m.strength) : '') + ' to the medicines</button></div>'; }).join('') +
+      '<p class="muted">Opens the medicine form with the name filled in, so you can put the exact name and dose from the bottle.</p>' : '') +
+    (o.stay ? '<h3>In care elsewhere</h3><div class="btn-row"><button type="button" class="btn sm" onclick="noteOfferStay()">' + icon('heart') + ' Start a stay' + (o.stay.org ? ' at ' + esc(o.stay.org) : '') + '</button></div>' +
+      '<p class="muted">Medicine reminders rest while their team is giving them, and nothing is counted as missed.</p>' : '') +
+    '<div class="btn-row"><button type="button" class="btn ghost" onclick="closeSheet()">Not now</button></div>');
+  return true;
+}
+function noteOfferLabs() {
+  var n = S.noteOffer; if (!n) return;
+  var picks = [].map.call(document.querySelectorAll('input[name="noLab"]:checked'), function (x) { return n.o.labs[+x.value]; });
+  var day = document.getElementById('noLabDay').value || n.day;
+  if (!picks.length) return toast('Tick at least one result');
+  Promise.all(picks.map(function (l) {
+    return DB.put('records', { kind: 'lab', for_profile_id: n.pid, title: l.test, occurred_at: new Date(day + 'T12:00:00').toISOString(), fields: { value: l.value, unit: LAB_UNITS[l.test] || null, notes: 'From a typed note. Check against the report.' } });
+  })).then(loadAll).then(function () {
+    var box = document.getElementById('noLabs'); if (box) box.innerHTML = '<p class="ok-note">&#10003; ' + picks.length + ' lab result' + (picks.length === 1 ? '' : 's') + ' saved.</p>';
+    n.o.labs = []; refresh(); if (Sync.enabled()) syncNow();
+    if (!n.o.meds.length && !n.o.stay) { closeSheet(); toast(picks.length + ' lab result' + (picks.length === 1 ? '' : 's') + ' saved'); }
+  }).catch(function (e) { toast('Could not save: ' + e.message); });
+}
+function noteOfferMed(i) {
+  var n = S.noteOffer, m = n && n.o.meds[i]; if (!m) return;
+  editRecord(null, 'medication', n.pid);
+  var set = function (id, v) { var el = document.getElementById(id); if (el && v) el.value = v; };
+  set('rTitle', m.name); set('rf-dose', m.strength); set('rf-start', n.day);
+}
+function noteOfferStay() {
+  var n = S.noteOffer; if (!n || !n.o.stay) return;
+  careSheet(n.pid);
+  var org = document.getElementById('careOrg'), from = document.getElementById('careFrom');
+  if (org && n.o.stay.org) org.value = n.o.stay.org;
+  if (from) from.value = localStamp(n.when);
 }
 
 /* ---------- editing a record ---------- */
@@ -229,7 +296,8 @@ function readExtraFields() {
 }
 // Picking a known test fills its usual unit, if the unit box is still empty.
 function fillLabUnit(test) { var u = LAB_UNITS[test], el = document.getElementById('rf-unit'); if (u && el && !el.value) el.value = u; }
-function saveRecord(id, kind, pid) {
+// force: 'asis' saves a medicine whose times were questioned without changing them.
+function saveRecord(id, kind, pid, force) {
   var K = RECORD_KINDS[kind], title = document.getElementById('rTitle').value.trim();
   if (!title && kind !== 'update') return toast('Fill in "' + K.title + '" first');
   var fields = {};
@@ -246,8 +314,14 @@ function saveRecord(id, kind, pid) {
     else fields[f[0]] = v || null;
   });
   var ex = readExtraFields(); if (ex !== undefined) fields.extra = ex.length ? ex : null;
+  if (kind === 'medication') {
+    var was = id ? (State.records || []).find(function (r) { return r.id === id; }) : null, sig = Logic.medSig(fields);
+    fields.timing_ok = force === 'asis' || (was && (was.fields || {}).timing_ok === sig) ? sig : null;
+    if (force !== 'asis' && medAsk(id, pid, title, fields)) return;
+  }
   var chk = S.phoneCheck;
   if (fields.phone && chk && chk.id === 'rf-phone' && chk.res.valid) { fields.phone = chk.res.national || fields.phone; fields.phone_e164 = chk.res.e164; fields.phone_type = chk.res.line_type; fields.phone_carrier = chk.res.carrier; }
+  var noteBefore = NOTE_TEXT_FIELDS[kind] && id ? (function (r) { return r ? noteTextOf(kind, r.title, r.fields) : ''; })((State.records || []).find(function (r) { return r.id === id; })) : '';
   var whenEl = document.getElementById('rWhen'), when = whenEl && whenEl.value ? new Date(K.date === 'date' ? whenEl.value + 'T12:00:00' : whenEl.value).toISOString() : null;
   var write = id
     ? DB.update('records', id, function (cur) {
@@ -261,11 +335,45 @@ function saveRecord(id, kind, pid) {
     S.phoneCheck = null; toast(saved ? 'Saved' : 'This was deleted elsewhere');
     if (saved && kind === 'visit' && S.scribe && S.scribe.pendingClear) { scribeClear(); S.scribe = null; }
     return (!id && saved ? snapAfterSave(saved) : Promise.resolve()).then(loadAll).then(function () {
-      if (!id && saved && Sync.enabled() && (kind === 'visit' || kind === 'document' || kind === 'lab')) { editRecord(saved.id); toast('Saved. Attach photos or PDFs below.'); }
+      var offered = saved && NOTE_TEXT_FIELDS[kind] && noteOfferSheet(saved.for_profile_id || null, noteTextOf(kind, title, fields), noteBefore, when);
+      if (offered) { /* the offers sheet replaces this one; photos can be attached by opening the entry */ }
+      else if (!id && saved && Sync.enabled() && (kind === 'visit' || kind === 'document' || kind === 'lab')) { editRecord(saved.id); toast('Saved. Attach photos or PDFs below.'); }
       else closeSheet();
-      refresh(); if (Sync.enabled()) syncNow();
+      refresh();
+      if (Sync.enabled()) syncNow();
     });
   }).catch(function (e) { toast('Could not save: ' + e.message); });
+}
+/* Before a medicine is saved: no time of day, times that disagree with its own words ("twice a
+ * day" with only morning picked), or the same medicine already saved. Asked once, in the sheet;
+ * the family can fix it in one tap or save it as it is. Returns true when it asked. */
+function medAsk(id, pid, title, fields) {
+  var box = document.getElementById('medAsk');
+  if (!box) { var row = document.querySelector('#sheetBody > .btn-row:last-child'); if (!row) return false; row.insertAdjacentHTML('beforebegin', '<div id="medAsk" role="alert"></div>'); box = document.getElementById('medAsk'); }
+  var asks = Logic.medTimingIssues({ title: title, fields: fields }).map(function (t) {
+    return '<p><b>' + esc(t.text) + '</b></p><div class="btn-row">' +
+      (t.options || []).map(function (o) { return '<button type="button" class="btn sm" onclick="medAskPerDose(' + o.per_dose + ')">' + esc(o.label) + '</button>'; }).join('') +
+      (t.fix ? '<button type="button" class="btn sm" onclick="medAskSlots(\'' + t.fix + '\')">Set ' + esc(t.fix.split(',').map(slotName).join(' and ').toLowerCase()) + '</button>' : '') +
+      (t.key === 'no_time' ? '<button type="button" class="btn sm ghost" onclick="medAskSlots(\'prn\')">Only when needed</button>' : '') + '</div>';
+  });
+  var day = careToday(), me = { title: title, generic: fields.generic || null, also: [] };
+  var twin = id ? null : recordsOf(pid || null, ['medication']).find(function (r) { var f = r.fields || {}; return !r.deleted && !(f.stop && f.stop < day) && Logic.medSame(me, Logic.medBrief(r)); });
+  if (twin) asks.push('<p><b>' + esc(twin.title) + ' is already saved and looks like the same medicine.</b> Saving this makes a second entry.</p>' +
+    '<div class="btn-row"><button type="button" class="btn sm" onclick="editRecord(\'' + twin.id + '\')">Open ' + esc(twin.title) + ' instead</button></div>');
+  if (!asks.length) { box.innerHTML = ''; return false; }
+  box.innerHTML = '<div class="note med-ask">' + asks.join('') + '<p class="muted">Or change it above and tap Save again.</p>' +
+    '<button type="button" class="linkish" onclick="saveRecord(' + (id ? '\'' + id + '\'' : 'null') + ',\'medication\',' + (pid ? '\'' + pid + '\'' : 'null') + ',\'asis\')">Save it as it is</button></div>';
+  box.scrollIntoView({ block: 'center' });
+  return true;
+}
+function medAskPerDose(n) {
+  var el = document.getElementById('rf-per_dose'); if (el) el.value = n;
+  var save = document.querySelector('#sheetBody > .btn-row:last-child .btn.writer-only'); if (save) save.click();
+}
+function medAskSlots(slots) {
+  var on = slots.split(',');
+  Array.prototype.forEach.call(document.querySelectorAll('#rf-slots .chip'), function (c) { var sel = on.indexOf(c.dataset.v) >= 0; c.classList.toggle('on', sel); c.setAttribute('aria-pressed', sel); });
+  var save = document.querySelector('#sheetBody > .btn-row:last-child .btn.writer-only'); if (save) save.click();
 }
 function deleteRecord(id) {
   if (!confirm('Delete this? It goes to Deleted for 30 days.')) return;
@@ -287,7 +395,7 @@ function exportHtml(pid, prof) {
   var visits = recordsOf(pid, ['visit']).filter(function (r) { return r.occurred_at <= new Date().toISOString(); }).sort(byDateDesc).slice(0, 3);
   var qs = visits.filter(function (v) { return (v.fields || {}).questions; }).map(function (v) { return '[' + fmtWhen(v.occurred_at) + ', from the ' + v.title + ' visit] ' + v.fields.questions; });
   return '<h2>' + esc(prof.person_name) + '</h2><p class="muted">Prepared ' + esc(localDay(new Date().toISOString())) + ' by the family from home records.</p>' +
-    '<h3>Allergies</h3>' + list('allergy', function (r) { return '<b>' + esc(r.title) + '</b>' + (f(r, 'reaction') ? ': ' + f(r, 'reaction') : ''); }) +
+    '<h3>Allergies</h3>' + (list('allergy', function (r) { return '<b>' + esc(r.title) + '</b>' + (f(r, 'reaction') ? ': ' + f(r, 'reaction') : ''); })).replace('<p>None recorded.</p>', noAllergiesOn(pid) ? '<p>No known allergies (the family confirmed ' + esc(noAllergiesOn(pid)) + ').</p>' : '<p>Not answered yet. Please ask.</p>') +
     '<h3>Conditions</h3>' + list('condition', function (r) { return esc(r.title) + (f(r, 'since') ? ' (since ' + f(r, 'since') + ')' : ''); }) +
     '<h3>Medicines</h3>' + list('medication', function (r) { return '<b>' + esc(r.title) + '</b> ' + [f(r, 'dose'), esc(slotsText(r)), f(r, 'when'), f(r, 'with_food')].filter(Boolean).join(', ') + (f(r, 'prescriber') ? ' (' + f(r, 'prescriber') + ')' : '') + (r.fields && r.fields.stop && r.fields.stop < careToday() ? ' (stopped ' + f(r, 'stop') + ')' : ''); }) +
     '<h3>Care team</h3>' + list('contact', function (r) { return esc(r.title) + (f(r, 'role') ? ', ' + f(r, 'role') : '') + (f(r, 'phone') ? ' · ' + f(r, 'phone') : ''); }) +
