@@ -54,24 +54,50 @@ var FX = (function () {
     gr.addColorStop(0, col(c.frost, a)); gr.addColorStop(0.3, col(c.mint, a * 0.55)); gr.addColorStop(0.65, col(c.main, a * 0.16)); gr.addColorStop(1, col(c.main, 0));
     g.fillStyle = gr; g.beginPath(); g.arc(x, y, R, 0, Math.PI * 2); g.fill();
   }
-  // Supernova: a white-hot core blooms where the ring meets itself, with jagged electric rays crackling out, then gone.
+  // Plasma bloom where the ring meets itself (owner's pick, "more miasma"): soft clouds drift out and dissolve,
+  // a white core blooms, a thin shockwave runs ahead of the gold, and two layers of electric filaments curl and
+  // writhe, each fading out along its length. Gradients only (no blur filters), so it stays smooth on a phone.
   function drawNova(e, p) {
-    var x = e.x * dpr, y = e.y * dpr, c = e.c;
-    var a = env(p, 0.06, 0.25);
+    var x = e.x * dpr, y = e.y * dpr, c = e.c, t = p * e.dur;
+    // the miasma: soft plasma clouds, slowly drifting outward
+    var ca = env(p, 0.08, 0.35);
+    if (ca > 0.003) e.clouds.forEach(function (cl) {
+      var d = cl.dist * (0.3 + 0.7 * ease.out(p)) * dpr, th = cl.ang + p * cl.spin;
+      var cx = x + Math.cos(th) * d, cy = y + Math.sin(th) * d, R = cl.size * (0.7 + 0.5 * ease.out(p)) * dpr;
+      var gr = g.createRadialGradient(cx, cy, 0, cx, cy, R);
+      gr.addColorStop(0, col(c[cl.c], ca * cl.a)); gr.addColorStop(0.45, col(c[cl.c], ca * cl.a * 0.45)); gr.addColorStop(1, col(c[cl.c], 0));
+      g.fillStyle = gr; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
+    });
+    // white-hot core
+    var a = env(p, 0.05, 0.22);
     if (a > 0.003) {
-      var R = (14 + 110 * ease.out(p)) * dpr, gr = g.createRadialGradient(x, y, 0, x, y, R);
-      gr.addColorStop(0, col(c.frost, a)); gr.addColorStop(0.18, col(c.frost, a * 0.9)); gr.addColorStop(0.4, col(c.gold, a * 0.55));
-      gr.addColorStop(0.7, col(c.mint, a * 0.15)); gr.addColorStop(1, col(c.gold, 0));
-      g.fillStyle = gr; g.beginPath(); g.arc(x, y, R, 0, Math.PI * 2); g.fill();
+      var R0 = (18 + 110 * ease.out(Math.min(1, p * 1.6))) * dpr, gr0 = g.createRadialGradient(x, y, 0, x, y, R0);
+      gr0.addColorStop(0, col(c.frost, a)); gr0.addColorStop(0.16, col(c.frost, a * 0.92)); gr0.addColorStop(0.38, col(c.gold, a * 0.5));
+      gr0.addColorStop(0.7, col(c.mint, a * 0.14)); gr0.addColorStop(1, col(c.gold, 0));
+      g.fillStyle = gr0; g.beginPath(); g.arc(x, y, R0, 0, Math.PI * 2); g.fill();
     }
-    var ra = env(p, 0.04, 0.18); if (ra < 0.01) return;
-    var reach = ease.out(Math.min(1, p * 2.2));
-    e.rays.forEach(function (r) {
-      g.beginPath(); g.moveTo(x, y);
-      r.pts.forEach(function (pt) { var d = r.len * pt[0] * reach * dpr; g.lineTo(x + Math.cos(pt[1]) * d, y + Math.sin(pt[1]) * d); });
-      g.lineCap = 'round'; g.lineJoin = 'round';
-      g.lineWidth = 4 * dpr; g.strokeStyle = col(c.gold, ra * 0.35); g.stroke();
-      g.lineWidth = 1.4 * dpr; g.strokeStyle = col(c.frost, ra); g.stroke();
+    // thin shockwave, riding ahead of the gold ring
+    var sp = Math.min(1, p / 0.3);
+    if (sp < 1) {
+      g.beginPath(); g.arc(x, y, (8 + e.reach * 0.8 * ease.out(sp)) * dpr, 0, Math.PI * 2);
+      g.lineWidth = 6 * dpr; g.strokeStyle = col(c.gold, (1 - sp) * 0.25); g.stroke();
+      g.lineWidth = 1.6 * dpr; g.strokeStyle = col(c.frost, 1 - sp); g.stroke();
+    }
+    // filaments: long faint wisps behind, shorter bright ones in front; each fades towards its tip
+    var fa = env(p, 0.06, 0.5); if (fa < 0.01) return;
+    var grow = ease.out(Math.min(1, p * 1.5));
+    g.lineCap = 'round';
+    e.fils.forEach(function (f) {
+      var px = x, py = y;
+      for (var s = 1; s <= 14; s++) {
+        var u = s / 14, r = f.len * u * grow * dpr;
+        var th = f.a + Math.sin(u * 4 + t * 0.008 + f.ph) * 0.3 * u + f.curl * u * u * 0.9;
+        var nx = x + Math.cos(th) * r, ny = y + Math.sin(th) * r, aa = fa * f.b * Math.pow(1 - u, 0.8);
+        g.beginPath(); g.moveTo(px, py); g.lineTo(nx, ny);
+        g.lineWidth = (f.b > 0.6 ? 5 : 7) * dpr; g.strokeStyle = col(c.mint, aa * 0.22); g.stroke();
+        g.lineWidth = (f.b > 0.6 ? 1.3 : 0.9) * dpr; g.strokeStyle = col(c.frost, aa); g.stroke();
+        px = nx; py = ny;
+      }
     });
   }
   function drawSpark(e, p) {
@@ -107,13 +133,17 @@ var FX = (function () {
       var back = t * 0.6, bounce = t * 0.88 + back;
       effects.push(ring({ k: 1, r0: 4, r1: far, ease: 'out', body: 0.16, crests: dense, start: now, dur: t, fout: 0.7 }));
       effects.push(ring({ k: 0.9, r0: far, r1: 0, ease: 'quick', body: 0.16, crests: dense, start: now + t * 0.88, dur: back, fin: 0.1, fout: 0.93, drift: -0.35 }));
-      var rays = [];
-      for (var j = 0; j < 16; j++) {
-        var base = (j / 16) * Math.PI * 2 + Math.random() * 0.3, pts = [], len = 90 + Math.random() * 120;
-        for (var q = 1; q <= 6; q++) pts.push([q / 6, base + (Math.random() - 0.5) * 0.35]);
-        rays.push({ len: len, pts: pts });
+      var fils = [], clouds = [], reach = Math.min(far, 420);
+      for (var j = 0; j < 18; j++) {
+        var bright = j % 3 !== 0;   // two in three are short and bright; one in three is a long faint wisp
+        fils.push({ a: (j / 18) * Math.PI * 2 + Math.random() * 0.3, len: reach * (bright ? 0.22 + Math.random() * 0.16 : 0.4 + Math.random() * 0.2),
+          b: bright ? 0.9 : 0.45, ph: Math.random() * 6, curl: (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 0.6) });
       }
-      effects.push({ type: 'nova', x: x, y: y, c: { frost: c.frost, gold: c.gold, mint: c.mint }, rays: rays, start: now + bounce - 40, dur: 750 });
+      ['mint', 'main', 'gold', 'mint', 'main'].forEach(function (k, i) {
+        clouds.push({ c: k, ang: (i / 5) * Math.PI * 2 + Math.random() * 0.8, dist: reach * (0.08 + Math.random() * 0.14), size: 60 + Math.random() * 60,
+          a: k === 'gold' ? 0.22 : 0.3, spin: (Math.random() - 0.5) * 0.6 });
+      });
+      effects.push({ type: 'nova', x: x, y: y, c: { frost: c.frost, gold: c.gold, mint: c.mint, main: c.main }, fils: fils, clouds: clouds, reach: reach, start: now + bounce - 40, dur: 1400 });
       var goldC = { main: c.gold, mint: c.gold, edge: c.gold, frost: c.frost };
       var interlaced = [{ off: 0, w: 2, a: 1, c: c.gold, dash: [3, 2] }, { off: 2.6, w: 1.6, a: 1, c: c.frost, dash: [2, 3] }, { off: 5.4, w: 1.4, a: 0.85, c: c.gold, dash: [1.5, 2.5] }];
       effects.push(ring({ k: 1, r0: 0, r1: far, ease: 'out', body: 0.14, crests: interlaced, c: goldC, start: now + bounce, dur: t * 1.35, fin: 0.05, fout: 0.38, drift: -0.5 }));
