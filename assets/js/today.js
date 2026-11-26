@@ -183,12 +183,13 @@ function nextDoseRow(p, pid) {
 function tickDose(btn, medId, slot, pid) {
   if (btn.disabled) return; btn.disabled = true;
   var row = btn.closest('.dose'); if (row) row.classList.add('done');
-  var still = FX.still(), panel = btn.closest('.next.urgent');
+  var still = FX.still(), panel = btn.closest('.next');
   var b = btn.getBoundingClientRect(), x = b.left + b.width / 2, y = b.top + b.height / 2;
-  // The last late dose ticked: the heartbeat stops, a green teardrop falls into the circle, then the full burst (fx.js).
-  if (panel && !still && !panel.querySelector('.dose-overdue:not(.done)')) {
+  // A benchmark finished (the last open dose in Next up, late or not): the heartbeat stops if it was beating,
+  // a green teardrop falls into the circle, then the full win (fx.js): green out, all the way back in, supernova, gold.
+  if (panel && !still && !panel.querySelector('.dose:not(.done)')) {
     var p = panel.getBoundingClientRect(), sx = (x - p.left) + 'px', sy = (y - p.top) + 'px';
-    panel.classList.add('resolving');
+    if (panel.classList.contains('urgent')) panel.classList.add('resolving');
     var drop = document.createElement('div'); drop.className = 'fx-drop'; drop.style.left = x + 'px'; drop.style.top = y + 'px';
     drop.innerHTML = '<svg viewBox="0 0 22 30" aria-hidden="true"><path d="M11 1C11 1 2 13 2 19.5a9 9 0 0 0 18 0C20 13 11 1 11 1z" fill="currentColor" opacity=".9"/></svg>';
     document.body.appendChild(drop);
