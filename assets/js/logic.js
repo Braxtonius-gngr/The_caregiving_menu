@@ -542,10 +542,21 @@ var Logic = (function () {
   var FREQ_WORDS = { 1: 'once a day', 2: 'twice a day', 3: 'three times a day', 4: 'four times a day', 6: 'six times a day' };
   /* Where a medicine's times of day and its own words disagree, or no time is set at all.
    * Each: { key, text, fix } where fix is the slots that would settle it (when there is one answer). */
+  // What the family has already looked at and chosen to keep: asked about once, not on every save.
+  function medSig(f) { f = f || {}; return [f.slots || '', f.dose || '', f.when || '', f.per_dose == null ? '' : f.per_dose].join('|'); }
+  function medGive(f) { return f && f.per_dose ? f.per_dose + ' each time' : ''; }
   function medTimingIssues(med) {
     var f = med.fields || {}, all = String(f.slots || '').split(',').filter(Boolean), timed = all.filter(function (s) { return s !== 'prn'; }), out = [];
+    if (f.timing_ok && f.timing_ok === medSig(f)) return out;
     var freq = medFrequency([f.dose, f.when].filter(Boolean).join(' '));
-    if (!all.length && !f.slots_none) out.push({ key: 'no_time', text: 'No time of day is picked, so it will not show in the daily medicines.', fix: freq && FREQ_SLOTS[freq] ? FREQ_SLOTS[freq] : null });
+    // "2 tablets" with two times of day: two each time, or two a day in total?
+    var cnt = /(\d+(?:\.\d+)?)\s*(tablets?|tabs?|capsules?|caps?|caplets?|pills?|puffs?|drops?|sprays?|patch(?:es)?)\b/i.exec(f.dose || '');
+    if (cnt && +cnt[1] > 1 && timed.length >= 2 && f.per_dose == null) {
+      var n = +cnt[1], unit = cnt[2].toLowerCase().replace(/e?s$/, ''), each = n / timed.length;
+      out.push({ key: 'per_dose', text: 'Is that ' + n + ' ' + cnt[2].toLowerCase() + ' each time, or ' + n + ' a day in total?', fix: null,
+        options: [{ label: n + ' each time (' + n * timed.length + ' a day)', per_dose: n }].concat(each === Math.round(each) ? [{ label: each + ' each time (' + n + ' a day)', per_dose: each }] : []), unit: unit });
+    }
+    if (!all.length) out.push({ key: 'no_time', text: 'No time of day is picked, so it will not show in the daily medicines.', fix: freq && FREQ_SLOTS[freq] ? FREQ_SLOTS[freq] : null });
     else if (freq && timed.length && freq !== timed.length) {
       out.push({ key: 'freq', text: 'It says ' + (FREQ_WORDS[freq] || freq + ' times a day') + ', but ' + timed.length + ' time' + (timed.length === 1 ? ' of day is' : 's of day are') + ' picked.',
         fix: freq > timed.length && FREQ_SLOTS[freq] && timed.every(function (s) { return FREQ_SLOTS[freq].split(',').indexOf(s) >= 0; }) ? FREQ_SLOTS[freq] : null });
@@ -729,7 +740,7 @@ var Logic = (function () {
     if (m) return +m[1] || words[m[1]] || 1;
     return 1;
   }
-  return { exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, noteOffers: noteOffers, noteOffersNew: noteOffersNew, medKey: medKey, medFrequency: medFrequency, medTimingIssues: medTimingIssues, mergeMeds: mergeMeds, repointPlan: repointPlan, medSame: medSame, medBrief: medBrief, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
+  return { exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, noteOffers: noteOffers, noteOffersNew: noteOffersNew, medSig: medSig, medGive: medGive, medKey: medKey, medFrequency: medFrequency, medTimingIssues: medTimingIssues, mergeMeds: mergeMeds, repointPlan: repointPlan, medSame: medSame, medBrief: medBrief, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
     slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, stayOpen: stayOpen, stayAt: stayAt, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();

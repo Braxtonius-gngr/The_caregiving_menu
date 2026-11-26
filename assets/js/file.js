@@ -10,7 +10,7 @@ var LAB_UNITS = { eGFR: 'mL/min/1.73m²', Creatinine: 'mg/dL', BUN: 'mg/dL', Pot
 var RECORD_KINDS = {
   condition: { label: 'Condition', title: 'Condition', fields: [['since', 'Since', 'text'], ['notes', 'Notes', 'textarea']] },
   allergy: { label: 'Allergy', title: 'Allergic to', fields: [['reaction', 'Reaction', 'text'], ['severity', 'Severity', 'select:Mild|Moderate|Severe|Unknown']] },
-  medication: { label: 'Medicine', title: 'Medicine', fields: [['dose', 'Dose (e.g. 40 mg, 1 tablet)', 'text'], ['slots', 'When to give it', 'slots'], ['with_food', 'Food', 'select:With food|Without food|Either'], ['when', 'Other timing notes', 'text'], ['purpose', 'What it is for', 'text'], ['prescriber', 'Prescribed by', 'text'], ['pharmacy', 'Pharmacy', 'text'], ['start', 'Started', 'date'], ['stop', 'Stop on (leave blank if ongoing)', 'date'], ['refill_on', 'Next refill due', 'date'], ['instructions', 'Instructions from the doctor or pharmacist', 'textarea'], ['generic', '', 'hidden'],
+  medication: { label: 'Medicine', title: 'Medicine', fields: [['dose', 'Dose (e.g. 40 mg, 1 tablet)', 'text'], ['per_dose', 'How many each time (tablets, capsules, puffs). Leave blank if unsure', 'number'], ['slots', 'When to give it', 'slots'], ['with_food', 'Food', 'select:With food|Without food|Either'], ['when', 'Other timing notes', 'text'], ['purpose', 'What it is for', 'text'], ['prescriber', 'Prescribed by', 'text'], ['pharmacy', 'Pharmacy', 'text'], ['start', 'Started', 'date'], ['stop', 'Stop on (leave blank if ongoing)', 'date'], ['refill_on', 'Next refill due', 'date'], ['instructions', 'Instructions from the doctor or pharmacist', 'textarea'], ['generic', '', 'hidden'],
     ['label_head', 'From the label', 'heading'], ['label_boxed', 'Boxed warning', 'textarea'], ['label_how', 'How to take it', 'textarea'], ['label_side', 'Side effects to watch for', 'textarea'], ['label_warn', 'Warnings', 'textarea'], ['label_patients', 'For patients and families', 'textarea'], ['label_older', 'Older adults', 'textarea'], ['label_source', '', 'hidden'], ['label_date', '', 'hidden']] },
   directive: { label: 'Directive', title: 'Document (e.g. DNR, POLST, living will, power of attorney)', fields: [['kept', 'Where the original is kept', 'text'], ['notes', 'Notes', 'textarea']] },
   contact: { label: 'Care team', title: 'Name', fields: [['role', 'Role (kidney doctor, hospice nurse, pharmacy...)', 'text'], ['phone', 'Phone', 'tel'], ['fax', 'Fax', 'text'], ['address', 'Address', 'text'], ['portal', 'Patient portal link', 'text'], ['notes', 'Notes', 'textarea']] },
@@ -65,12 +65,25 @@ function fileSummary(pid, prof) {
   var f = function (r, k) { return esc((r.fields || {})[k] || ''); };
   var next = nextAppointment(pid);
   return (next ? '<div class="note"><b>Next appointment:</b> ' + esc(fmtWhen(next.when, true)) + ' · ' + esc(next.with) + '</div>' : '') +
-    group('allergy', 'Allergies', function (r) { return [f(r, 'reaction'), f(r, 'severity')].filter(Boolean).join(' · '); }) +
-    group('condition', 'Conditions', function (r) { return f(r, 'since') ? 'since ' + f(r, 'since') : ''; }) +
-    group('medication', 'Medicines', function (r) { return [f(r, 'dose'), esc(slotsText(r)), f(r, 'purpose'), r.fields && r.fields.stop && r.fields.stop < careToday() ? 'stopped' : ''].filter(Boolean).join(' · '); }) +
+    group('allergy', 'Allergies', function (r) { return [f(r, 'reaction'), f(r, 'severity')].filter(Boolean).join(' · '); }).replace('<p class="muted">None recorded.</p>', allergyAsk(pid)) +
+    group('condition', 'Conditions', function (r) { return f(r, 'since') ? 'since ' + f(r, 'since') : ''; }).replace('<p class="muted">None recorded.</p>', '<p class="muted">None recorded yet. Add the main ones (heart, kidney, diabetes, memory...) so a hospital or a new nurse sees them first.</p>') +
+    group('medication', 'Medicines', function (r) { return [f(r, 'dose'), esc(Logic.medGive(r.fields)), esc(slotsText(r)), f(r, 'purpose'), r.fields && r.fields.stop && r.fields.stop < careToday() ? 'stopped' : ''].filter(Boolean).join(' · '); }) +
     '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'meds\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">Daily meds</button><button class="btn sm ghost" onclick="showScreen(\'medcheck\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">Compare sources</button></div>' +
     group('directive', 'Directives and legal papers', function (r) { return f(r, 'kept') ? 'kept: ' + f(r, 'kept') : ''; }) +
     '<p class="muted">Keep this list the way the doctors and pharmacy have it. The app records; it doesn\'t advise.</p>';
+}
+// "None recorded" could mean no allergies or nobody asked. The family answers once; a hospital asks this first.
+function noAllergiesOn(pid) { return recordsOf(pid, ['allergy']).length ? null : (careSettingsOf(pid).no_known_allergies || null); }
+function allergyAsk(pid) {
+  var on = noAllergiesOn(pid), a = pid ? '\'' + pid + '\'' : 'null';
+  if (on) return '<p><b>No known allergies</b> <span class="muted">(the family confirmed ' + esc(on) + ')</span> <button class="linkish writer-only" onclick="setNoAllergies(' + a + ',false)">Undo</button></p>';
+  if (!pid) return '<p class="muted">None recorded.</p>';
+  return '<div class="note"><b>Not answered yet.</b> A hospital or a new nurse asks this first. Does she have any allergies, to medicines, food or latex?' +
+    '<div class="btn-row writer-only"><button class="btn sm" onclick="setNoAllergies(' + a + ',true)">No known allergies</button>' + addBtn('allergy', pid, 'Add an allergy') + '</div></div>';
+}
+function setNoAllergies(pid, yes) {
+  DB.update('diet_profiles', pid, function (p) { if (!p) return null; var cs = Object.assign({}, p.care_settings || {}); cs.no_known_allergies = yes ? localDay(new Date().toISOString()) : null; p.care_settings = cs; return p; })
+    .then(loadAll).then(function () { refresh(); if (Sync.enabled()) syncNow(); toast(yes ? 'Saved: no known allergies' : 'Cleared'); });
 }
 function fileTeam(pid) {
   var rs = recordsOf(pid, ['contact']).sort(function (a, b) { return (a.title || '').localeCompare(b.title || ''); });
@@ -302,7 +315,8 @@ function saveRecord(id, kind, pid, force) {
   });
   var ex = readExtraFields(); if (ex !== undefined) fields.extra = ex.length ? ex : null;
   if (kind === 'medication') {
-    fields.slots_none = !fields.slots && force === 'asis' ? true : null;
+    var was = id ? (State.records || []).find(function (r) { return r.id === id; }) : null, sig = Logic.medSig(fields);
+    fields.timing_ok = force === 'asis' || (was && (was.fields || {}).timing_ok === sig) ? sig : null;
     if (force !== 'asis' && medAsk(id, pid, title, fields)) return;
   }
   var chk = S.phoneCheck;
@@ -338,6 +352,7 @@ function medAsk(id, pid, title, fields) {
   if (!box) { var row = document.querySelector('#sheetBody > .btn-row:last-child'); if (!row) return false; row.insertAdjacentHTML('beforebegin', '<div id="medAsk" role="alert"></div>'); box = document.getElementById('medAsk'); }
   var asks = Logic.medTimingIssues({ title: title, fields: fields }).map(function (t) {
     return '<p><b>' + esc(t.text) + '</b></p><div class="btn-row">' +
+      (t.options || []).map(function (o) { return '<button type="button" class="btn sm" onclick="medAskPerDose(' + o.per_dose + ')">' + esc(o.label) + '</button>'; }).join('') +
       (t.fix ? '<button type="button" class="btn sm" onclick="medAskSlots(\'' + t.fix + '\')">Set ' + esc(t.fix.split(',').map(slotName).join(' and ').toLowerCase()) + '</button>' : '') +
       (t.key === 'no_time' ? '<button type="button" class="btn sm ghost" onclick="medAskSlots(\'prn\')">Only when needed</button>' : '') + '</div>';
   });
@@ -350,6 +365,10 @@ function medAsk(id, pid, title, fields) {
     '<button type="button" class="linkish" onclick="saveRecord(' + (id ? '\'' + id + '\'' : 'null') + ',\'medication\',' + (pid ? '\'' + pid + '\'' : 'null') + ',\'asis\')">Save it as it is</button></div>';
   box.scrollIntoView({ block: 'center' });
   return true;
+}
+function medAskPerDose(n) {
+  var el = document.getElementById('rf-per_dose'); if (el) el.value = n;
+  var save = document.querySelector('#sheetBody > .btn-row:last-child .btn.writer-only'); if (save) save.click();
 }
 function medAskSlots(slots) {
   var on = slots.split(',');
@@ -376,7 +395,7 @@ function exportHtml(pid, prof) {
   var visits = recordsOf(pid, ['visit']).filter(function (r) { return r.occurred_at <= new Date().toISOString(); }).sort(byDateDesc).slice(0, 3);
   var qs = visits.filter(function (v) { return (v.fields || {}).questions; }).map(function (v) { return '[' + fmtWhen(v.occurred_at) + ', from the ' + v.title + ' visit] ' + v.fields.questions; });
   return '<h2>' + esc(prof.person_name) + '</h2><p class="muted">Prepared ' + esc(localDay(new Date().toISOString())) + ' by the family from home records.</p>' +
-    '<h3>Allergies</h3>' + list('allergy', function (r) { return '<b>' + esc(r.title) + '</b>' + (f(r, 'reaction') ? ': ' + f(r, 'reaction') : ''); }) +
+    '<h3>Allergies</h3>' + (list('allergy', function (r) { return '<b>' + esc(r.title) + '</b>' + (f(r, 'reaction') ? ': ' + f(r, 'reaction') : ''); })).replace('<p>None recorded.</p>', noAllergiesOn(pid) ? '<p>No known allergies (the family confirmed ' + esc(noAllergiesOn(pid)) + ').</p>' : '<p>Not answered yet. Please ask.</p>') +
     '<h3>Conditions</h3>' + list('condition', function (r) { return esc(r.title) + (f(r, 'since') ? ' (since ' + f(r, 'since') + ')' : ''); }) +
     '<h3>Medicines</h3>' + list('medication', function (r) { return '<b>' + esc(r.title) + '</b> ' + [f(r, 'dose'), esc(slotsText(r)), f(r, 'when'), f(r, 'with_food')].filter(Boolean).join(', ') + (f(r, 'prescriber') ? ' (' + f(r, 'prescriber') + ')' : '') + (r.fields && r.fields.stop && r.fields.stop < careToday() ? ' (stopped ' + f(r, 'stop') + ')' : ''); }) +
     '<h3>Care team</h3>' + list('contact', function (r) { return esc(r.title) + (f(r, 'role') ? ', ' + f(r, 'role') : '') + (f(r, 'phone') ? ' · ' + f(r, 'phone') : ''); }) +

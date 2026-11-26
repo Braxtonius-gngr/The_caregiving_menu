@@ -366,7 +366,19 @@ t('medTimingIssues: no time of day, and times that disagree with the words, each
   assert.deepEqual(t({ dose: '100 mcg tablet' }), ['no_time:null']);
   assert.deepEqual(t({ when: 'three times a day' }), ['no_time:morning,noon,evening']);
   assert.deepEqual(t({ slots: 'prn' }), []);
-  assert.deepEqual(t({ slots_none: true }), []);
+  // Saved as it is: not asked again until the dose or times change.
+  var kept = { slots: 'morning', when: 'Twice a day' }; kept.timing_ok = Logic.medSig(kept);
+  assert.deepEqual(t(kept), []);
+  assert.deepEqual(t(Object.assign({}, kept, { when: 'Three times a day' })), ['freq:morning,noon,evening']);
+  var none = {}; none.timing_ok = Logic.medSig(none); assert.deepEqual(t(none), []);
+  // "2 tablets" at two times of day: each time, or in total?
+  var q = Logic.medTimingIssues({ title: 'amlodipine 2.5 mg tablet', fields: { dose: '2 tablets (2.5 mg each)', slots: 'morning,evening', when: 'Twice a day' } });
+  assert.deepEqual(q.map(function (i) { return i.key; }), ['per_dose']);
+  assert.deepEqual(q[0].options, [{ label: '2 each time (4 a day)', per_dose: 2 }, { label: '1 each time (2 a day)', per_dose: 1 }]);
+  assert.deepEqual(t({ dose: '2 tablets', slots: 'morning,evening', per_dose: 1 }), []);
+  assert.deepEqual(t({ dose: '3 capsules', slots: 'morning,evening' }).length, 1);
+  assert.deepEqual(t({ dose: '2 tablets', slots: 'morning' }), [], 'one time of day is not ambiguous');
+  assert.strictEqual(Logic.medGive({ per_dose: 2 }), '2 each time');
   var r = Logic.reconcileMeds([{ id: 'a', title: 'Amiodarone', fields: { slots: 'morning', when: 'Twice a day' } }], '2026-11-25');
   assert.ok(r.items[0].issues.some(function (i) { return i.level === 'warn' && /twice a day, but 1 time of day is picked/.test(i.text); }));
 });
