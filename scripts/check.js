@@ -46,5 +46,20 @@ while ((m = re.exec(handlerSrc))) {
   if (first && !defined[first] && !seen[first]) { seen[first] = true; fail('inline handler calls undefined global: ' + first); }
 }
 
+// 4. the look (P-020): screens use line icons, not emoji, and colours come from tokens.css.
+// Typographic marks (✓ ✗ ♥ arrows) are fine. Comments are skipped. Data colours are allowed by file:
+// fluids.js holds the urine colour swatches (real colours, not theme), yourdata.js the print-out styles.
+var HEX_OK = { 'assets/js/fluids.js': true, 'assets/js/yourdata.js': true };
+function isEmoji(n) { return n >= 0x1F000 || (n >= 0x2600 && n <= 0x27BF && n !== 0x2713 && n !== 0x2717 && n !== 0x2665) || n === 0x2B50 || n === 0x23F8; }
+jsFiles.filter(function (f) { return f.startsWith('assets/js/'); }).forEach(function (f) {
+  fs.readFileSync(path.join(root, f), 'utf8').split('\n').forEach(function (line, i) {
+    var code = line.replace(/^\s*(\/\/|\/?\*).*$/, '').replace(/\s\/\/ .*$/, '');
+    var em = /&#(\d+);/g, mm;
+    while ((mm = em.exec(code))) if (isEmoji(+mm[1])) { fail('emoji ' + mm[0] + ' in ' + f + ':' + (i + 1) + ' (use icon())'); break; }
+    for (var ch of code) if (/\p{Extended_Pictographic}/u.test(ch) && isEmoji(ch.codePointAt(0))) { fail('emoji ' + ch + ' in ' + f + ':' + (i + 1) + ' (use icon())'); break; }
+    if (!HEX_OK[f] && /(?<![&\w])#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?\b/.test(code)) fail('hard-coded colour in ' + f + ':' + (i + 1) + ' (use a token from tokens.css)');
+  });
+});
+
 if (failures) { console.error(failures + ' check(s) failed'); process.exit(1); }
 console.log('ok: ' + jsFiles.length + ' scripts, ' + refs.length + ' references, handlers resolve');

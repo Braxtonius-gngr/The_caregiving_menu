@@ -28,36 +28,36 @@ function renderHandoff(arg) {
   var section = function (title, inner) { return inner ? '<div class="card"><h3>' + title + '</h3>' + inner + '</div>' : ''; };
   var pick = function (hrs, label) { return '<button class="chip' + ((arg && arg.hours) === hrs ? ' on' : '') + '" onclick="showScreen(\'handoff\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + ',hours:' + hrs + '})">' + label + '</button>'; };
   var m = h.meds, fl = h.fluids;
-  var html = '<div class="card"><h3>&#128075; Catch me up' + (prof.person_name ? ': ' + esc(prof.person_name) : '') + '</h3>' +
+  var html = '<div class="card"><h3>' + icon('wave') + ' Catch me up' + (prof.person_name ? ': ' + esc(prof.person_name) : '') + '</h3>' +
     '<p class="muted">' + esc(w.label) + '. Everything here comes straight from what was logged, with who logged it.</p>' +
     '<div class="chips">' + '<button class="chip' + (!(arg && arg.hours) ? ' on' : '') + '" onclick="showScreen(\'handoff\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">Since last time</button>' + pick(8, '8 hours') + pick(24, '1 day') + pick(72, '3 days') + '</div>' +
     '<div class="btn-row"><button class="btn" onclick="handoffDone()">&#10003; Got it</button>' + (h.empty ? '' : '<button class="btn ghost" onclick="handoffSay()">Say it in a few lines</button><button class="btn ghost" onclick="copyText(handoffText(), \'Copied\')">Copy</button>') + '</div>' +
     '<div id="handoffSay" aria-live="polite"></div></div>';
   if (h.empty && !h.checks.length) return html + '<p class="muted">Nothing was logged for her in this time.</p>';
   var day = careToday(), att = attentionItems(pid, day, fluidEntriesFor(pid, day), planFor(pid, day));
-  html += att.length ? '<div class="card attention"><h3>&#9888; Needs attention now</h3><ul>' + att.map(function (f) { return '<li>' + f.text + '</li>'; }).join('') + '</ul></div>' : '';
-  html += section('&#128138; Medicines',
+  html += att.length ? '<div class="card attention"><h3>' + icon('alert') + ' Needs attention now</h3><ul>' + att.map(function (f) { return '<li>' + f.text + '</li>'; }).join('') + '</ul></div>' : '';
+  html += section(icon('pill') + ' Medicines',
     (m.given.length || m.skipped.length || m.refused.length) ? '<ul>' +
       m.given.map(function (r) { return li(handoffTime(r.occurred_at), handoffWho(r), '&#10003; ' + esc(r.title) + ' given'); }).join('') +
       m.refused.map(function (r) { return li(handoffTime(r.occurred_at), handoffWho(r), '<b class="flag-text">' + esc(r.title) + ' refused</b>' + ((r.fields || {}).note ? ': ' + esc(r.fields.note) : '')); }).join('') +
       m.skipped.map(function (r) { return li(handoffTime(r.occurred_at), handoffWho(r), '<b>' + esc(r.title) + ' skipped</b>' + ((r.fields || {}).note ? ': ' + esc(r.fields.note) : '')); }).join('') + '</ul>'
       : '<p class="muted">No doses marked in this time.</p>');
-  html += section('&#128167; In and out', (fl.drinks || fl.outputs || h.meals.length) ?
+  html += section(icon('drop') + ' In and out', (fl.drinks || fl.outputs || h.meals.length) ?
     '<p>In: <b>' + shortOz(fl.inMl) + '</b> (' + fl.drinks + ' drink' + (fl.drinks === 1 ? '' : 's') + ') &middot; Out: <b>' + shortOz(fl.outMl) + '</b> (' + fl.outputs + ')' + (h.meals.length ? ' &middot; ' + h.meals.length + ' meal' + (h.meals.length === 1 ? '' : 's') + ' or snack' + (h.meals.length === 1 ? '' : 's') : '') + '</p>' +
     (fl.flags.length ? '<ul>' + fl.flags.map(function (f) { return li(handoffTime(f.entry.eaten_at), handoffWho(f.entry), '<b class="flag-text">' + esc((OUTPUT_TYPES[f.entry.output_type] || 'Output') + ': ' + f.reasons.join(', ')) + '</b>'); }).join('') + '</ul>' : '') : '');
-  html += section('&#10084;&#65039; Readings', (h.vitals.length || h.weights.length) ? '<ul>' +
+  html += section(icon('vitals') + ' Readings', (h.vitals.length || h.weights.length) ? '<ul>' +
     h.vitals.map(function (v) { var name = (VITALS[v.kind] || [v.kind])[0]; return li(handoffTime(v.taken_at), handoffWho(v), esc(name) + ' <b>' + esc(v.value) + (v.value2 != null ? '/' + esc(v.value2) : '') + '</b>' + (v.pulse != null ? ', pulse ' + esc(v.pulse) : '') + (v.rhythm ? ' <b class="flag-text">' + esc(rhythmName(v.rhythm)) + '</b>' : '')); }).join('') +
     h.weights.map(function (v) { return li(handoffTime(v.taken_at), handoffWho(v), 'Weight <b>' + esc(v.value) + ' ' + esc(v.unit || '') + '</b>'); }).join('') + '</ul>' : '');
-  html += section('&#129658; Visits', h.visits.map(function (v) {
+  html += section(icon('vitals') + ' Visits', h.visits.map(function (v) {
     var f = v.fields || {};
     return '<div class="tappable" onclick="editRecord(\'' + v.id + '\')"><b>' + esc(v.title) + '</b> <span class="muted">' + esc(handoffTime(v.occurred_at)) + '</span>' +
       [['said', 'Said'], ['changed', 'Changed'], ['meds_changed', 'Medicines'], ['tests', 'Tests']].map(function (k) { return f[k[0]] ? '<div><span class="muted">' + k[1] + ':</span> <span class="prewrap">' + esc(f[k[0]]) + '</span></div>' : ''; }).join('') + '</div>';
   }).join('<hr>'));
-  html += section('&#129336; Exercises', h.exercises && h.exercises.length ? '<ul>' + h.exercises.map(function (x) { return li(handoffTime(x.occurred_at), handoffWho(x), ((x.fields || {}).status === 'skipped' ? 'Skipped: ' : '&#10003; ') + esc(x.title)); }).join('') + '</ul>' : '');
-  html += section('&#128221; Updates', h.updates.length ? '<ul>' + h.updates.map(function (u) { return li(handoffTime(u.occurred_at), handoffWho(u), esc((u.title ? u.title + ': ' : '') + ((u.fields || {}).text || ''))); }).join('') + '</ul>' : '');
-  html += section('&#9989; Still to do', h.todo.length ? '<ul>' + h.todo.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>' : '');
-  html += section('&#10067; To double-check', h.checks.length ? '<ul>' + h.checks.map(function (r) { return '<li class="tappable" onclick="editRecord(\'' + r.id + '\')"><b>' + esc(r.title) + '</b>: ' + esc(checkLine(r)) + '</li>'; }).join('') + '</ul>' : '');
-  html += section('&#128193; Added or changed in her file', h.changed.length ? '<ul>' + h.changed.map(function (r) { return li(handoffTime(r.updated_at), handoffWho(r), '<span class="tappable" onclick="editRecord(\'' + r.id + '\')">' + esc((RECORD_KINDS[r.kind] || {}).label || r.kind) + ': ' + esc(r.title) + '</span>'); }).join('') + '</ul>' : '');
+  html += section(icon('exercise') + ' Exercises', h.exercises && h.exercises.length ? '<ul>' + h.exercises.map(function (x) { return li(handoffTime(x.occurred_at), handoffWho(x), ((x.fields || {}).status === 'skipped' ? 'Skipped: ' : '&#10003; ') + esc(x.title)); }).join('') + '</ul>' : '');
+  html += section(icon('update') + ' Updates', h.updates.length ? '<ul>' + h.updates.map(function (u) { return li(handoffTime(u.occurred_at), handoffWho(u), esc((u.title ? u.title + ': ' : '') + ((u.fields || {}).text || ''))); }).join('') + '</ul>' : '');
+  html += section(icon('tick') + ' Still to do', h.todo.length ? '<ul>' + h.todo.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>' : '');
+  html += section(icon('question') + ' To double-check', h.checks.length ? '<ul>' + h.checks.map(function (r) { return '<li class="tappable" onclick="editRecord(\'' + r.id + '\')"><b>' + esc(r.title) + '</b>: ' + esc(checkLine(r)) + '</li>'; }).join('') + '</ul>' : '');
+  html += section(icon('folder') + ' Added or changed in her file', h.changed.length ? '<ul>' + h.changed.map(function (r) { return li(handoffTime(r.updated_at), handoffWho(r), '<span class="tappable" onclick="editRecord(\'' + r.id + '\')">' + esc((RECORD_KINDS[r.kind] || {}).label || r.kind) + ': ' + esc(r.title) + '</span>'); }).join('') + '</ul>' : '');
   return html;
 }
 function handoffDone() {

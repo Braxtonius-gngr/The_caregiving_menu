@@ -19,13 +19,13 @@ var SNAP_MAX_IMAGES = 6; // retakes plus extra pages of one document
 
 function snapIt(pid, expect) {
   S.snap = { pid: pid || null, expect: expect || null, images: [] };
-  openSheet('<h2 style="margin-top:0">&#128247; Snap it</h2>' +
+  openSheet('<h2 style="margin-top:0">' + icon('camera') + ' Snap it</h2>' +
     '<p>' + (expect && SNAP_KINDS[expect] ? 'Take a photo of ' + SNAP_KINDS[expect] + '.' : 'Take a photo of a cuff or meter screen, the scale, a pill bottle label, a lab report, an appointment card, a care team list or any paper worth keeping.') + ' The app reads it and fills in the form for you to check.</p>' +
     '<p class="muted">Fill the frame, avoid glare, hold still. If anything is unclear it will ask for another photo rather than guess.</p>' +
     snapButtons('Take photo') + '<div id="snapOut" aria-live="polite"></div>');
 }
 function snapButtons(label) {
-  return '<div class="btn-row"><button class="btn" onclick="document.getElementById(\'snapCam\').click()">&#128247; ' + label + '</button><button class="btn ghost" onclick="document.getElementById(\'snapLib\').click()">Choose a photo</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>' +
+  return '<div class="btn-row"><button class="btn" onclick="document.getElementById(\'snapCam\').click()">' + icon('camera') + ' ' + label + '</button><button class="btn ghost" onclick="document.getElementById(\'snapLib\').click()">Choose a photo</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>' +
     '<input id="snapCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="snapFile(this)"><input id="snapLib" type="file" accept="image/*" class="hidden" onchange="snapFile(this)">';
 }
 function snapFile(input) {
@@ -44,15 +44,15 @@ function snapResult(d) {
   S.snapLast = d;
   if (d.kind === 'food_label' || d.kind === 'other') {
     var food = d.kind === 'food_label';
-    return openSheet('<h2 style="margin-top:0">&#128247; Snap it</h2><p>' + esc(d.summary || '') + '</p>' +
+    return openSheet('<h2 style="margin-top:0">' + icon('camera') + ' Snap it</h2><p>' + esc(d.summary || '') + '</p>' +
       '<p>' + (food ? 'Food labels go in <b>Kitchen</b> &rarr; Pantry &rarr; Scan, which saves the nutrition facts.' : 'This does not look like a paper or screen the app reads. You can still keep it in Documents &rarr; Misc.') + '</p>' +
       snapButtons('Try another photo') + (food ? '<div class="btn-row"><button class="btn ghost" onclick="closeSheet();showScreen(\'kitchen\')">Open Kitchen</button></div>' : '<div class="btn-row"><button class="btn ghost" onclick="snapTeam(S.snapLast)">Keep it in Misc</button></div>') + '<div id="snapOut" aria-live="polite"></div>');
   }
   if (d.decision === 'retake') {
     var last = sn.tries >= SNAP_MAX_TRIES;
-    return openSheet('<h2 style="margin-top:0">&#128247; One more photo, please</h2>' +
+    return openSheet('<h2 style="margin-top:0">' + icon('camera') + ' One more photo, please</h2>' +
       '<div class="card attention"><p><b>' + esc(d.retake_reason || 'Part of it was not clear enough to read for sure.') + '</b></p>' +
-      (d.retake_tip ? '<p>&#128161; ' + esc(d.retake_tip) + '</p>' : '') + '</div>' +
+      (d.retake_tip ? '<p>' + icon('bulb') + ' ' + esc(d.retake_tip) + '</p>' : '') + '</div>' +
       (d.summary ? '<p class="muted">So far: ' + esc(d.summary) + '</p>' : '') +
       (last ? '<p class="muted">Still unclear after ' + sn.tries + ' photos. You can keep trying, or type it in.</p>' : '<p class="muted">Your earlier photo is kept, so it can combine the two.</p>') +
       snapButtons('Take another photo') +
@@ -61,11 +61,11 @@ function snapResult(d) {
   }
   // The paper seems to go on: ask for the next page before filling anything.
   if (d.more_pages && !sn.noMore && sn.images.length < SNAP_MAX_IMAGES) {
-    return openSheet('<h2 style="margin-top:0">&#128196; Is there another page?</h2>' +
+    return openSheet('<h2 style="margin-top:0">' + icon('doc') + ' Is there another page?</h2>' +
       '<p>' + esc(d.summary || '') + '</p>' +
       '<div class="card"><p><b>It looks like this continues' + (d.more_pages_hint ? ' (' + esc(d.more_pages_hint) + ')' : '') + '.</b> Add the next page so nothing is missed. Pages so far: ' + sn.images.length + '.</p></div>' +
       snapPageInputs() +
-      '<div class="btn-row"><button class="btn" onclick="snapAddPage(\'cam\')">&#128247; Add the next page</button><button class="btn ghost" onclick="snapAddPage(\'lib\')">Choose a photo</button><button class="btn ghost" onclick="snapNoMore()">That&rsquo;s all, use what you have</button></div>' +
+      '<div class="btn-row"><button class="btn" onclick="snapAddPage(\'cam\')">' + icon('camera') + ' Add the next page</button><button class="btn ghost" onclick="snapAddPage(\'lib\')">Choose a photo</button><button class="btn ghost" onclick="snapNoMore()">That&rsquo;s all, use what you have</button></div>' +
       '<div id="snapOut" aria-live="polite"></div>');
   }
   snapFill(d);
@@ -83,7 +83,7 @@ function snapNoMore() { var sn = S.snap; if (!sn || !S.snapLast) return; sn.noMo
 // On result sheets: add a page any time; the whole set is read again together.
 function snapMorePagesRow() {
   var sn = S.snap || { images: [] };
-  return snapPageInputs() + '<div class="btn-row"><button class="btn ghost sm" onclick="snapAddPage(\'cam\')">&#128196; Add another page</button><span class="muted">' + sn.images.length + ' page' + (sn.images.length === 1 ? '' : 's') + ' read</span></div><div id="snapOut" aria-live="polite"></div>';
+  return snapPageInputs() + '<div class="btn-row"><button class="btn ghost sm" onclick="snapAddPage(\'cam\')">' + icon('doc') + ' Add another page</button><span class="muted">' + sn.images.length + ' page' + (sn.images.length === 1 ? '' : 's') + ' read</span></div><div id="snapOut" aria-live="polite"></div>';
 }
 // After a few unclear photos: open the right blank form.
 function snapTypeIn() {
@@ -95,7 +95,7 @@ function snapTypeIn() {
 
 var SNAP_VITAL = { bp_monitor: 'blood_pressure', glucose_meter: 'glucose', pulse_oximeter: 'oxygen', thermometer: 'temperature' };
 function snapNote(d) {
-  var h = '<div class="ok-note">&#128247; Filled in from the photo: ' + esc(d.summary || '') + '. Check every number before saving.' +
+  var h = '<div class="ok-note">' + icon('camera') + ' Filled in from the photo: ' + esc(d.summary || '') + '. Check every number before saving.' +
     (d.uncertain && d.uncertain.length ? ' Left blank (not clear): ' + esc(d.uncertain.join(', ')) + '.' : '') + '</div>';
   var body = document.getElementById('sheetBody'), h2 = body && body.querySelector('h2');
   if (h2) h2.insertAdjacentHTML('afterend', h);
@@ -187,7 +187,7 @@ function snapTeam(d) {
   S.snapTeam = { rows: rows, facts: facts, doc: doc, summary: d.summary || '', uncertain: d.uncertain || [] };
   // Each box remembers what the photo said; editing one shows "Photo read: ..." right away.
   var box = function (id, label, val, cls) { return '<input id="' + id + '" class="' + (cls || '') + '" aria-label="' + label + '" placeholder="' + label + '" value="' + esc(val || '') + '" data-read="' + esc(val || '') + '" oninput="snapDiffHint(this)"><div class="muted photo-diff hidden" id="' + id + 'Diff"></div>'; };
-  openSheet('<h2 style="margin-top:0">&#128247; From the photo</h2>' +
+  openSheet('<h2 style="margin-top:0">' + icon('camera') + ' From the photo</h2>' +
     '<p class="muted">' + esc(d.summary || '') + '</p>' +
     (rows.length ? '<h3>Add to the Care team</h3><p class="muted">Fix anything it misread right here, and untick old or wrong entries. What the photo said is kept with each one, so a change can be traced later.</p>' +
       (d.uncertain && d.uncertain.length ? '<div class="card attention"><p><b>Not clear in the photo</b></p><ul>' + d.uncertain.map(function (u) { return '<li>' + esc(u) + '</li>'; }).join('') + '</ul></div>' : '') +
@@ -348,9 +348,9 @@ function snapMergeBottle(d, ex, g) {
   var clash = savedStr && bottleStr && savedStr !== bottleStr;
   var row = function (label, a, b, bad) { return '<tr' + (bad ? ' class="flag-text"' : '') + '><th>' + label + '</th><td>' + esc(a || '—') + '</td><td>' + esc(b || '—') + '</td></tr>'; };
   S.snapMerge = { d: d, id: ex.id, g: g, clash: clash ? 'Strength differs: saved ' + savedStr + ', bottle ' + bottleStr + '. Check with the pharmacist which is right.' : null };
-  openSheet('<h2 style="margin-top:0">&#128138; Same medicine as one already saved?</h2>' +
+  openSheet('<h2 style="margin-top:0">' + icon('pill') + ' Same medicine as one already saved?</h2>' +
     '<p>This bottle looks like <b>' + esc(ex.title) + '</b>, already in her medicines' + (fl.instructions && /medicine list/.test(fl.instructions) ? ' (from the medicine list)' : '') + '.</p>' +
-    (clash ? '<div class="card attention"><p><b>&#9888; ' + esc(S.snapMerge.clash) + '</b></p></div>' : '') +
+    (clash ? '<div class="card attention"><p><b>' + icon('alert') + ' ' + esc(S.snapMerge.clash) + '</b></p></div>' : '') +
     '<table class="cmp"><tr><th></th><th>Saved</th><th>Bottle</th></tr>' +
     row('Strength', savedStr || '', m.strength || '', clash) +
     row('Directions', [fl.dose, fl.when].filter(Boolean).join(', '), m.directions) +
@@ -391,7 +391,7 @@ function snapMeds(d) {
   var sn = S.snap, pid = sn.pid, rows = snapMergeRows((d.med_list || []).filter(function (m) { return m && (m.name || m.written); }));
   if (!rows.length) return snapResult({ decision: 'retake', retake_reason: 'No medicine lines could be read.', retake_tip: 'Lay the list flat in good light and fill the frame with it.', summary: d.summary });
   S.snapMeds = rows; S.snapListSource = d.list_source || 'handwritten list'; S.snapMedInfo = rows.map(function (m) { var ex = snapFindMed(pid, m.name, null); return { match: ex ? ex.id : null, g: null, found: null }; });
-  openSheet('<h2 style="margin-top:0">&#128138; Medicine list from the photo</h2>' +
+  openSheet('<h2 style="margin-top:0">' + icon('pill') + ' Medicine list from the photo</h2>' +
     '<p class="muted">' + esc(d.summary || '') + ' Each name is checked against the FDA list. Ticked lines become her medicines, or are added to the one already saved; you then set when each is given.</p>' +
     scrollList(rows.map(function (m, i) {
       var unsure = m.is_medicine !== 'yes';
@@ -411,7 +411,7 @@ function snapMeds(d) {
 function snapShowMatch(i) {
   var info = S.snapMedInfo[i], el = document.getElementById('smMatch' + i); if (!el) return;
   var ex = info.match && (State.records || []).find(function (r) { return r.id === info.match; });
-  el.innerHTML = ex ? '&#128279; Matches <b>' + esc(ex.title) + '</b>, already saved: this line and the list photo will be added to it.' : '';
+  el.innerHTML = ex ? icon('link') + ' Matches <b>' + esc(ex.title) + '</b>, already saved: this line and the list photo will be added to it.' : '';
 }
 function snapCheckMed(i) {
   var el = document.getElementById('smChk' + i), nm = document.getElementById('smName' + i), name = nm && nm.value.trim(), info = S.snapMedInfo[i];
@@ -423,7 +423,7 @@ function snapCheckMed(i) {
     info.g = g; info.found = !!g;
     var ex = snapFindMed(S.snap && S.snap.pid, name, g); info.match = ex ? ex.id : null; snapShowMatch(i);
     if (g) e2.innerHTML = '&#10003; Found: ' + esc(g.generic || g.brand || name.toLowerCase());
-    else { e2.innerHTML = '<span class="flag-text">&#9888; Not found in the FDA list. Check the spelling, or ask the pharmacist. (Vitamins and supplements are usually not on it; tick Add to keep it anyway.)</span>'; var c = document.getElementById('sm' + i); if (c) c.checked = false; }
+    else { e2.innerHTML = '<span class="flag-text">' + icon('alert') + ' Not found in the FDA list. Check the spelling, or ask the pharmacist. (Vitamins and supplements are usually not on it; tick Add to keep it anyway.)</span>'; var c = document.getElementById('sm' + i); if (c) c.checked = false; }
   });
 }
 function saveSnapMeds() {
@@ -497,7 +497,7 @@ closeSheet = function () { var pend = S.snapPending; _snapCloseSheet(); if (pend
 function checksFor(pid) { return (State.records || []).filter(function (r) { return !r.deleted && (r.for_profile_id || null) === (pid || null) && r.fields && r.fields.check; }); }
 function todayChecks(pid) {
   var rs = checksFor(pid); if (!rs.length) return '';
-  return '<div class="card"><h3>&#10067; To double-check</h3><p class="muted">Read from photos or lists, but not certain. Tap one to check it and mark it done.</p>' +
+  return '<div class="card"><h3>' + icon('question') + ' To double-check</h3><p class="muted">Read from photos or lists, but not certain. Tap one to check it and mark it done.</p>' +
     scrollList(rs.map(function (r) { return '<div class="list-item tappable" onclick="editRecord(\'' + r.id + '\')"><div class="grow"><b>' + esc(r.title || (RECORD_KINDS[r.kind] || {}).label || '') + '</b><div class="muted">' + esc(checkLine(r)) + '</div></div></div>'; }), 4) + '</div>';
 }
 /* Answering a flag: confirm what you can, keep the rest as a "maybe" that still needs approval.
@@ -505,9 +505,9 @@ function todayChecks(pid) {
  * otherwise it stays open showing "Maybe: ... (needs approval)". History records who answered. */
 function checkBoxHtml(r) {
   var f = r.fields || {}, a = f.check_answer || null, id = r.id;
-  var ans = a && (a.confirmed || a.maybe) ? '<p>' + (a.confirmed ? '&#10003; <b>Confirmed:</b> ' + esc(a.confirmed) : '') + (a.confirmed && a.maybe ? '<br>' : '') + (a.maybe ? '&#10067; <b>Maybe:</b> ' + esc(a.maybe) + ' <span class="muted">(needs approval)</span>' : '') + (a.at ? ' <span class="muted">&middot; ' + esc(localDay(a.at)) + '</span>' : '') + '</p>' : '';
+  var ans = a && (a.confirmed || a.maybe) ? '<p>' + (a.confirmed ? '&#10003; <b>Confirmed:</b> ' + esc(a.confirmed) : '') + (a.confirmed && a.maybe ? '<br>' : '') + (a.maybe ? icon('question') + ' <b>Maybe:</b> ' + esc(a.maybe) + ' <span class="muted">(needs approval)</span>' : '') + (a.at ? ' <span class="muted">&middot; ' + esc(localDay(a.at)) + '</span>' : '') + '</p>' : '';
   if (!f.check) return ans ? '<div class="card ok-note">' + ans + '</div>' : '';
-  return '<div class="card attention"><p><b>&#10067; Please double-check</b></p><div class="prewrap">' + esc(f.check) + '</div>' + ans +
+  return '<div class="card attention"><p><b>' + icon('question') + ' Please double-check</b></p><div class="prewrap">' + esc(f.check) + '</div>' + ans +
     '<details class="writer-only"><summary><b>Answer what you can</b></summary>' +
     '<label for="ckConf">What you can confirm</label><input id="ckConf" data-autosave value="' + esc((a && a.confirmed) || '') + '" placeholder="e.g. First name is Crystal">' +
     '<label for="ckMaybe">Still unsure (kept as a &ldquo;maybe&rdquo;)</label><input id="ckMaybe" data-autosave value="' + esc((a && a.maybe) || '') + '" placeholder="e.g. Last name, maybe Cannon">' +
@@ -540,7 +540,7 @@ function clearCheck(id) {
 function snapExercises(d) {
   var rows = (d.exercises || []).filter(function (x) { return x && x.name; }), doc = d.document || {};
   S.snapEx = { rows: rows, doc: doc };
-  openSheet('<h2 style="margin-top:0">&#129336; Therapy exercises from the photo</h2>' +
+  openSheet('<h2 style="margin-top:0">' + icon('exercise') + ' Therapy exercises from the photo</h2>' +
     '<p class="muted">' + esc(d.summary || '') + ' Ticked exercises go to File &rarr; Therapy.</p>' +
     (rows.length ? scrollList(rows.map(function (x, i) {
       return '<label class="check"><input type="checkbox" id="sx' + i + '" checked> <b>' + esc(x.name) + '</b> <span class="muted">' + esc([x.how, x.how_often].filter(Boolean).join(' · ')) + '</span>' + (x.notes ? '<div class="muted">' + esc(x.notes) + '</div>' : '') + '</label>';
@@ -616,12 +616,12 @@ function formSnapFile(input) {
   }).then(function (d) {
     var o = document.getElementById('fsOut'); if (!o) return;
     if (d.decision === 'retake') {
-      o.innerHTML = '<div class="card attention"><b>One more photo, please.</b> ' + esc(d.retake_reason || 'Part of it was not clear.') + (d.retake_tip ? '<br>&#128161; ' + esc(d.retake_tip) : '') +
+      o.innerHTML = '<div class="card attention"><b>One more photo, please.</b> ' + esc(d.retake_reason || 'Part of it was not clear.') + (d.retake_tip ? '<br>' + icon('bulb') + ' ' + esc(d.retake_tip) : '') +
         '<br><span class="muted">' + (fs.tries >= SNAP_MAX_TRIES ? 'Still unclear after ' + fs.tries + ' photos; you can type it in.' : 'Your earlier photo is kept so they can be combined.') + '</span></div>';
       return;
     }
     var n = formSnapApply(d.values || []);
-    o.innerHTML = '<div class="ok-note">&#128247; ' + esc(d.summary || '') + ' ' + (n ? 'Filled ' + n + ' field' + (n > 1 ? 's' : '') + ' (outlined). Check them before saving.' : 'Nothing on this form could be filled from it.') +
+    o.innerHTML = '<div class="ok-note">' + icon('camera') + ' ' + esc(d.summary || '') + ' ' + (n ? 'Filled ' + n + ' field' + (n > 1 ? 's' : '') + ' (outlined). Check them before saving.' : 'Nothing on this form could be filled from it.') +
       (d.uncertain && d.uncertain.length ? ' Left blank (not clear): ' + esc(d.uncertain.join(', ')) + '.' : '') + '</div>' + aiWrongLink('fill_form');
   }).catch(function (e) { var o = document.getElementById('fsOut'); if (o) o.textContent = 'Could not read the photo: ' + e.message; });
 }

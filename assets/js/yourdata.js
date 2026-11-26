@@ -20,7 +20,7 @@ var DATA_PROCESSORS = [
 function eraseWhen() { return State.eraseAfter ? new Date(State.eraseAfter).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }) : ''; }
 function eraseBanner() {
   if (!State.eraseAfter) return '';
-  return '<div class="card" style="border:2px solid var(--bad)"><h3 class="flag-text" style="margin-top:0">&#9888; This family will be deleted on ' + esc(eraseWhen()) + '</h3>' +
+  return '<div class="card" style="border:2px solid var(--bad)"><h3 class="flag-text" style="margin-top:0">' + icon('alert') + ' This family will be deleted on ' + esc(eraseWhen()) + '</h3>' +
     '<p>Everything (records, photos, history and sign-ins) will be erased for good. Until then you can read and export, but nothing can be added or changed, and the AI is off.</p>' +
     (State.role === 'owner' ? '<div class="btn-row"><button class="btn" onclick="cancelErase()">Cancel the deletion</button><button class="btn ghost" onclick="showScreen(\'settings\')">Export first</button></div>' : '<p class="muted">Only an owner can cancel it.</p>') + '</div>';
 }

@@ -99,7 +99,7 @@ function logOutput(id) {
       '<label>Color</label><div class="chips" role="radiogroup" id="oColor">' + OUTPUT_COLORS.map(function (c) { var on = e && e.output_color === c[0]; return '<button type="button" role="radio" aria-checked="' + !!on + '" class="chip swatch' + (on ? ' on' : '') + '" data-v="' + c[0] + '" onclick="pickChip(\'oColor\', this, true)"><i style="background:' + c[2] + '"></i>' + c[1] + '</button>'; }).join('') + '</div>' +
       '<label class="check"><input id="oClots" type="checkbox"' + (e && e.clots ? ' checked' : '') + '> Clots</label>' +
       '<label for="oNote">Note</label><input id="oNote" placeholder="cloudy, strong smell, burning..." value="' + esc(e ? e.eaten_note || '' : '') + '">' +
-      '<label>Photo</label><div class="btn-row" style="margin-top:0"><button type="button" class="btn ghost sm" onclick="document.getElementById(\'oCam\').click()">&#128247; Take photo</button><button type="button" class="btn ghost sm" onclick="document.getElementById(\'oLib\').click()">&#128444; Choose photo</button></div>' +
+      '<label>Photo</label><div class="btn-row" style="margin-top:0"><button type="button" class="btn ghost sm" onclick="document.getElementById(\'oCam\').click()">' + icon('camera') + ' Take photo</button><button type="button" class="btn ghost sm" onclick="document.getElementById(\'oLib\').click()">' + icon('image') + ' Choose photo</button></div>' +
       '<input id="oCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="pickOutputPhoto(this)"><input id="oLib" type="file" accept="image/*" class="hidden" onchange="pickOutputPhoto(this)">' +
       '<img id="oPrev" class="photo-thumb hidden" alt="Output photo preview">' +
       '<p class="muted">No calories or sodium are counted for outputs.</p>' +
@@ -342,7 +342,7 @@ function checkPhoneField(id) {
     if (!document.getElementById(id)) return;
     if (!res || res.available === false) { hint.textContent = 'Number checking is not set up yet (it needs Twilio keys in the cloud). The number is saved as typed.'; return; }
     S.phoneCheck = { id: id, res: res };
-    if (!res.valid) { hint.textContent = '⚠ ' + (res.error || 'This number does not look valid. Check the digits.'); return; }
+    if (!res.valid) { hint.textContent = (res.error || 'This number does not look valid. Check the digits.'); return; }
     if (res.national) input.value = res.national;
     hint.textContent = phoneTypeText(res.line_type, res.carrier) + (res.line_type === 'landline' ? ' (it can take calls, not texts)' : '');
   }).catch(function (e) { hint.textContent = 'Could not check: ' + e.message; });

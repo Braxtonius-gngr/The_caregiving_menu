@@ -9,10 +9,10 @@ function renderAsk(arg) {
   var pid = (arg && arg.pid) || S.askPid || State.activeProfile || (State.profiles[0] && State.profiles[0].id) || null;
   S.askPid = pid; S.askLog = S.askLog || [];
   var prof = State.profiles.find(function (p) { return p.id === pid; }) || { person_name: '' };
-  return '<div class="card"><h3>&#128172; Ask her file' + (prof.person_name ? ': ' + esc(prof.person_name) : '') + '</h3>' +
+  return '<div class="card"><h3>' + icon('chat') + ' Ask her file' + (prof.person_name ? ': ' + esc(prof.person_name) : '') + '</h3>' +
     '<p class="muted">Answers come only from what is saved in the app, with the entries they came from. If it is not in her file, it says so. It does not give medical advice.</p>' +
     '<textarea id="askQ" data-autosave rows="2" placeholder="Ask anything about her care, medicines, visits, numbers..."></textarea>' +
-    '<div class="btn-row"><button class="btn" onclick="askRun()">Ask</button>' + ((window.SpeechRecognition || window.webkitSpeechRecognition) ? '<button class="btn ghost" onclick="askListen()">&#127908; Say it</button>' : '') + '</div>' +
+    '<div class="btn-row"><button class="btn" onclick="askRun()">Ask</button>' + ((window.SpeechRecognition || window.webkitSpeechRecognition) ? '<button class="btn ghost" onclick="askListen()">' + icon('mic') + ' Say it</button>' : '') + '</div>' +
     '<label class="muted" for="askCmp">Compare models (for testing)</label><select id="askCmp" onchange="S.askCmp=this.value"><option value="">Off</option><option value="sonnet"' + (S.askCmp === 'sonnet' ? ' selected' : '') + '>Opus vs Sonnet</option><option value="haiku"' + (S.askCmp === 'haiku' ? ' selected' : '') + '>Opus vs Haiku</option></select>' +
     '<div class="chips">' + ASK_SUGGEST.map(function (q) { return '<button class="chip" onclick="document.getElementById(\'askQ\').value=this.textContent;askRun()">' + esc(q) + '</button>'; }).join('') + '</div></div>' +
     '<div id="askOut" aria-live="polite"></div>' +

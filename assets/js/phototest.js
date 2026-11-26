@@ -12,14 +12,14 @@ function renderPhotoTest() {
   return '<div class="card"><h3>Photo reader test</h3>' +
     '<p>Add photos you already know the right answer to: cuff and meter screens, the scale, pill bottles, a lab report, a care team sheet. Include a few bad ones on purpose (glare, blurry, cut off).</p>' +
     '<p class="muted">For each photo, type the right answer in plain words, e.g. <i>138/72 pulse 64</i>, <i>furosemide 40 mg</i>, <i>weight 151.2</i>. For a photo that is too bad to read, type <b>retake</b>. Photos stay on this phone and nothing is added to her file.</p>' +
-    '<div class="btn-row"><button class="btn" onclick="document.getElementById(\'ptAdd\').click()">&#128247; Add photos</button>' +
+    '<div class="btn-row"><button class="btn" onclick="document.getElementById(\'ptAdd\').click()">' + icon('camera') + ' Add photos</button>' +
     (PT.cases.length ? '<button class="btn" ' + (PT.running ? 'disabled ' : '') + 'onclick="runPhotoTest()">' + (PT.running ? 'Running...' : 'Run the test') + '</button><button class="btn ghost" onclick="copyPhotoTest()">Copy results</button><button class="btn ghost" onclick="PT.cases=[];refresh()">Clear</button>' : '') + '</div>' +
     '<label for="ptCmp">Compare with a cheaper model</label><select id="ptCmp" onchange="PT.compare=this.value"><option value="">No, just the current model</option><option value="sonnet"' + (PT.compare === 'sonnet' ? ' selected' : '') + '>Sonnet (about half the cost)</option><option value="haiku"' + (PT.compare === 'haiku' ? ' selected' : '') + '>Haiku (much cheaper)</option></select>' +
     '<input id="ptAdd" type="file" accept="image/*" multiple class="hidden" onchange="addTestPhotos(this)"></div>' +
     ptCompareSummary() +
     (done.length ? '<div class="card"><h3>Results: ' + done.length + ' of ' + PT.cases.length + ' photos' + (PT.ran2 ? ' (Opus)' : '') + '</h3>' +
       '<p>&#10003; Correct: <b>' + count('correct') + '</b> &middot; Rightly asked for a retake: <b>' + count('retake_ok') + '</b> &middot; Missed something: <b>' + count('missed') + '</b></p>' +
-      '<p class="' + (count('wrong') + count('should_retake') ? 'flag-text' : '') + '">&#9888; Wrong number: <b>' + count('wrong') + '</b> &middot; Read it when it should have asked: <b>' + count('should_retake') + '</b> &middot; Asked for a retake on a good photo: <b>' + count('retake_extra') + '</b></p>' +
+      '<p class="' + (count('wrong') + count('should_retake') ? 'flag-text' : '') + '">' + icon('alert') + ' Wrong number: <b>' + count('wrong') + '</b> &middot; Read it when it should have asked: <b>' + count('should_retake') + '</b> &middot; Asked for a retake on a good photo: <b>' + count('retake_extra') + '</b></p>' +
       '<p class="muted">Wrong numbers are the ones that matter most. Send me the copied results and I will tune the reader.</p></div>' : '') +
     PT.cases.map(function (c, i) {
       return '<div class="card row"><img class="photo-thumb" alt="" src="' + c.img + '"><div class="grow">' +
@@ -30,7 +30,7 @@ function renderPhotoTest() {
         '</div><button class="icon-btn" aria-label="Remove" onclick="PT.cases.splice(' + i + ',1);refresh()">&times;</button></div>';
     }).join('');
 }
-var PT_LABEL = { correct: '✓ Correct', missed: 'Missed something', wrong: '⚠ Wrong number', retake_ok: '✓ Rightly asked for a retake', should_retake: '⚠ Read it, but should have asked for a retake', retake_extra: 'Asked for a retake on a readable photo' };
+var PT_LABEL = { correct: '✓ Correct', missed: 'Missed something', wrong: 'Wrong number', retake_ok: '✓ Rightly asked for a retake', should_retake: 'Read it, but should have asked for a retake', retake_extra: 'Asked for a retake on a readable photo' };
 
 function addTestPhotos(input) {
   var files = Array.prototype.slice.call(input.files || []); if (!files.length) return;

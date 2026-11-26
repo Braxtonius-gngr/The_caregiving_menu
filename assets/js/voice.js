@@ -6,9 +6,9 @@
 function sayIt(pid) {
   S.say = { pid: pid || null, text: '', listening: false };
   var can = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-  openSheet('<h2 style="margin-top:0">&#127908; Say it</h2>' +
+  openSheet('<h2 style="margin-top:0">' + icon('mic') + ' Say it</h2>' +
     '<p>Say what happened, as you would tell family: <i>&ldquo;She drank 8 ounces of water,&rdquo;</i> <i>&ldquo;gave her the morning pills,&rdquo;</i> <i>&ldquo;BP 142 over 80, pulse 70,&rdquo;</i> <i>&ldquo;urine 300, dark yellow.&rdquo;</i> Several things at once is fine.</p>' +
-    (can ? '<div class="btn-row"><button class="btn" id="sayMic" onclick="sayListen()">&#127908; Tap and talk</button></div>' : '<p class="muted">Tap the microphone on your keyboard to talk, or type.</p>') +
+    (can ? '<div class="btn-row"><button class="btn" id="sayMic" onclick="sayListen()">' + icon('mic') + ' Tap and talk</button></div>' : '<p class="muted">Tap the microphone on your keyboard to talk, or type.</p>') +
     '<div id="sayLive" class="muted" aria-live="polite"></div>' +
     '<label for="sayText">What you said (you can fix it)</label><textarea id="sayText" data-autosave rows="3" placeholder="She drank 8 ounces of water at 2"></textarea>' +
     '<div class="btn-row"><button class="btn writer-only" onclick="sayRun()">Make entries</button><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>' +
@@ -28,7 +28,7 @@ function sayListen() {
   };
   rec.onerror = function (ev) { if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') toast('Allow the microphone for this app to listen'); };
   rec.onend = function () {
-    sa.rec = null; if (btn) btn.innerHTML = '&#127908; Tap and talk';
+    sa.rec = null; if (btn) btn.innerHTML = icon('mic') + ' Tap and talk';
     if (live) live.textContent = '';
     if (ta && ta.value.trim() && ta.value.trim() !== base) sayRun(); // read it as soon as she stops talking
   };
@@ -56,16 +56,16 @@ function sayLine(it, meds) {
   var amt = it.amount != null ? it.amount + ' ' + (it.unit || '') : '';
   var at = it.time ? ' at ' + it.time : '';
   switch (it.type) {
-    case 'drink': return '&#129380; Drink: <b>' + esc(it.what || 'drink') + '</b>' + (amt ? ', ' + esc(amt.trim()) : ', <span class="flag-text">how much?</span>') + (it.portion != null && it.portion < 1 ? ', drank ' + Math.round(it.portion * 100) + '%' : '') + esc(at);
-    case 'meal': return '&#127869; Ate: <b>' + esc(it.what || 'food') + '</b>' + (it.portion != null && it.portion < 1 ? ', about ' + Math.round(it.portion * 100) + '% of it' : '') + esc(at);
-    case 'output': return '&#128701; ' + esc(OUTPUT_TYPES[it.output_type] || 'Output') + (amt ? ': ' + esc(amt.trim()) : '') + (it.color ? ', ' + esc(colorName(it.color)) : '') + (it.clots ? ', <b>clots</b>' : '') + esc(at);
-    case 'vital': return '&#10084;&#65039; ' + esc((VITALS[it.vital_kind] || ['Reading'])[0]) + ' <b>' + esc(it.value) + (it.value2 != null ? '/' + esc(it.value2) : '') + '</b>' + (it.pulse != null ? ', pulse ' + esc(it.pulse) : '') + (it.rhythm ? ', ' + esc(rhythmName(it.rhythm)) : '') + esc(at);
-    case 'weight': return '&#9878;&#65039; Weight <b>' + esc(it.value) + ' ' + esc(it.unit || State.weightUnit || 'lb') + '</b>' + esc(at);
+    case 'drink': return icon('cup') + ' Drink: <b>' + esc(it.what || 'drink') + '</b>' + (amt ? ', ' + esc(amt.trim()) : ', <span class="flag-text">how much?</span>') + (it.portion != null && it.portion < 1 ? ', drank ' + Math.round(it.portion * 100) + '%' : '') + esc(at);
+    case 'meal': return icon('meal') + ' Ate: <b>' + esc(it.what || 'food') + '</b>' + (it.portion != null && it.portion < 1 ? ', about ' + Math.round(it.portion * 100) + '% of it' : '') + esc(at);
+    case 'output': return icon('output') + ' ' + esc(OUTPUT_TYPES[it.output_type] || 'Output') + (amt ? ': ' + esc(amt.trim()) : '') + (it.color ? ', ' + esc(colorName(it.color)) : '') + (it.clots ? ', <b>clots</b>' : '') + esc(at);
+    case 'vital': return icon('vitals') + ' ' + esc((VITALS[it.vital_kind] || ['Reading'])[0]) + ' <b>' + esc(it.value) + (it.value2 != null ? '/' + esc(it.value2) : '') + '</b>' + (it.pulse != null ? ', pulse ' + esc(it.pulse) : '') + (it.rhythm ? ', ' + esc(rhythmName(it.rhythm)) : '') + esc(at);
+    case 'weight': return icon('scale') + ' Weight <b>' + esc(it.value) + ' ' + esc(it.unit || State.weightUnit || 'lb') + '</b>' + esc(at);
     case 'dose': {
       var names = sayDoseTargets(it, meds).map(function (m) { return m.name; });
-      return '&#128138; ' + esc(names.length ? names.join(', ') : (it.what || 'medicine')) + ': <b>' + esc(it.status || 'given') + '</b>' + (it.slot ? ' (' + esc(slotName(it.slot).toLowerCase()) + ')' : '') + (it.note ? ', ' + esc(it.note) : '') + esc(at);
+      return icon('pill') + ' ' + esc(names.length ? names.join(', ') : (it.what || 'medicine')) + ': <b>' + esc(it.status || 'given') + '</b>' + (it.slot ? ' (' + esc(slotName(it.slot).toLowerCase()) + ')' : '') + (it.note ? ', ' + esc(it.note) : '') + esc(at);
     }
-    default: return '&#128221; Note: ' + esc(it.note || it.what || '');
+    default: return icon('update') + ' Note: ' + esc(it.note || it.what || '');
   }
 }
 // "the morning pills" -> every medicine given in that slot; otherwise the one medicine named.

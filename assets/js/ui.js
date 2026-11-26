@@ -36,6 +36,16 @@ var ICONS = {
   barcode: '<path d="M4 6v12M7 6v12M9.5 6v12M13 6v12M15.5 6v12M18 6v12M20.5 6v12"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
   books: '<path d="M4 4h5v16H4zM10.5 4h4v16h-4z"/><path d="M16 5.2l3.6-1 2.2 15-3.6 1z"/>',
+  drop: '<path d="M12 3s-5.5 6.2-5.5 10.2a5.5 5.5 0 0 0 11 0C17.5 9.2 12 3 12 3z"/>',
+  chart: '<path d="M4 4v16h16"/><path d="M7.5 14.5l3.5-4 3 2.5 4.5-6"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  star: '<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>',
+  bulb: '<path d="M9 17h6M10 20.5h4"/><path d="M12 3.5a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2v.6h5v-.6c0-.8.4-1.5 1-2A6 6 0 0 0 12 3.5z"/>',
+  cloud: '<path d="M7 18.5h10.5a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.6-1.4A4.5 4.5 0 0 0 7 18.5z"/>',
+  pencil: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  signal: '<path d="M5 19v-3M9.5 19v-6.5M14 19V9.5M18.5 19V5.5"/>',
+  question: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/>',
+  pause: '<path d="M9 5v14M15 5v14"/>',
   clip: '<path d="M20.5 11.5l-8.3 8.3a5 5 0 0 1-7-7L13.6 4.4a3.3 3.3 0 0 1 4.7 4.7l-8.4 8.4a1.7 1.7 0 0 1-2.4-2.4l7.7-7.7"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   heart: '<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/>'
@@ -120,7 +130,7 @@ function profileBadge(recipeId) {
   var p = State.activeProfile ? State.profiles.find(function (x) { return x.id === State.activeProfile; }) : null;
   if (!p) return '';
   var f = S.recipeInfo[recipeId].fits[p.id];
-  var sym = { ok: '&#10003;', warn: '&#9888;', bad: '&#10007;' }[f.level];
+  var sym = { ok: '&#10003;', warn: icon('alert'), bad: '&#10007;' }[f.level];
   return '<span class="badge ' + f.level + '" title="' + esc(f.reasons.join('; ')) + '">' + sym + ' ' + esc(p.person_name) + '</span>';
 }
 function recipeCard(r) {
@@ -130,7 +140,7 @@ function recipeCard(r) {
     (r.photo_data || r.photo_path ? '<img class="photo-thumb" alt="" data-photo="' + r.id + '" data-store="recipes"' + (r.photo_data ? ' src=\"' + esc(r.photo_data) + '\"' : '') + '>' : '') +
     '<div class="grow"><h3>' + esc(r.title) + '</h3>' +
     '<div class="muted">' + (r.cuisine ? esc(r.cuisine) + ' · ' : '') + (info.nut.perServing.kcal ? '~' + info.nut.perServing.kcal + ' kcal/serving · ' : '') + info.cov.have + '/' + info.cov.total + ' on hand' + (miss ? ' · need ' + miss : '') + '</div>' +
-    '<div class="chips" style="margin:4px 0 0">' + (r.review_flag ? '<span class="badge warn">&#9888; check</span>' : '') + profileBadge(r.id) + (r.meal_type || []).map(function (m) { return '<span class="badge">' + esc(m) + '</span>'; }).join('') + '</div>' +
+    '<div class="chips" style="margin:4px 0 0">' + (r.review_flag ? '<span class="badge warn">' + icon('alert') + ' check</span>' : '') + profileBadge(r.id) + (r.meal_type || []).map(function (m) { return '<span class="badge">' + esc(m) + '</span>'; }).join('') + '</div>' +
     '</div><div class="ring" style="--pct:' + info.cov.pct + '" title="' + info.cov.pct + '% of ingredients on hand"><span>' + info.cov.pct + '%</span></div></div>';
 }
 function dvTiles(totals, targets) {
@@ -674,7 +684,7 @@ function renderPantry() {
   var byLoc = {}; items.forEach(function (p) { (byLoc[p.location || 'pantry'] = byLoc[p.location || 'pantry'] || []).push(p); });
   var expiring = Logic.expiringSoon(State.pantry, 4);
   return '<div class="search"><input placeholder="Search pantry" value="' + esc(State.pq || '') + '" oninput="State.pq=this.value;refresh()"></div>' +
-    '<div class="btn-row"><button class="btn" onclick="editPantryItem()">+ Add item</button><button class="btn ghost" onclick="scanGroceries(false)">&#128247; Photo of groceries</button><button class="btn ghost" onclick="scanGroceries(true)">&#128444; From saved photos</button><button class="btn ghost" onclick="showScreen(\'scan\')">Scan receipt</button></div>' + groceryInputs() +
+    '<div class="btn-row"><button class="btn" onclick="editPantryItem()">+ Add item</button><button class="btn ghost" onclick="scanGroceries(false)">' + icon('camera') + ' Photo of groceries</button><button class="btn ghost" onclick="scanGroceries(true)">' + icon('image') + ' From saved photos</button><button class="btn ghost" onclick="showScreen(\'scan\')">Scan receipt</button></div>' + groceryInputs() +
     (expiring.length ? '<div class="note">Expiring soon: ' + expiring.map(function (p) { return esc(S.ingById[p.ingredient_id].name); }).join(', ') + '</div>' : '') +
     (items.length ? ['fridge', 'freezer', 'pantry', 'counter'].filter(function (l) { return byLoc[l]; }).map(function (loc) {
       return '<h2>' + loc + ' (' + byLoc[loc].length + ')</h2><div class="card">' + byLoc[loc].sort(function (a, b) { return S.ingById[a.ingredient_id].name.localeCompare(S.ingById[b.ingredient_id].name); }).map(function (p) {
@@ -753,7 +763,7 @@ function logFood() {
     openSheet('<h2 style="margin-top:0">Log a meal</h2>' +
       '<label>Who is eating?</label><select id="lWho" onchange="if(this.value===\'__new\')addEaterInline(this)"><option value="">Me</option>' + State.profiles.map(function (p) { return '<option value="' + p.id + '" ' + (who === p.id ? 'selected' : '') + '>' + esc(p.person_name) + '</option>'; }).join('') + '<option value="__new">+ Someone new...</option></select>' +
       '<label>When</label><input id="lWhen" type="datetime-local" value="' + pad(new Date()) + '">' +
-      '<label>Photo</label><div class="btn-row" style="margin-top:0"><button type="button" class="btn ghost sm" onclick="document.getElementById(\'lPhotoCam\').click()">&#128247; Take photo</button><button type="button" class="btn ghost sm" onclick="document.getElementById(\'lPhoto\').click()">&#128444; Choose photo</button></div>' +
+      '<label>Photo</label><div class="btn-row" style="margin-top:0"><button type="button" class="btn ghost sm" onclick="document.getElementById(\'lPhotoCam\').click()">' + icon('camera') + ' Take photo</button><button type="button" class="btn ghost sm" onclick="document.getElementById(\'lPhoto\').click()">' + icon('image') + ' Choose photo</button></div>' +
       '<input id="lPhotoCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="previewLogPhoto(this)"><input id="lPhoto" type="file" accept="image/*" class="hidden" onchange="previewLogPhoto(this)">' +
       '<img id="lPhotoPrev" class="photo-thumb hidden" alt="Meal photo preview">' +
       '<label>Recipe (if it was one of yours)</label><select id="lRecipe"><option value="">—</option>' + State.recipes.map(function (r) { return '<option value="' + r.id + '">' + esc(r.title) + '</option>'; }).join('') + '</select>' +
@@ -926,7 +936,7 @@ function photoThumb(e) {
 }
 function photoStatus(e) {
   if (!Sync.enabled() || (!e.photo_data && !e.photo_path)) return '';
-  return e.photo_path ? ' · &#9729; photo saved' : ' · photo uploads on next sync';
+  return e.photo_path ? ' · ' + icon('cloud') + ' photo saved' : ' · photo uploads on next sync';
 }
 // Fill in thumbnails that only exist in the cloud. Called after the diary renders.
 // Fill in photos that only exist in the cloud. Runs after every screen render.
@@ -974,7 +984,7 @@ function editDiaryEntry(id, focusNote) {
   openSheet('<h2 style="margin-top:0">Meal details</h2>' +
     '<img id="eBigPhoto" class="photo-big' + (hasPhoto ? '' : ' hidden') + '" alt="Meal photo">' +
     '<fieldset id="eFields" style="border:0;padding:0;margin:0">' +
-    '<div class="btn-row"><button type="button" class="btn ghost sm" onclick="document.getElementById(\'ePhotoCam\').click()">&#128247; Take photo</button><button type="button" class="btn ghost sm" onclick="document.getElementById(\'ePhotoLib\').click()">&#128444; Choose photo</button><button type="button" id="eRemovePhoto" class="btn ghost sm' + (hasPhoto ? '' : ' hidden') + '" onclick="removeEditPhoto()">Remove photo</button></div>' +
+    '<div class="btn-row"><button type="button" class="btn ghost sm" onclick="document.getElementById(\'ePhotoCam\').click()">' + icon('camera') + ' Take photo</button><button type="button" class="btn ghost sm" onclick="document.getElementById(\'ePhotoLib\').click()">' + icon('image') + ' Choose photo</button><button type="button" id="eRemovePhoto" class="btn ghost sm' + (hasPhoto ? '' : ' hidden') + '" onclick="removeEditPhoto()">Remove photo</button></div>' +
     '<input id="ePhotoCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="pickEditPhoto(this)"><input id="ePhotoLib" type="file" accept="image/*" class="hidden" onchange="pickEditPhoto(this)">' +
     '<label for="eWho">Who ate it</label><select id="eWho"><option value="">Me</option>' + State.profiles.map(function (p) { return '<option value="' + p.id + '"' + (e.for_profile_id === p.id ? ' selected' : '') + '>' + esc(p.person_name) + '</option>'; }).join('') + '</select>' +
     '<label for="eWhen">When</label><input id="eWhen" type="datetime-local" value="' + localDay(e.eaten_at) + 'T' + localTime(e.eaten_at) + '">' +
@@ -1132,7 +1142,7 @@ function fluidsLine(entries) {
   var drinks = entries.filter(function (e) { return e.entry_kind === 'drink' && e.volume_ml; });
   if (!drinks.length) return '';
   var ml = drinks.reduce(function (t, e) { return t + e.volume_ml * (e.portion_mult || 1); }, 0);
-  return '<div class="note">&#128167; Fluids: ' + fluidLabel(ml) + ' (' + Math.round(ml) + ' ml) from ' + drinks.length + ' drink' + (drinks.length === 1 ? '' : 's') + '</div>';
+  return '<div class="note">' + icon('drop') + ' Fluids: ' + fluidLabel(ml) + ' (' + Math.round(ml) + ' ml) from ' + drinks.length + ' drink' + (drinks.length === 1 ? '' : 's') + '</div>';
 }
 var ZERO_CAL_DRINK = /^(plain |still |sparkling |tap |bottled )?(water|ice water|sparkling water|seltzer|club soda)$/i;
 function logDrink() {
@@ -1178,8 +1188,8 @@ function plateNote(e) {
 }
 function plateButtons(e) {
   if (e.entry_kind === 'drink' || e.entry_kind === 'output' || e.plate_status) return '';
-  return ((e.photo_data || e.photo_path) ? ' <button class="btn sm ghost writer-only" onclick="event.stopPropagation();pickAfterPhoto(\'' + e.id + '\')">&#128247; After photo</button>' : '') +
-    ' <button class="btn sm ghost writer-only" onclick="event.stopPropagation();editDiaryEntry(\'' + e.id + '\', true)">&#9998; Ate part</button>' +
+  return ((e.photo_data || e.photo_path) ? ' <button class="btn sm ghost writer-only" onclick="event.stopPropagation();pickAfterPhoto(\'' + e.id + '\')">' + icon('camera') + ' After photo</button>' : '') +
+    ' <button class="btn sm ghost writer-only" onclick="event.stopPropagation();editDiaryEntry(\'' + e.id + '\', true)">' + icon('pencil') + ' Ate part</button>' +
     ' <button class="btn sm ghost writer-only" onclick="event.stopPropagation();markPlateFinished(\'' + e.id + '\')">&#10003; Finished plate</button>';
 }
 function afterSection(e) {
@@ -1190,7 +1200,7 @@ function afterSection(e) {
     '<p class="muted">' + (e.plate_status === 'finished' ? 'Plate finished: everything was eaten.' : e.plate_status === 'leftovers' ? 'Ate part of it.' + (e.served_kcal > 0 ? ' Served ~' + Math.round(e.served_kcal) + ' kcal; ate ~' + Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal.' : '') : 'Take a photo of what was left, or describe it below, to count only what was eaten.') + '</p>' +
     '<label for="eNote">What was actually eaten (or added)</label><textarea id="eNote" rows="2" placeholder="ate all but half the toast, half the eggs, added 2 salt packets">' + esc(e.eaten_note || '') + '</textarea>' +
     '<div class="btn-row"><button type="button" class="btn sm" onclick="saveEatenNote(\'' + e.id + '\')">Update what was eaten</button></div>' +
-    '<div class="btn-row"><button type="button" class="btn ghost sm" onclick="pickAfterPhoto(\'' + e.id + '\')">&#128247; ' + (has ? 'Retake' : 'Take') + ' after photo</button><button type="button" class="btn ghost sm" onclick="pickAfterPhoto(\'' + e.id + '\', true)">&#128444; Choose after photo</button>' +
+    '<div class="btn-row"><button type="button" class="btn ghost sm" onclick="pickAfterPhoto(\'' + e.id + '\')">' + icon('camera') + ' ' + (has ? 'Retake' : 'Take') + ' after photo</button><button type="button" class="btn ghost sm" onclick="pickAfterPhoto(\'' + e.id + '\', true)">' + icon('image') + ' Choose after photo</button>' +
     (e.plate_status !== 'finished' ? '<button type="button" class="btn ghost sm" onclick="markPlateFinished(\'' + e.id + '\')">&#10003; Finished plate</button>' : '') +
     (e.plate_status ? '<button type="button" class="btn ghost sm" onclick="clearPlateStatus(\'' + e.id + '\')">Clear</button>' : '') + '</div>';
 }

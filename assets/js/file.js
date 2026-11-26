@@ -44,7 +44,7 @@ function renderFile(arg) {
     (prof ? '' : '<p class="muted">Add the person you care for in Settings first.</p>') +
     '<div class="seg scrolls" role="tablist">' + FILE_SECTIONS.map(function (s) { return '<button role="tab" aria-selected="' + (s[0] === section) + '" class="seg-btn' + (s[0] === section ? ' on' : '') + '" onclick="' + go({ pid: pid, section: s[0] }) + '">' + s[1] + '</button>'; }).join('') + '</div>';
   if (!prof) return head;
-  head += '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'ask\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">&#128172; Ask her file</button></div>';
+  head += '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'ask\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">' + icon('chat') + ' Ask her file</button></div>';
   var body = { summary: fileSummary, team: fileTeam, labs: fileLabs, visits: fileVisits, therapy: fileTherapy, documents: fileDocuments, updates: fileUpdates, export: fileExport }[section] || fileSummary;
   return head + body(pid, prof);
 }
@@ -126,7 +126,7 @@ function fileVisits(pid) {
   var upcoming = rs.filter(function (r) { return r.occurred_at > now; }).sort(function (a, b) { return a.occurred_at < b.occurred_at ? -1 : 1; });
   var past = rs.filter(function (r) { return !(r.occurred_at > now); }).sort(byDateDesc);
   var card = function (r) { var fl = r.fields || {}; return recordCard(r, esc(fmtWhen(r.occurred_at, true)) + (fl.where ? ' · ' + esc(fl.where) : ''), esc([fl.why, fl.changed ? 'Changed: ' + fl.changed : ''].filter(Boolean).join(' · ').slice(0, 160))); };
-  return '<div class="row between"><h2>Visits</h2><span>' + addBtn('visit', pid) + ' <button class="btn sm ghost writer-only" onclick="scribeIt(' + (pid ? '\'' + pid + '\'' : 'null') + ')">&#127897; Scribe</button></span></div>' +
+  return '<div class="row between"><h2>Visits</h2><span>' + addBtn('visit', pid) + ' <button class="btn sm ghost writer-only" onclick="scribeIt(' + (pid ? '\'' + pid + '\'' : 'null') + ')">' + icon('mic') + ' Scribe</button></span></div>' +
     (upcoming.length ? '<h3>Coming up</h3>' + upcoming.map(card).join('') : '') +
     '<h3>Past visits</h3>' + (past.length ? past.map(card).join('') : '<p class="muted">After each visit, note what they said and what changed, and photograph the After Visit Summary.</p>');
 }
@@ -136,16 +136,16 @@ function fileDocuments(pid) {
   var rs = recordsOf(pid, ['document', 'directive']).sort(byDateDesc), groups = {}, order = ['Directive', 'Insurance card', 'ID', 'Discharge papers', 'Report', 'Bill', 'Misc'];
   rs.forEach(function (r) { var g = docFolder(r); (groups[g] = groups[g] || []).push(r); });
   var card = function (r) { var fl = r.fields || {}, ex = (fl.extra || []).slice(0, 2).map(function (f) { return f.label + ': ' + f.value; }).join(' · '); return recordCard(r, esc(fmtWhen(r.occurred_at)), ex ? esc(ex) : ''); };
-  return '<div class="row between"><h2>Documents</h2><span>' + addBtn('document', pid) + ' <button class="btn sm ghost writer-only" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ')">&#128247; Snap a paper</button></span></div>' +
+  return '<div class="row between"><h2>Documents</h2><span>' + addBtn('document', pid) + ' <button class="btn sm ghost writer-only" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ')">' + icon('camera') + ' Snap a paper</button></span></div>' +
     (rs.length ? order.concat(Object.keys(groups).filter(function (g) { return order.indexOf(g) < 0; })).filter(function (g) { return groups[g]; }).map(function (g) {
-      return '<details class="doc-folder" open><summary><b>&#128193; ' + esc(g) + '</b> <span class="muted">(' + groups[g].length + ')</span></summary>' + groups[g].map(card).join('') + '</details>';
+      return '<details class="doc-folder" open><summary><b>' + icon('folder') + ' ' + esc(g) + '</b> <span class="muted">(' + groups[g].length + ')</span></summary>' + groups[g].map(card).join('') + '</details>';
     }).join('') : '<p class="muted">Discharge papers, reports, insurance cards: snap a paper, or add a document and attach photos or PDFs. Papers that fit nowhere else go in Misc, with their own details pulled out.</p>');
 }
 function fileTherapy(pid) {
   var rs = recordsOf(pid, ['exercise']).sort(function (a, b) { return (a.title || '').localeCompare(b.title || ''); });
   var on = rs.filter(function (r) { return (r.fields || {}).active !== 'No'; }), off = rs.filter(function (r) { return (r.fields || {}).active === 'No'; });
   var card = function (r) { var fl = r.fields || {}; return recordCard(r, esc([fl.how, fl.how_often].filter(Boolean).join(' · ')), fl.notes ? esc(fl.notes.slice(0, 140)) : ''); };
-  return '<div class="row between"><h2>Therapy</h2><span>' + addBtn('exercise', pid) + ' <button class="btn sm ghost writer-only" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ',\'exercise\')">&#128247; Snap the sheet</button> <button class="btn sm ghost writer-only" onclick="openWorkoutSchedule(' + (pid ? '\'' + pid + '\'' : 'null') + ')">Workout schedule</button></span></div>' +
+  return '<div class="row between"><h2>Therapy</h2><span>' + addBtn('exercise', pid) + ' <button class="btn sm ghost writer-only" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ',\'exercise\')">' + icon('camera') + ' Snap the sheet</button> <button class="btn sm ghost writer-only" onclick="openWorkoutSchedule(' + (pid ? '\'' + pid + '\'' : 'null') + ')">Workout schedule</button></span></div>' +
     (on.length ? on.map(card).join('') : '<p class="muted">Physical, occupational or speech therapy home exercises. Snap the sheet the therapist gave you and the exercises are listed here, with the pages kept under Documents.</p>') +
     (off.length ? '<h3>No longer doing</h3>' + off.map(card).join('') : '');
 }
@@ -188,8 +188,8 @@ function editRecord(id, kind, pid) {
   var titleField = kind === 'lab'
     ? '<label for="rTitle">' + K.title + '</label><input id="rTitle" list="labList" value="' + esc(r ? r.title : '') + '" oninput="fillLabUnit(this.value)"><datalist id="labList">' + LAB_TESTS.map(function (t) { return '<option value="' + esc(t) + '">'; }).join('') + '</datalist>'
     : '<label for="rTitle">' + K.title + '</label><input id="rTitle" value="' + esc(r ? r.title : '') + '">';
-  if (!r && (kind === 'medication' || kind === 'lab' || kind === 'visit' || kind === 'exercise')) titleField = '<div class="btn-row writer-only"><button type="button" class="btn sm ghost" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ',\'' + kind + '\')">&#128247; From a photo</button></div>' + titleField;
-  if (!r && kind === 'visit') titleField = titleField.replace('</button></div>', '</button><button type="button" class="btn sm ghost" onclick="scribeIt(' + (pid ? '\'' + pid + '\'' : 'null') + ')">&#127897; Scribe it</button></div>');
+  if (!r && (kind === 'medication' || kind === 'lab' || kind === 'visit' || kind === 'exercise')) titleField = '<div class="btn-row writer-only"><button type="button" class="btn sm ghost" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ',\'' + kind + '\')">' + icon('camera') + ' From a photo</button></div>' + titleField;
+  if (!r && kind === 'visit') titleField = titleField.replace('</button></div>', '</button><button type="button" class="btn sm ghost" onclick="scribeIt(' + (pid ? '\'' + pid + '\'' : 'null') + ')">' + icon('mic') + ' Scribe it</button></div>');
   if (kind === 'medication') titleField += '<div class="btn-row writer-only"><button type="button" class="btn sm ghost" onclick="fillFromLabel()">Fill from the FDA label</button></div><div class="muted" id="labelHint" aria-live="polite"></div>';
   var checkBox = r ? checkBoxHtml(r) : '';
   openSheet('<h2 style="margin-top:0">' + (r ? '' : 'Add ') + esc(K.label) + '</h2>' + checkBox + titleField +
@@ -208,7 +208,7 @@ function photoDiffNotes(fl) {
   var note = function (el, read) {
     if (!el || norm(el.value) === norm(read)) return;
     if (el.parentNode && el.parentNode.classList && el.parentNode.classList.contains('row')) el = el.parentNode; // e.g. phone + Check number
-    el.insertAdjacentHTML('afterend', '<div class="muted photo-diff">&#128247; Photo read: &ldquo;' + esc(read || '(blank)') + '&rdquo;. Changed since; History shows who and when.</div>');
+    el.insertAdjacentHTML('afterend', '<div class="muted photo-diff">' + icon('camera') + ' Photo read: &ldquo;' + esc(read || '(blank)') + '&rdquo;. Changed since; History shows who and when.</div>');
   };
   Object.keys(fp).forEach(function (k) { if (k !== 'extra') note(document.getElementById(k === 'title' ? 'rTitle' : 'rf-' + k), fp[k]); });
   (fp.extra || []).forEach(function (f) {

@@ -91,7 +91,7 @@ function renderTrash() {
   var items = trashItems(), owner = State.role === 'owner' || State.role == null;
   return '<p class="muted">Deleted entries stay here for ' + TRASH_DAYS + ' days, so you can restore them. After that they are erased for good, with their photos and edit history.</p>' +
     (items.length ? items.map(function (r) {
-      var label = r._store === 'records' ? esc((RECORD_KINDS[r.kind] || {}).label || 'File item') + ': ' + esc(r.title || '') : r._store === 'measurements' ? 'Weight ' + r.value + ' ' + (r.unit || '') : ((r.entry_kind === 'output' ? '&#128701; ' : r.entry_kind === 'drink' ? '&#129380; ' : '') + esc(r.free_text || 'Meal'));
+      var label = r._store === 'records' ? esc((RECORD_KINDS[r.kind] || {}).label || 'File item') + ': ' + esc(r.title || '') : r._store === 'measurements' ? 'Weight ' + r.value + ' ' + (r.unit || '') : ((r.entry_kind === 'output' ? icon('output') + ' ' : r.entry_kind === 'drink' ? icon('cup') + ' ' : '') + esc(r.free_text || 'Meal'));
       var when = r.eaten_at || r.taken_at || r.occurred_at || r.updated_at;
       return '<div class="card row"><div class="grow"><b>' + label + '</b> <span class="muted">' + esc(localDay(when) + ' ' + localTime(when)) + '</span><div class="muted">deleted ' + esc(localDay(r.updated_at) + ' ' + localTime(r.updated_at)) + (r.edited_by ? ' by ' + esc(whoName(r.edited_by)) : '') + '</div></div>' +
         '<div class="btn-col"><button class="btn sm writer-only" onclick="restoreFromTrash(\'' + r._store + '\',\'' + r.id + '\')">Restore</button>' +
@@ -130,10 +130,10 @@ function extraPhotosSection(entryId, store) {
   store = store || 'diary_entries';
   var list = extraPhotosOf(entryId);
   return '<h3>' + (store === 'records' ? 'Photos and PDFs' : 'More photos') + '</h3><div class="photo-strip" id="xStrip">' + list.map(function (p) {
-    return '<div class="photo-tile"><button type="button" class="photo-btn" aria-label="View ' + (p.mime === 'application/pdf' ? 'PDF ' + esc(p.file_name || '') : 'photo') + '" onclick="viewExtraPhoto(\'' + p.id + '\')">' + (p.mime === 'application/pdf' ? '<span class="pdf-tile">&#128196;<br>' + esc((p.file_name || 'PDF').slice(0, 14)) + '</span>' : '<img class="photo-thumb" alt="" data-photo="' + p.id + '" data-store="entry_photos"' + (p.photo_data ? ' src="' + esc(p.photo_data) + '"' : '') + '>') + '</button>' +
+    return '<div class="photo-tile"><button type="button" class="photo-btn" aria-label="View ' + (p.mime === 'application/pdf' ? 'PDF ' + esc(p.file_name || '') : 'photo') + '" onclick="viewExtraPhoto(\'' + p.id + '\')">' + (p.mime === 'application/pdf' ? '<span class="pdf-tile">' + icon('doc') + ' <br>' + esc((p.file_name || 'PDF').slice(0, 14)) + '</span>' : '<img class="photo-thumb" alt="" data-photo="' + p.id + '" data-store="entry_photos"' + (p.photo_data ? ' src="' + esc(p.photo_data) + '"' : '') + '>') + '</button>' +
       '<button type="button" class="icon-btn writer-only" aria-label="Remove photo" onclick="removeExtraPhoto(\'' + p.id + '\',\'' + entryId + '\')">&times;</button></div>';
   }).join('') + '</div>' +
-    '<div class="btn-row writer-only"><button type="button" class="btn ghost sm" onclick="document.getElementById(\'xCam\').click()">&#128247; Take another</button><button type="button" class="btn ghost sm" onclick="document.getElementById(\'xLib\').click()">&#128444; Add photos</button></div>' +
+    '<div class="btn-row writer-only"><button type="button" class="btn ghost sm" onclick="document.getElementById(\'xCam\').click()">' + icon('camera') + ' Take another</button><button type="button" class="btn ghost sm" onclick="document.getElementById(\'xLib\').click()">' + icon('image') + ' Add photos</button></div>' +
     '<input id="xCam" type="file" accept="image/*" capture="environment" class="hidden" onchange="addExtraPhotos(this, \'' + entryId + '\', \'' + store + '\')"><input id="xLib" type="file" accept="' + (store === 'records' ? 'image/*,application/pdf' : 'image/*') + '" multiple class="hidden" onchange="addExtraPhotos(this, \'' + entryId + '\', \'' + store + '\')">';
 }
 function addExtraPhotos(input, entryId, store) {

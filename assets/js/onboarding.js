@@ -129,7 +129,7 @@ function gettingStarted(pid) {
   ];
   var done = steps.filter(function (s) { return s[0]; }).length;
   if (done === steps.length) return '';
-  return '<div class="card gs"><div class="row between"><h3>&#11088; Getting started</h3><span class="muted">' + done + ' of ' + steps.length + '</span></div>' +
+  return '<div class="card gs"><div class="row between"><h3>' + icon('star') + ' Getting started</h3><span class="muted">' + done + ' of ' + steps.length + '</span></div>' +
     steps.map(function (s) { return '<div class="list-item' + (s[0] ? ' gs-done' : ' tappable') + '"' + (s[0] ? '' : ' onclick="' + s[3] + '"') + '><div class="grow"><b>' + (s[0] ? '&#10003; ' : '') + s[1] + '</b>' + (s[0] ? '' : '<div class="muted">' + s[2] + '</div>') + '</div>' + (s[0] ? '' : '<span class="muted">&rsaquo;</span>') + '</div>'; }).join('') +
     '<div class="btn-row"><button class="btn sm ghost" onclick="gsHide()">Hide this</button></div></div>';
 }

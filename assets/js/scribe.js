@@ -25,11 +25,11 @@ function scribeIt(pid) {
 }
 function scribeSheet() {
   var sc = S.scribe, can = scribeCanListen();
-  openSheet('<h2 style="margin-top:0" data-nosnap>&#127897; Scribe a visit</h2>' +
+  openSheet('<h2 style="margin-top:0" data-nosnap>' + icon('mic') + ' Scribe a visit</h2>' +
     '<p>Tell it what happened at the visit, or let it listen to the whole visit. Then it pulls out what matters (what they said, what changed, medicine changes, tests, next appointment, questions) and fills in the Visit form for you to check.</p>' +
     (can
       ? '<label class="check"><input type="checkbox" id="scribeOk"' + (sc.consented ? ' checked' : '') + '> Everyone in the room agrees to this visit being turned into notes. <span class="muted">(Say: &ldquo;Is it OK if my phone takes notes of this visit for the family?&rdquo;)</span></label>' +
-        '<div class="btn-row"><button class="btn" id="scribeListenBtn" onclick="scribeToggle()">' + (sc.listening ? '&#9208; Pause listening' : '&#127897; Listen to the visit') + '</button></div>' +
+        '<div class="btn-row"><button class="btn" id="scribeListenBtn" onclick="scribeToggle()">' + (sc.listening ? icon('pause') + ' Pause listening' : icon('mic') + ' Listen to the visit') + '</button></div>' +
         '<p class="muted">Ask first: tell the nurse or doctor you are taking notes with your phone. Some states require everyone&rsquo;s OK to record. No sound is saved, only the words. Keep the phone face up, near whoever is talking, with the app open.</p>'
       : '<p class="muted">Listening is not available in this browser. Type below, or tap the microphone on your keyboard to talk instead of typing.</p>') +
     '<div id="scribeLive" class="muted" aria-live="polite">' + (sc.listening ? 'Listening...' : '') + '</div>' +
@@ -94,7 +94,7 @@ function scribeStop() {
 }
 function scribeButtons() {
   var b = document.getElementById('scribeListenBtn'), live = document.getElementById('scribeLive'), on = S.scribe && S.scribe.listening;
-  if (b) b.innerHTML = on ? '&#9208; Pause listening' : '&#127897; ' + (S.scribe && S.scribe.text ? 'Keep listening' : 'Listen to the visit');
+  if (b) b.innerHTML = on ? icon('pause') + ' Pause listening' : icon('mic') + ' ' + (S.scribe && S.scribe.text ? 'Keep listening' : 'Listen to the visit');
   if (live) live.textContent = on ? 'Listening...' : '';
 }
 // Closing the sheet stops listening; the words stay saved for next time.
@@ -124,7 +124,7 @@ function scribeFill(d, text) {
   set('rf-meds_changed', v.meds_changed); set('rf-tests', v.tests); set('rf-next_appt', v.next_appt);
   set('rf-questions', v.questions); set('rf-transcript', text);
   var todo = (d.to_do || []).filter(Boolean), check = (d.double_check || []).filter(Boolean);
-  var h = '<div class="ok-note">&#127897; Filled in from your notes: ' + esc(d.summary || '') + ' Check it before saving.</div>' +
+  var h = '<div class="ok-note">' + icon('mic') + ' Filled in from your notes: ' + esc(d.summary || '') + ' Check it before saving.</div>' +
     (check.length ? '<div class="card attention"><p><b>Double-check these</b> (unclear or possibly misheard):</p><ul>' + check.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ul></div>' : '') +
     (todo.length ? '<div class="card"><p><b>To do after this visit</b></p><ul>' + todo.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ul><p class="muted">These are saved with the visit under "What changed". Medicine changes: update them in File &rarr; Summary too.</p></div>' : '');
   if (todo.length) { var ch = document.getElementById('rf-changed'); if (ch) { ch.value = (ch.value ? ch.value + '\n' : '') + 'To do: ' + todo.join('; '); ch.classList.add('snap-filled'); } }

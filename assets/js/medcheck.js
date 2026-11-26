@@ -14,10 +14,10 @@ function renderMedCheck(arg) {
   var order = { bad: 0, warn: 1, info: 2 };
   var worst = function (x) { return x.issues.reduce(function (m, s) { return Math.min(m, order[s.level]); }, 3); };
   var items = r.items.slice().sort(function (a, b) { return worst(a) - worst(b) || (a.title || '').localeCompare(b.title || ''); });
-  return '<div class="card"><h3>&#128138; Compare her medicines' + (prof.person_name ? ' (' + esc(prof.person_name) + ')' : '') + '</h3>' +
+  return '<div class="card"><h3>' + icon('pill') + ' Compare her medicines' + (prof.person_name ? ' (' + esc(prof.person_name) + ')' : '') + '</h3>' +
     '<p>Each medicine with what every source says: the medicine list, discharge papers, the bottle. Mismatches and possible duplicates are listed first. Take the printout to the pharmacist or doctor to sort them out.</p>' +
     (items.length ? '<p><b>' + items.length + '</b> medicine' + (items.length === 1 ? '' : 's') + ' &middot; <span class="' + (r.problems ? 'flag-text' : '') + '"><b>' + r.problems + '</b> to sort out</span></p>' : '') +
-    '<div class="btn-row"><button class="btn" onclick="printMedCheck()">Print for the pharmacist</button><button class="btn ghost" onclick="copyText(medCheckText(), \'Copied\')">Copy as text</button><button class="btn ghost" onclick="snapIt(S.medCheckPid,\'medlist\')">&#128247; Snap a list or bottle</button></div></div>' +
+    '<div class="btn-row"><button class="btn" onclick="printMedCheck()">Print for the pharmacist</button><button class="btn ghost" onclick="copyText(medCheckText(), \'Copied\')">Copy as text</button><button class="btn ghost" onclick="snapIt(S.medCheckPid,\'medlist\')">' + icon('camera') + ' Snap a list or bottle</button></div></div>' +
     (items.length ? items.map(medCheckCard).join('') : '<p class="muted">No medicines saved yet. Snap her medicine list, the discharge papers or each bottle, and they show up here side by side.</p>');
 }
 function medCheckCard(x) {
