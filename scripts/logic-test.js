@@ -249,6 +249,29 @@ t('medPlan: a medicine set for 6:30 is due at 5:45 and overdue at 8:45; blank us
   assert.strictEqual(Logic.medPlan(m, [], '2026-11-23', 8.75)[0].state, 'overdue');
   assert.strictEqual(Logic.medPlan(m, [], '2026-11-23', 8.75)[0].time, '06:30');
 });
+t('in care elsewhere: doses inside a stay are covered, not overdue; the edges follow the clock', function () {
+  var meds = [{ id: 'a', title: 'Furosemide', fields: { slots: 'morning,evening' } }];
+  var at = function (d, h) { return new Date(2026, 10, d, h, 0).toISOString(); };
+  var open = [{ org: 'St. Mary', from_at: at(23, 14), to_at: null }];
+  var states = function (day, hour, stays, doses) { return Logic.medPlan(meds, doses || [], day, hour, stays, 6).map(function (r) { return r.state; }); };
+  // Admitted at 2 pm: the morning dose was home's, the evening one is theirs.
+  assert.deepEqual(states('2026-11-23', 20, open), ['overdue', 'covered']);
+  assert.deepEqual(states('2026-11-25', 22, open), ['covered', 'covered']);
+  assert.strictEqual(Logic.medPlan(meds, [], '2026-11-25', 22, open, 6)[0].stay.org, 'St. Mary');
+  assert.strictEqual(Logic.stayOpen(open).org, 'St. Mary');
+  // Home at noon on the 26th: that morning was covered, the evening is home's again.
+  var done = [{ org: 'St. Mary', from_at: at(23, 14), to_at: at(26, 12) }];
+  assert.strictEqual(Logic.stayOpen(done), null);
+  assert.deepEqual(states('2026-11-26', 20, done), ['covered', 'overdue']);
+  assert.deepEqual(states('2026-11-27', 20, done), ['overdue', 'overdue']);
+  // A dose someone did mark keeps its own state; no stays behaves as before.
+  var given = [{ id: 'x', updated_at: at(25, 8), occurred_at: at(25, 8), fields: { med_id: 'a', day: '2026-11-25', slot: 'morning', status: 'given' } }];
+  assert.deepEqual(states('2026-11-25', 22, open, given), ['given', 'covered']);
+  assert.deepEqual(states('2026-11-25', 22), ['overdue', 'overdue']);
+  // Timing review counts those days as covered, not as unmarked.
+  var r = Logic.doseTiming(meds[0], [], 'evening', ['2026-11-22', '2026-11-23', '2026-11-24', '2026-11-25', '2026-11-26'], 6, done);
+  assert.deepEqual([r.unmarked, r.covered], [2, 3]);
+});
 t('doseTiming: typical time, late (2h+), skipped and unmarked over a week', function () {
   var med = { id: 'a', fields: { slots: 'morning' } }, days = [], doses = [];
   for (var i = 0; i < 7; i++) days.push('2026-11-' + (16 + i));
