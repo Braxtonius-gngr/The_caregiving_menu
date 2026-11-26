@@ -318,6 +318,7 @@ function syncNow() {
     dot.classList.toggle('on', r.signedIn); dot.title = r.signedIn ? 'Synced' : 'Local only';
     if (State.signedIn !== r.signedIn) { State.signedIn = r.signedIn; if (!State.profiles.length && currentScreen === 'home') refresh(); }
     if (!r.signedIn) return;
+    if (typeof mergeNoteFlush === 'function') mergeNoteFlush();
     var roleBefore = State.role;
     var lockedBefore = State.eraseAfter;
     return Promise.all([loadMemberNames(), Sync.refreshDayStart(), Sync.eraseDate().then(function (d) { State.eraseAfter = d; return DB.meta('erase_after', d); })]).then(function () {
