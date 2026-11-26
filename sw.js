@@ -15,6 +15,7 @@ var SHELL = [
   './assets/js/sync.js',
   './assets/js/scanner.js',
   './assets/js/ui.js',
+  './assets/js/fx.js',
   './assets/js/fluids.js',
   './assets/js/history.js',
   './assets/js/file.js',

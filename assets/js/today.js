@@ -183,18 +183,26 @@ function nextDoseRow(p, pid) {
 function tickDose(btn, medId, slot, pid) {
   if (btn.disabled) return; btn.disabled = true;
   var row = btn.closest('.dose'); if (row) row.classList.add('done');
-  var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var panel = btn.closest('.next.urgent');
-  // The last late dose ticked: the heartbeat stops and a cool splash spreads from the circle before the list updates.
+  var still = FX.still(), panel = btn.closest('.next.urgent');
+  var b = btn.getBoundingClientRect(), x = b.left + b.width / 2, y = b.top + b.height / 2;
+  // The last late dose ticked: the heartbeat stops, a green teardrop falls into the circle, then the full burst (fx.js).
   if (panel && !still && !panel.querySelector('.dose-overdue:not(.done)')) {
-    var b = btn.getBoundingClientRect(), p = panel.getBoundingClientRect();
-    panel.style.setProperty('--sx', (b.left + b.width / 2 - p.left) + 'px');
-    panel.style.setProperty('--sy', (b.top + b.height / 2 - p.top) + 'px');
-    panel.insertAdjacentHTML('beforeend', '<span class="splash" aria-hidden="true"></span><span class="splash-ring" aria-hidden="true"></span>');
+    var p = panel.getBoundingClientRect(), sx = (x - p.left) + 'px', sy = (y - p.top) + 'px';
     panel.classList.add('resolving');
-    setTimeout(function () { giveDose(medId, slot, pid); }, 950);
+    var drop = document.createElement('div'); drop.className = 'fx-drop'; drop.style.left = x + 'px'; drop.style.top = y + 'px';
+    drop.innerHTML = '<svg viewBox="0 0 22 30" aria-hidden="true"><path d="M11 1C11 1 2 13 2 19.5a9 9 0 0 0 18 0C20 13 11 1 11 1z" fill="currentColor" opacity=".9"/></svg>';
+    document.body.appendChild(drop);
+    setTimeout(function () {
+      drop.remove(); fxBurst(x, y, 1);
+      giveDose(medId, slot, pid).then(function () {
+        var np = document.querySelector('.next'); if (!np) return;
+        np.style.setProperty('--sx', sx); np.style.setProperty('--sy', sy); np.classList.add('settle');
+        setTimeout(function () { np.classList.remove('settle'); }, 3300);
+      });
+    }, 420);
     return;
   }
+  fxBurst(x, y, 0.55);
   setTimeout(function () { giveDose(medId, slot, pid); }, still ? 0 : 460);
 }
 // opts: { at: ISO time given (default now), amount: what was given (default the usual dose) }

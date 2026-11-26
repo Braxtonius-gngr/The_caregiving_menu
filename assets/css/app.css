@@ -328,7 +328,7 @@ label.check input { width: auto; margin: 0; }
 /* ---------- motion ---------- */
 @keyframes fade { from { opacity: 0; } }
 @keyframes sheet-up { from { transform: translateY(24px); opacity: 0; } }
-@keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); filter: blur(6px); } }
 @keyframes drift { from { background-position: 0% 0%; } to { background-position: 100% 60%; } }
 /* A new screen settles in once, top to bottom: a fade and 10px of rise, never a bounce. Re-renders after a save don't replay it. */
 .screen.entering > * { animation: rise var(--dur-enter) var(--ease-settle) both; }
@@ -348,25 +348,41 @@ label.check input { width: auto; margin: 0; }
 .next .late { color: var(--status-bad-fg); display: inline-flex; align-items: center; gap: 6px; }
 .next .late .ico { width: 18px; height: 18px; vertical-align: 0; }
 .dose-overdue .check { border-color: var(--status-bad); }
-/* Missed doses: the panel edge beats like a heart (a double beat every 1.6s, well under 3 flashes a second),
- * a red ripple pushing out from the edge; late circles beat in time. */
-.next.urgent { animation: drift var(--dur-drift) ease-in-out infinite alternate, heartbeat 1.6s var(--ease-settle) infinite; }
+/* Missed doses: an uneasy, hazy heartbeat. Uneven rhythm (a strong beat, a stumbling half-beat, a long lingering fade)
+ * and a blurred red glow past the edge. At most 3 pulses in 2.4s, under the flash-safety limit. Late circles throb in time. */
+.next.urgent { animation: drift var(--dur-drift) ease-in-out infinite alternate, heartbeat 2.4s linear infinite; }
 @keyframes heartbeat {
-  0%   { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--status-bad) 45%, transparent), 0 0 0 0 color-mix(in srgb, var(--status-bad) 50%, transparent); }
-  10%  { box-shadow: inset 0 0 0 3px var(--status-bad), 0 0 0 0 color-mix(in srgb, var(--status-bad) 55%, transparent); }
-  28%  { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--status-bad) 45%, transparent), 0 0 0 9px color-mix(in srgb, var(--status-bad) 0%, transparent); }
-  36%  { box-shadow: inset 0 0 0 3px var(--status-bad), 0 0 0 0 color-mix(in srgb, var(--status-bad) 50%, transparent); }
-  60%, 100% { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--status-bad) 45%, transparent), 0 0 0 14px color-mix(in srgb, var(--status-bad) 0%, transparent); }
+  0%   { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--status-bad) 40%, transparent), 0 0 10px 0 color-mix(in srgb, var(--status-bad) 15%, transparent); }
+  5%   { box-shadow: inset 0 0 0 3px var(--status-bad), 0 0 30px 6px color-mix(in srgb, var(--status-bad) 55%, transparent); }
+  11%  { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--status-bad) 70%, transparent), 0 0 22px 3px color-mix(in srgb, var(--status-bad) 30%, transparent); }
+  15%  { box-shadow: inset 0 0 0 2.5px var(--status-bad), 0 0 34px 8px color-mix(in srgb, var(--status-bad) 45%, transparent); }
+  19%  { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--status-bad) 55%, transparent), 0 0 26px 4px color-mix(in srgb, var(--status-bad) 30%, transparent); }
+  24%  { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--status-bad) 75%, transparent), 0 0 30px 5px color-mix(in srgb, var(--status-bad) 35%, transparent); }
+  70%  { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--status-bad) 45%, transparent), 0 0 20px 2px color-mix(in srgb, var(--status-bad) 14%, transparent); }
+  100% { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--status-bad) 40%, transparent), 0 0 10px 0 color-mix(in srgb, var(--status-bad) 15%, transparent); }
 }
-.next.urgent .dose-overdue:not(.done) .check { animation: beat 1.6s var(--ease-settle) infinite; border-width: 2.5px; }
-@keyframes beat { 0%, 60%, 100% { transform: scale(1); } 10% { transform: scale(1.12); } 22% { transform: scale(1); } 36% { transform: scale(1.08); } }
-/* Resolved: the beat stops, the red drains, a cool teal splash spreads from the ticked circle and a ring ripples out. */
-.next.urgent.resolving { animation: none; box-shadow: none; background: var(--surface-accent); transition: background-color var(--dur-enter) var(--ease-settle); }
-.next.resolving .late { color: var(--action-text); transition: color var(--dur-enter) var(--ease-settle); }
-.splash, .splash-ring { position: absolute; left: var(--sx, 32px); top: var(--sy, 32px); width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%; pointer-events: none; }
-.splash { background: radial-gradient(circle, var(--surface-accent-2) 0 45%, color-mix(in srgb, var(--action) 22%, transparent) 70%, transparent 72%); animation: splash 900ms var(--ease-settle) forwards; }
-.splash-ring { border: 2px solid color-mix(in srgb, var(--action) 55%, transparent); animation: splash-ring 900ms var(--ease-settle) 120ms both; }
-@keyframes splash { from { transform: scale(0); opacity: .95; } 70% { opacity: .6; } to { transform: scale(48); opacity: 0; } }
-@keyframes splash-ring { from { transform: scale(.6); opacity: 1; } to { transform: scale(14); opacity: 0; } }
+.next.urgent .dose-overdue:not(.done) .check { animation: beat 2.4s linear infinite; border-width: 2.5px; }
+@keyframes beat { 0%, 30%, 100% { transform: scale(1); filter: none; } 5% { transform: scale(1.13); filter: drop-shadow(0 0 4px var(--status-bad)); } 10% { transform: scale(1.02); } 15% { transform: scale(1.07); filter: drop-shadow(0 0 3px var(--status-bad)); } 21% { transform: scale(1); } 24% { transform: scale(1.03); } }
+/* All clear: the beat stops, a green teardrop falls into the ticked circle, then the burst (fx.js); the panel holds a soft green light. */
+.next.urgent.resolving { animation: none; box-shadow: none; background: var(--surface-accent); }
+.next.resolving .late { color: var(--calm); transition: color var(--dur-enter) var(--ease-settle); }
+.next.settle::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; background: radial-gradient(140% 120% at var(--sx, 30px) var(--sy, 30px), color-mix(in srgb, var(--calm) 42%, transparent), color-mix(in srgb, var(--calm) 14%, transparent) 55%, transparent 80%); animation: settle 3200ms ease-out forwards; }
+@keyframes settle { from { opacity: 1; } 40% { opacity: .85; } to { opacity: 0; } }
+.next > * { position: relative; z-index: 1; }
 .dose.done .check { border-color: var(--action); }
-.next > :not(.splash):not(.splash-ring) { position: relative; z-index: 1; }
+.fx-drop { position: fixed; width: 22px; height: 30px; margin: -26px 0 0 -11px; pointer-events: none; z-index: 50; color: var(--calm); animation: fx-drop 420ms cubic-bezier(.55, 0, .85, .4) forwards; }
+.fx-drop svg { width: 100%; height: 100%; display: block; }
+@keyframes fx-drop { from { transform: translateY(-70px) scale(.7); opacity: 0; } 25% { opacity: 1; } 85% { transform: translateY(0) scale(1, 1.05); opacity: 1; } to { transform: translateY(6px) scale(1.3, .5); opacity: 0; } }
+#fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 40; }
+/* Tab bar: a green-teal underglow breathes under the active tab and glides to the next one. */
+.tabbar { isolation: isolate; }
+.tab { z-index: 1; }
+.tab .ico { transition: transform 500ms var(--ease-settle); }
+.tab.active .ico { transform: translateY(-1px) scale(1.06); }
+.tab.active::after { display: none; }
+.underglow { position: absolute; z-index: 0; top: 50%; left: 10%; width: 64px; height: 54px; margin: -27px 0 0 -32px; border-radius: 22px; pointer-events: none;
+  background: radial-gradient(60% 70% at 50% 80%, color-mix(in srgb, var(--calm) 38%, transparent), color-mix(in srgb, var(--action) 14%, transparent) 60%, transparent 75%);
+  filter: blur(2px); transition: left 560ms var(--ease-settle), opacity 300ms ease; animation: breathe 5s ease-in-out infinite; }
+.underglow::after { content: ""; position: absolute; left: 50%; bottom: 3px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--action); box-shadow: 0 0 8px 2px color-mix(in srgb, var(--calm) 70%, transparent); }
+.underglow.none { opacity: 0; }
+@keyframes breathe { 0%, 100% { opacity: .8; } 50% { opacity: 1; } }

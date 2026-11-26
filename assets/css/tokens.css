@@ -44,6 +44,8 @@
   --status-warn-bg: var(--amber-bg); --status-warn-fg: var(--amber-fg); --status-warn: var(--amber-mid);
   --status-bad-bg: var(--red-bg); --status-bad-fg: var(--red-fg); --status-bad: var(--red-mid);
   --on-status: #ffffff;
+  /* motion colours: calm green for done, mint and frost for the cool burst, gold for the all-clear */
+  --calm: var(--green-mid); --mint: #2bb58a; --frost: rgba(255, 255, 255, .95); --gold: #d4a22a;
 
   /* component */
   --tap-min: 52px; --btn-h: 48px; --btn-h-sm: 40px; --check-size: 32px; --tabbar-h: 66px; --icon-stroke: 1.6;
@@ -73,5 +75,6 @@
     --status-warn-bg: #3d3010; --status-warn-fg: #f6d58a; --status-warn: #e3b04b;
     --status-bad-bg: #44201c; --status-bad-fg: #ffb4aa; --status-bad: #f08a7e;
     --on-status: #10100e;
+    --calm: #5cc48a; --mint: #6fe0b8; --frost: rgba(214, 255, 238, .9); --gold: #f2cf72;
   }
 }
