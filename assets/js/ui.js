@@ -74,6 +74,7 @@ function showScreen(name, arg) {
   document.getElementById('screenTitle').textContent = TITLES[name] || name;
   var tab = { scan: 'kitchen', ask: 'home', handoff: 'home', medcheck: 'file', phototest: 'settings', recipes: 'kitchen', pantry: 'kitchen', recipe: 'kitchen', fluids: 'diary', trash: 'diary', meds: 'home', help: 'home', timing: 'home', patterns: 'home', plans: 'home', plan: 'home', reports: 'settings' }[name] || name;
   document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === tab); });
+  placeGlow();
   var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe, fluids: renderFluids, trash: renderTrash, file: renderFile, kitchen: renderKitchen, meds: renderMeds, help: renderHelp, timing: renderTiming, patterns: renderPatterns, plans: renderPlans, plan: renderPlan, phototest: renderPhotoTest, medcheck: renderMedCheck, handoff: renderHandoff, ask: renderAsk, reports: renderReports }[name];
   var el = document.getElementById('screen');
   el.innerHTML = fn ? fn(arg) : '';
@@ -81,6 +82,18 @@ function showScreen(name, arg) {
   if (entering) { el.classList.remove('entering'); void el.offsetWidth; el.classList.add('entering'); clearTimeout(S.enterTimer); S.enterTimer = setTimeout(function () { el.classList.remove('entering'); }, 1200); }
   window.scrollTo(0, 0);
 }
+// The underglow sits under the active tab and glides when it changes (P-020). The + button never holds it.
+function placeGlow() {
+  var g = document.querySelector('.underglow'), t = document.querySelector('.tab.active:not(.tab-scan)');
+  if (!g) return;
+  g.classList.toggle('none', !t);
+  if (t) g.style.left = (t.offsetLeft + t.offsetWidth / 2) + 'px';
+}
+window.addEventListener('resize', placeGlow);
+document.addEventListener('click', function (e) {
+  var t = e.target.closest && e.target.closest('.tabbar .tab[data-tab]:not(.tab-scan)');
+  if (t && typeof fxFromEl === 'function') fxFromEl(t, 0.35);
+});
 function refresh() { rebuildIndexes(); showScreen(currentScreen, S.lastArg); }
 
 /* ---------- shared bits ---------- */

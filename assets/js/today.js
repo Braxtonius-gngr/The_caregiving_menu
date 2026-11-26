@@ -21,7 +21,8 @@ function renderHome(arg) {
   var html = profileSwitcher();
   if (!prof) return html + welcomeCard() + legalFooter();
   var entries = fluidEntriesFor(pid, day), plan = planFor(pid, day);
-  var flags = attentionItems(pid, day, entries, plan);
+  // Overdue doses show once, in the Next up panel (it turns into an alert); the red card keeps the other alerts.
+  var flags = attentionItems(pid, day, entries, plan).filter(function (f) { return !f.dose; });
   html += '<p class="today-sub">' + esc(dayLabel(day)) + ' · Caring for ' + esc(prof.person_name) + '</p>';
   html += eraseBanner() + gettingStarted(pid);
   if (flags.length) html += '<div class="card attention" role="alert"><h3>' + icon('alert') + ' Needs attention</h3>' + flags.map(function (f) { return '<div class="list-item"><div class="grow">' + f.text + '</div>' + (f.action || '') + '</div>'; }).join('') + '</div>';
@@ -61,7 +62,7 @@ function attentionItems(pid, day, entries, plan) {
   var weighsDaily = Logic.standardWeights(State.measurements || [], pid, dayStart()).some(function (x) { return x.day >= shiftDay(day, -7); });
   // While she is in care elsewhere, the things only home would do are not missing.
   if (!away && !w && weighsDaily && careHourNow() >= 10) out.push({ text: 'No morning weight yet today.', action: '<button class="btn sm writer-only" onclick="logWeight()">Log weight</button>' });
-  if (!away) plan.filter(function (p) { return p.state === 'overdue'; }).forEach(function (p) { out.push({ text: '<b>' + esc(p.med.title) + '</b> ' + esc(slotName(p.slot).toLowerCase()) + ' dose not marked yet.', action: '<button class="btn sm writer-only" onclick="giveDose(\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')">Given</button>' }); });
+  if (!away) plan.filter(function (p) { return p.state === 'overdue'; }).forEach(function (p) { out.push({ dose: true, text: '<b>' + esc(p.med.title) + '</b> ' + esc(slotName(p.slot).toLowerCase()) + ' dose not marked yet.', action: '<button class="btn sm writer-only" onclick="giveDose(\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')">Given</button>' }); });
   Logic.upcoming(medsOf(pid), day, 3, localDay).forEach(function (u) { out.push({ text: esc(u.title) + ' ' + (u.inDays === 0 ? 'today' : u.inDays === 1 ? 'tomorrow' : 'in ' + u.inDays + ' days') + '.' }); });
   return out;
 }
@@ -160,10 +161,13 @@ function todayMeds(pid, day, plan) {
   var show = open.length ? open : next.filter(function (p) { return p.hour === nextHour; });
   var done = plan.filter(function (p) { return p.dose; }).length;
   var count = plan.length ? '<span>' + done + ' of ' + plan.length + ' marked</span>' : '';
-  var head = open.length ? '<div class="when"><span>Now</span>' + count + '</div><div class="what">' + (open.length === 1 ? esc(slotName(open[0].slot)) + ' dose' : 'Medicines due') + '</div>'
+  // Late doses turn the panel into the alert: warm red light, a red heading with an icon, red circles. Words, not colour alone.
+  var late = open.filter(function (p) { return p.state === 'overdue'; });
+  var head = late.length ? '<div class="when"><span class="late">' + icon('alert') + ' Overdue</span>' + count + '</div><div class="what">' + (late.length === 1 ? esc(late[0].med.title) + ' is late' : late.length + ' doses are late') + '</div>'
+    : open.length ? '<div class="when"><span>Now</span>' + count + '</div><div class="what">' + (open.length === 1 ? esc(slotName(open[0].slot)) + ' dose' : 'Medicines due') + '</div>'
     : show.length ? '<div class="when"><span>Next up' + (show[0].time ? ' · ' + esc(show[0].time) : '') + '</span>' + count + '</div><div class="what">' + esc(slotName(show[0].slot)) + ' medicines</div>'
     : '<div class="when"><span>Medicines</span>' + count + '</div><div class="what">' + (plan.length ? 'Nothing due right now' : 'No scheduled doses today') + '</div>';
-  return '<div class="next">' + head + (show.length ? scrollList(show.map(function (p) { return nextDoseRow(p, pid); }), 5) : '') +
+  return '<div class="next' + (late.length ? ' urgent" role="alert' : '') + '">' + head + (show.length ? scrollList(show.map(function (p) { return nextDoseRow(p, pid); }), 5) : '') +
     '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'meds\',{pid:' + pidArg(pid) + '})">All meds today</button>' + careStartBtn(pid) + '</div></div>';
 }
 var DOSE_TAG = { due: '<span class="badge warn">Due now</span>', overdue: '<span class="badge bad">Overdue</span>' };
@@ -179,7 +183,27 @@ function nextDoseRow(p, pid) {
 function tickDose(btn, medId, slot, pid) {
   if (btn.disabled) return; btn.disabled = true;
   var row = btn.closest('.dose'); if (row) row.classList.add('done');
-  var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var still = FX.still(), panel = btn.closest('.next');
+  var b = btn.getBoundingClientRect(), x = b.left + b.width / 2, y = b.top + b.height / 2;
+  // A benchmark finished (the last open dose in Next up, late or not): the heartbeat stops if it was beating,
+  // a green teardrop falls into the circle, then the full win (fx.js): green out, all the way back in, supernova, gold.
+  if (panel && !still && !panel.querySelector('.dose:not(.done)')) {
+    var p = panel.getBoundingClientRect(), sx = (x - p.left) + 'px', sy = (y - p.top) + 'px';
+    if (panel.classList.contains('urgent')) panel.classList.add('resolving');
+    var drop = document.createElement('div'); drop.className = 'fx-drop'; drop.style.left = x + 'px'; drop.style.top = y + 'px';
+    drop.innerHTML = '<svg viewBox="0 0 22 30" aria-hidden="true"><path d="M11 1C11 1 2 13 2 19.5a9 9 0 0 0 18 0C20 13 11 1 11 1z" fill="currentColor" opacity=".9"/></svg>';
+    document.body.appendChild(drop);
+    setTimeout(function () {
+      drop.remove(); fxBurst(x, y, 1);
+      giveDose(medId, slot, pid).then(function () {
+        var np = document.querySelector('.next'); if (!np) return;
+        np.style.setProperty('--sx', sx); np.style.setProperty('--sy', sy); np.classList.add('settle');
+        setTimeout(function () { np.classList.remove('settle'); }, 3300);
+      });
+    }, 420);
+    return;
+  }
+  fxBurst(x, y, 0.55);
   setTimeout(function () { giveDose(medId, slot, pid); }, still ? 0 : 460);
 }
 // opts: { at: ISO time given (default now), amount: what was given (default the usual dose) }

@@ -1,5 +1,5 @@
 /* Service worker: cache the app shell, network-first for everything else. */
-var CACHE = 'tcm-shell-v55';
+var CACHE = 'tcm-shell-v56';
 var CDN = 'https://cdn.jsdelivr.net/npm/';
 var SHELL = [
   './',
@@ -15,6 +15,7 @@ var SHELL = [
   './assets/js/sync.js',
   './assets/js/scanner.js',
   './assets/js/ui.js',
+  './assets/js/fx.js',
   './assets/js/fluids.js',
   './assets/js/history.js',
   './assets/js/file.js',
