@@ -179,7 +179,7 @@ function postUpdate(pid) {
  * After a visit, an update or the family notes are saved, anything in the words that belongs
  * elsewhere in the file (a lab number, a new medicine, a hospital admission; see Logic.noteOffers)
  * is offered back in one sheet. Nothing is saved from a note without a tap. */
-var NOTE_TEXT_FIELDS = { visit: ['why', 'said', 'changed', 'meds_changed', 'tests'], update: ['text'] };
+var NOTE_TEXT_FIELDS = { visit: ['why', 'said', 'changed', 'meds_changed', 'tests', 'transcript'], update: ['text'] };
 function noteTextOf(kind, title, fields) { return (kind === 'update' ? [title] : []).concat((NOTE_TEXT_FIELDS[kind] || []).map(function (k) { return (fields || {})[k]; })).filter(Boolean).join('. '); }
 function noteOfferSheet(pid, text, before, when) {
   var o = Logic.noteOffersNew(text, before), day = careDayOf(when || new Date().toISOString());

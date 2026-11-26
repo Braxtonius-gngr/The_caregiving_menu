@@ -125,6 +125,10 @@ function saySave() {
   };
   picks.reduce(function (p, it) { return p.then(function () { return one(it); }).then(function () { saved++; }); }, Promise.resolve())
     .then(function () { closeSheet(); return loadAll(); })
-    .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast(saved + ' entr' + (saved === 1 ? 'y' : 'ies') + ' saved'); })
+    .then(function () {
+      refresh(); if (Sync.enabled()) syncNow(); toast(saved + ' entr' + (saved === 1 ? 'y' : 'ies') + ' saved');
+      // What was said may also hold a lab number, a new medicine or an admission (see noteOfferSheet).
+      if (typeof noteOfferSheet === 'function') noteOfferSheet(pid, sa.text || '', '', new Date().toISOString());
+    })
     .catch(function (e) { toast('Could not save: ' + e.message); });
 }

@@ -599,7 +599,7 @@ var Logic = (function () {
       var re = new RegExp('(?:^|[^a-z0-9])(?:' + L[1] + ')\\s*(?:@|:|=|of|is|was|at|level|came back(?: at)?)?\\s*(\\d+(?:\\.\\d+)?)(?![\\d/:-])', 'i'), m = re.exec(t);
       if (m) labs.push({ test: L[0], value: +m[1] });
     });
-    var re = new RegExp('\\b' + NOTE_MED_VERB + '\\s+(?:(?:an?|the|some|on|a new|new|taking)\\s+)*((?:blood thinner|water pill|sleeping pill|stool softener|nausea medicine|eye ?drops|ear ?drops|[a-z][a-z-]{2,}))(\\s+\\d+(?:\\.\\d+)?\\s*(?:mcg|mg|g|ml|units?))?', 'gi'), m;
+    var re = new RegExp('\\b' + NOTE_MED_VERB + '\\s+(?:(?:an?|the|some|on|a new|new|taking|her|him|them|me)\\s+)*((?:blood thinner|water pill|sleeping pill|stool softener|nausea medicine|eye ?drops|ear ?drops|[a-z][a-z-]{2,}))(\\s+\\d+(?:\\.\\d+)?\\s*(?:mcg|mg|g|ml|units?))?', 'gi'), m;
     while ((m = re.exec(t))) {
       var name = m[2].toLowerCase(), strength = (m[3] || '').trim();
       if (!(NOTE_MED_CLASS.test(name) || NOTE_MED_SUFFIX.test(name) || strength || /^prescribed$/i.test(m[1]) && name.length > 4)) continue;
@@ -608,7 +608,14 @@ var Logic = (function () {
     }
     if (/\b(admitted|hospitali[sz]ed|inpatient|kept (?:her |him |them )?overnight)\b/i.test(t)) {
       var o = /\b(?:taken to|admitted to|admitted at|transferred to|transported to|went to|brought to|at)\s+((?:(?:the|of)\s+)?[A-Z][\w'&.-]*(?:\s+(?:of\s+)?[A-Z][\w'&.-]*){0,5})/.exec(t);
-      stay = { org: o ? o[1].replace(/^the\s+/i, '').replace(/[.,;]+$/, '') : null };
+      var org = o ? o[1].replace(/^the\s+/i, '').replace(/[.,;]+$/, '') : null;
+      if (!org) { // spoken words arrive without capitals: take the few words after "admitted to" / "taken to"
+        var w = /\b(?:taken to|admitted to|admitted at|transferred to|transported to|brought to)\s+(?:the\s+)?((?:[a-z'&.-]+\s*){1,5})/i.exec(t);
+        var words = w ? w[1].trim().split(/\s+/) : [], cut = words.findIndex(function (x) { return /^(and|for|with|because|after|where|last|this|on|at|in|overnight|today|yesterday|tonight|by|so|but|they|she|he|we|i)$/i.test(x); });
+        if (cut >= 0) words = words.slice(0, cut);
+        if (words.length && !/^(hospital|er|emergency|icu)$/i.test(words.join(' '))) org = words.map(function (x) { return x.charAt(0).toUpperCase() + x.slice(1); }).join(' ');
+      }
+      stay = { org: org };
     }
     return { labs: labs, meds: meds, stay: stay, any: !!(labs.length || meds.length || stay) };
   }
