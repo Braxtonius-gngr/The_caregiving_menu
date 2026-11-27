@@ -222,7 +222,24 @@ Return only what the schema asks for. Use generic, lowercase, singular ingredien
 Nutrition numbers are estimates for decision support; be realistic, not precise-sounding.
 Never present medical advice as fact. Diet suggestions are options to discuss with the person's doctor or dietitian.`;
 
-type Mode = "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "timing_questions" | "guidance" | "read_vitals" | "read_photo" | "fill_form" | "scribe" | "handoff" | "quick_log" | "ask_file";
+// A drug label rewritten in plain words: only what the label says, short points, most important first.
+const labelPlainSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["what_for", "how_to_take", "watch_for", "warnings", "avoid_with", "older_adults", "boxed", "bottle_first"],
+  properties: {
+    what_for: str,
+    how_to_take: strList("How the label says to take it, in plain words. Empty if the label does not say"),
+    watch_for: strList("Side effects or signs the label says to stop and call a doctor about, most serious first"),
+    warnings: strList("Other warnings from the label, plain words, most important first"),
+    avoid_with: strList("Medicines, foods, drinks or conditions the label says to avoid or be careful with"),
+    older_adults: strList("What the label says about older adults. Empty if nothing"),
+    boxed: str,
+    bottle_first: str,
+  },
+};
+
+type Mode = "label_plain" | "parse_recipe" | "parse_receipt" | "pantry_photo" | "estimate_plate" | "variations" | "diet_swaps" | "canonicalize" | "appointment_summary" | "meal_ideas" | "timing_questions" | "guidance" | "read_vitals" | "read_photo" | "fill_form" | "scribe" | "handoff" | "quick_log" | "ask_file";
 
 /* ---------- current guidance: search trusted sites first, then answer in a fixed shape ---------- */
 // Web search stays on public health sources; the answer step cites them by number.
@@ -606,8 +623,41 @@ async function handle(mode: Mode, body: Record<string, any>) {
       return await ask(optionsSchema, [{ type: "text", text: `Suggest 2-3 versions of this recipe adjusted for ${body.profile?.name}. Keep it recognisably the same dish; say what each change saves (e.g. "~600 mg sodium per serving").\nTheir rules: ${JSON.stringify(body.profile?.rules ?? [])}\nDaily targets: ${JSON.stringify(body.profile?.targets ?? {})}\nRecipe: ${JSON.stringify(body.recipe)}` }], "medium");
     case "canonicalize":
       return await ask(canonSchema, [{ type: "text", text: `Map each input to an existing ingredient name if it is the same thing, otherwise propose a new generic name.\nInputs: ${JSON.stringify(body.inputs)}\nKnown: ${known}` }], "low");
-    case "appointment_summary":
-      return await ask(summarySchema, [{ type: "text", text: `Draft a short brief a family caregiver can bring to an appointment, from this home food diary summary. Use only the data given; do not diagnose or recommend treatment. Frame concerns as questions for the clinician. Write in plain language.\n${JSON.stringify(body.digest)}` }], "medium");
+    case "appointment_summary": {
+      // Two callers: the food diary digest (Kitchen) and the visit summary (home care log: readings
+      // past the care team's numbers, weight, doses, stays, patterns). No names in either.
+      const care = /care log/i.test(String(body.digest?.kind ?? ""));
+      return await ask(summarySchema, [{ type: "text", text: (care
+        ? `A family caregiver is getting ready for an appointment. Below is a summary of what the family logged at home: readings that went past numbers the care team gave, weight, readings, medicine doses given or missed, stays elsewhere, and patterns. Draft a short brief to bring.
+Rules:
+- Use only the data given. Do not diagnose, do not say what a number means for her health, and do not recommend treatment or changes to medicines.
+- Put the most important things first: readings past the care team's numbers, weight going up, missed doses.
+- questions_for_clinician: 3 to 6 specific questions in plain words, each tied to something in the data ("Her weight went up 2.4 lb over 3 mornings; what should we do if that happens again?").
+- watch_items: the facts from the data worth pointing out, short.
+- patterns: 2 to 4 short observations grounded in the numbers given.
+- foods_that_fit: return an empty list.
+- Plain language, short sentences, no jargon.`
+        : `Draft a short brief a family caregiver can bring to an appointment, from this home food diary summary. Use only the data given; do not diagnose or recommend treatment. Frame concerns as questions for the clinician. Write in plain language.`) +
+        `\n${JSON.stringify(body.digest)}` }], "medium");
+    }
+    case "label_plain": {
+      // body.label: official FDA label sections (public text) for one medicine; body.name; body.bottle:
+      // the directions printed on her bottle, if any. No personal data.
+      const lab = JSON.stringify(body.label ?? {}).slice(0, 24000);
+      return await ask(labelPlainSchema, [{ type: "text", text: `Rewrite this official FDA drug label for a family member caring for an older relative at home. They read it on a phone and are tired.
+Rules:
+- Use ONLY what the label text says. Never add facts, doses, advice or anything from your own knowledge. If a section has nothing in the label, return an empty list or empty string.
+- Plain words a non-medical reader understands. Explain medical words in a few words ("hypotension (low blood pressure)").
+- Each point one short sentence, under 25 words. At most 6 points per list, most important or most dangerous first.
+- watch_for: the signs the label says to stop taking it or call a doctor about.
+- boxed: the boxed warning in one or two plain sentences, or empty.
+- what_for: one sentence, what the label says it treats.
+- bottle_first: one short sentence reminding that the directions from her doctor or pharmacy (on the bottle) come first when they differ from the label's general directions. If the bottle directions are given and the label's general dosing differs (for example the label gives pain-relief dosing for a medicine prescribed once a day), say so plainly without judging which is right.
+Medicine: ${String(body.name ?? "").slice(0, 120)}
+Bottle directions: ${String(body.bottle ?? "none given").slice(0, 400)}
+Label sections:
+${lab}` }], "low");
+    }
     case "meal_ideas":
       return await ask(mealIdeasSchema, [{ type: "text", text: `Suggest 3 simple meal ideas for ${body.profile?.name ?? "this person"} for ${body.meal ?? "the next meal"}. Prefer what is on hand. Respect their diet rules strictly (sodium, potassium, phosphorus, fluid). Count soups, gelatin, ice and sauces as fluid. Keep each idea easy for a tired caregiver.
 Their rules: ${JSON.stringify(body.profile?.rules ?? [])}

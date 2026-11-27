@@ -31,7 +31,7 @@ function snapButtons(label) {
 function snapFile(input) {
   var f = input.files[0], sn = S.snap; if (!f || !sn) return;
   if (!Sync.enabled()) return toast('Turn on sync in Settings to read photos');
-  var out = document.getElementById('snapOut'); if (out) out.innerHTML = '<p>Reading the photo...</p>';
+  var out = document.getElementById('snapOut'); if (out) out.innerHTML = workingArt('read-bottle', 'Reading the photo. This takes a few seconds.');
   downscale(f, 1600).then(function (img) {
     sn.images.push(img); if (sn.images.length > SNAP_MAX_IMAGES) sn.images.shift();
     if (sn.addingPage) sn.addingPage = false; else sn.tries = (sn.tries || 0) + 1;
@@ -95,7 +95,7 @@ function snapTypeIn() {
 
 var SNAP_VITAL = { bp_monitor: 'blood_pressure', glucose_meter: 'glucose', pulse_oximeter: 'oxygen', thermometer: 'temperature' };
 function snapNote(d) {
-  var h = '<div class="ok-note">' + icon('camera') + ' Filled in from the photo: ' + esc(d.summary || '') + '. Check every number before saving.' +
+  var h = '<div class="ok-note">' + icon('camera') + ' Filled in from the photo' + (d.summary ? ': ' + esc(String(d.summary).replace(/\.$/, '')) : '') + '. Check every number before saving.' +
     (d.uncertain && d.uncertain.length ? ' Left blank (not clear): ' + esc(d.uncertain.join(', ')) + '.' : '') + '</div>';
   var body = document.getElementById('sheetBody'), h2 = body && body.querySelector('h2');
   if (h2) h2.insertAdjacentHTML('afterend', h);
@@ -127,7 +127,7 @@ function snapFill(d) {
   if (d.kind === 'med_label') {
     // Same medicine already saved (from a list, or an earlier bottle)? Offer to merge instead of a duplicate.
     var mm = d.medication || {}, o = document.getElementById('snapOut');
-    if (o) o.innerHTML = '<p>Checking her medicines for this one...</p>';
+    if (o) o.innerHTML = workingArt('merge', 'Checking whether this medicine is already saved...');
     return snapGeneric(mm.name).then(function (g) {
       var ex = snapFindMed(pid, mm.name, g);
       if (ex) snapMergeBottle(d, ex, g); else snapNewBottle(d, g);
@@ -187,7 +187,7 @@ function snapTeam(d) {
   S.snapTeam = { rows: rows, facts: facts, doc: doc, summary: d.summary || '', uncertain: d.uncertain || [] };
   // Each box remembers what the photo said; editing one shows "Photo read: ..." right away.
   var box = function (id, label, val, cls) { return '<input id="' + id + '" class="' + (cls || '') + '" aria-label="' + label + '" placeholder="' + label + '" value="' + esc(val || '') + '" data-read="' + esc(val || '') + '" oninput="snapDiffHint(this)"><div class="muted photo-diff hidden" id="' + id + 'Diff"></div>'; };
-  openSheet('<h2 style="margin-top:0">' + icon('camera') + ' From the photo</h2>' +
+  openSheet(art('correct', 'small') + '<h2 style="margin-top:0">' + icon('camera') + ' From the photo</h2>' +
     '<p class="muted">' + esc(d.summary || '') + '</p>' +
     (rows.length ? '<h3>Add to the Care team</h3><p class="muted">Fix anything it misread right here, and untick old or wrong entries. What the photo said is kept with each one, so a change can be traced later.</p>' +
       (d.uncertain && d.uncertain.length ? '<div class="card attention"><p><b>Not clear in the photo</b></p><ul>' + d.uncertain.map(function (u) { return '<li>' + esc(u) + '</li>'; }).join('') + '</ul></div>' : '') +
@@ -259,8 +259,9 @@ function snapMedKey(n) { return Logic.medKey(n); }
 function snapGeneric(name) {
   if (!name) return Promise.resolve(null);
   return Sync.lookup('drug_label', name).then(function (r) {
-    var g = r && r.found ? { generic: (r.generic || '').toLowerCase() || null, brand: (r.brand || '').toLowerCase() || null } : null;
-    return g && snapGenericFits(name, g) ? g : null;
+    var g = r && r.found ? { generic: (r.generic || '').toLowerCase() || null, brand: (r.brand || '').toLowerCase() || null, ingredients: r.ingredients || [] } : null;
+    // The lookup already checked the label is this medicine (directly or through RxNorm's names).
+    return g && (snapGenericFits(name, g) || (g.ingredients || []).some(function (i) { return snapGenericFits(i, g); })) ? g : null;
   }, function () { return null; });
 }
 // The FDA search returns its closest label, which can be a different product: "ezetimibe" finds
@@ -314,15 +315,28 @@ function snapMergeRows(rows) {
   });
   return out;
 }
+// Every word in a name that could be the medicine ("Bayer Aspirin 81 mg" -> bayer, aspirin).
+function snapMedWords(n) { return String(n || '').toLowerCase().replace(/\([^)]*\)/g, ' ').split(/[^a-z0-9]+/).filter(function (w) { return w.length >= 4 && !/^\d/.test(w) && snapMedKey(w) === w; }); }
 function snapFindMed(pid, name, g) {
   var keys = [snapMedKey(name)];
-  if (g) { if (g.generic) keys.push(snapMedKey(g.generic)); if (g.brand) keys.push(snapMedKey(g.brand)); }
+  if (g) { if (g.generic) keys.push(snapMedKey(g.generic)); if (g.brand) keys.push(snapMedKey(g.brand)); (g.ingredients || []).forEach(function (i) { keys.push(snapMedKey(i)); }); }
   keys = keys.filter(Boolean);
-  return recordsOf(pid, ['medication']).find(function (r) {
+  var words = snapMedWords(name);
+  var meds = recordsOf(pid, ['medication']).filter(function (r) { return !r.deleted; });
+  return meds.find(function (r) {
     var fl = r.fields || {};
     return [r.title, fl.generic].concat(fl.also_called || []).map(snapMedKey).some(function (k) { return k && keys.indexOf(k) >= 0; });
+  }) || meds.find(function (r) {
+    // A saved medicine whose main word appears anywhere in the new name, or the other way round.
+    var fl = r.fields || {}, mine = [r.title, fl.generic].concat(fl.also_called || []).map(snapMedKey).filter(function (k) { return k && k.length >= 4; });
+    var theirs = snapMedWords([r.title, fl.generic].join(' '));
+    return mine.some(function (k) { return words.indexOf(k) >= 0; }) || theirs.indexOf(keys[0]) >= 0;
   }) || null;
 }
+// "Take 1 tablet by mouth twice daily" -> 1; "take two capsules" -> 2. null when it does not say.
+var SNAP_NUM = { one: 1, two: 2, three: 3, four: 4, half: 0.5 };
+function snapPerDose(t) { var m = String(t || '').toLowerCase().match(/\b(?:take|give|inhale|use|apply)?\s*(\d+(?:\.\d+)?|one|two|three|four|half|1\/2)\s*(?:\(\w+\)\s*)?(tablets?|tabs?|capsules?|caps?|pills?|puffs?|softgels?|caplets?|drops?)\b/); if (!m) return null; return m[1] === '1/2' ? 0.5 : SNAP_NUM[m[1]] || +m[1]; }
+function snapQty(q) { var m = String(q || '').match(/\d+/); return m ? +m[0] : null; }
 // "40 mg", "0.5mg" -> "40mg"; null when no strength is written.
 function snapStrength(t) { var m = String(t || '').toLowerCase().replace(/,/g, '').match(/(\d+(?:\.\d+)?)\s*(mcg|mg|g|ml|units?|iu|%)/); return m ? (+m[1]) + m[2].replace(/s$/, '') : null; }
 function snapAddCheck(old, add) { add = (add || []).filter(Boolean); if (!add.length) return old || null; return [old].concat(add).filter(Boolean).join('\n'); }
@@ -335,10 +349,15 @@ function snapNewBottle(d, g) {
   var stock = [m.quantity ? 'Qty ' + m.quantity : '', m.refills ? 'Refills: ' + m.refills : '', m.filled_on ? 'Filled ' + m.filled_on : ''].filter(Boolean).join(' · ');
   snapSet('rf-instructions', [m.directions ? 'Label: ' + m.directions : '', m.warnings && m.warnings.length ? 'Label warnings: ' + m.warnings.join('; ') : '', stock].filter(Boolean).join('\n'));
   snapSet('rf-prescriber', m.prescriber); snapSet('rf-pharmacy', m.pharmacy); snapSet('rf-generic', g && g.generic);
+  snapSet('rf-per_dose', snapPerDose(m.directions)); snapSet('rf-on_hand', snapQty(m.quantity));
+  var slots = snapWhenSlots(m.directions), chips = document.getElementById('rf-slots');
+  if (slots && chips) Array.prototype.forEach.call(chips.querySelectorAll('.chip'), function (c) { if ((slots.split(',').indexOf(c.dataset.v) >= 0) !== c.classList.contains('on')) toggleChip(c); });
+  openFilledGroups(); growAll();
+  var dn = document.getElementById('draftNote'); if (dn) dn.remove(); // the photo is newer than any old draft
   snapNote(d);
   S.snapPending.check = d.uncertain && d.uncertain.length ? 'Not clear on the bottle: ' + d.uncertain.join(', ') : null;
   S.snapPending.source = snapBottleSource(m);
-  var hint = document.getElementById('labelHint'); if (hint) hint.textContent = 'Set the dose and when to give it. "Fill from the FDA label" adds the official warnings.';
+  var hint = document.getElementById('labelHint'); if (hint) hint.textContent = slots ? 'Times of day were read from the bottle. Check them, then Save; the FDA label is added in plain words after you save.' : 'Pick when to give it, then Save. The FDA label is added in plain words after you save.';
 }
 function snapBottleSource(m) { return { type: 'bottle', label: 'Bottle', strength: m.strength || null, dose: null, when: null, said: m.directions || null, prescriber: m.prescriber || null, pharmacy: m.pharmacy || null, date: m.filled_on || localDay(new Date().toISOString()) }; }
 // The bottle matches a medicine already saved: show both side by side and add the bottle to it.
@@ -348,7 +367,7 @@ function snapMergeBottle(d, ex, g) {
   var clash = savedStr && bottleStr && savedStr !== bottleStr;
   var row = function (label, a, b, bad) { return '<tr' + (bad ? ' class="flag-text"' : '') + '><th>' + label + '</th><td>' + esc(a || '—') + '</td><td>' + esc(b || '—') + '</td></tr>'; };
   S.snapMerge = { d: d, id: ex.id, g: g, clash: clash ? 'Strength differs: saved ' + savedStr + ', bottle ' + bottleStr + '. Check with the pharmacist which is right.' : null };
-  openSheet('<h2 style="margin-top:0">' + icon('pill') + ' Same medicine as one already saved?</h2>' +
+  openSheet(art('merge', 'small') + '<h2 style="margin-top:0">' + icon('pill') + ' Same medicine as one already saved?</h2>' +
     '<p>This bottle looks like <b>' + esc(ex.title) + '</b>, already in her medicines' + (fl.instructions && /medicine list/.test(fl.instructions) ? ' (from the medicine list)' : '') + '.</p>' +
     (clash ? '<div class="card attention"><p><b>' + icon('alert') + ' ' + esc(S.snapMerge.clash) + '</b></p></div>' : '') +
     '<table class="cmp"><tr><th></th><th>Saved</th><th>Bottle</th></tr>' +
@@ -372,12 +391,16 @@ function saveMergeBottle() {
     if (!f.pharmacy && m.pharmacy) f.pharmacy = m.pharmacy;
     if (!f.generic && mg.g && mg.g.generic) f.generic = mg.g.generic;
     snapAddStrength(cur, m.strength);
-    f.instructions = [f.instructions, label].filter(Boolean).join('\n');
+    if (!f.slots) { var sl = snapWhenSlots(m.directions); if (sl) f.slots = sl; }
+    if (f.per_dose == null) { var pd = snapPerDose(m.directions); if (pd) f.per_dose = pd; }
+    var qn = snapQty(m.quantity); if (qn) { f.on_hand = qn; f.on_hand_at = careToday(); }
+    var said = String(m.directions || '').trim().toLowerCase();
+    if (!said || String(f.instructions || '').toLowerCase().indexOf(said) < 0) f.instructions = [f.instructions, label].filter(Boolean).join('\n');
     f.sources = (f.sources || []).concat([snapBottleSource(m)]);
     var pres = f.prescriber && m.prescriber && f.prescriber.toLowerCase() !== m.prescriber.toLowerCase() ? 'Prescriber differs: saved ' + f.prescriber + ', bottle ' + m.prescriber + '.' : null;
     f.check = snapAddCheck(f.check, [mg.clash, pres, unc.length ? 'Not clear on the bottle: ' + unc.join(', ') : null]);
     return cur;
-  }).then(function (rec) { return snapKeepPhotos(rec); })
+  }).then(function (rec) { if (rec) labelInBackground(rec); return snapKeepPhotos(rec); })
     .then(function () { closeSheet(); return loadAll(); })
     .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast('Added to the saved medicine, with the bottle photo' + (mg.clash ? '. Flagged: strength differs' : '')); })
     .catch(function (e) { toast('Could not save: ' + e.message); });
@@ -391,7 +414,7 @@ function snapMeds(d) {
   var sn = S.snap, pid = sn.pid, rows = snapMergeRows((d.med_list || []).filter(function (m) { return m && (m.name || m.written); }));
   if (!rows.length) return snapResult({ decision: 'retake', retake_reason: 'No medicine lines could be read.', retake_tip: 'Lay the list flat in good light and fill the frame with it.', summary: d.summary });
   S.snapMeds = rows; S.snapListSource = d.list_source || 'handwritten list'; S.snapMedInfo = rows.map(function (m) { var ex = snapFindMed(pid, m.name, null); return { match: ex ? ex.id : null, g: null, found: null }; });
-  openSheet('<h2 style="margin-top:0">' + icon('pill') + ' Medicine list from the photo</h2>' +
+  openSheet(art('correct', 'small') + '<h2 style="margin-top:0">' + icon('pill') + ' Medicine list from the photo</h2>' +
     '<p class="muted">' + esc(d.summary || '') + ' Each name is checked against the FDA list. Ticked lines become her medicines, or are added to the one already saved; you then set when each is given.</p>' +
     scrollList(rows.map(function (m, i) {
       var unsure = m.is_medicine !== 'yes';
@@ -609,7 +632,7 @@ function formSnapFile(input) {
   if (!Sync.enabled()) return toast('Turn on sync in Settings to read photos');
   var out = document.getElementById('fsOut'), h2 = document.querySelector('#sheetBody h2');
   var fs = S.formSnap || (S.formSnap = { images: [], tries: 0 });
-  out.textContent = 'Reading the photo...';
+  out.innerHTML = workingArt('read-bottle', 'Reading the photo. This takes a few seconds.');
   downscale(f, 1600).then(function (img) {
     fs.images.push(img); if (fs.images.length > SNAP_MAX_TRIES) fs.images.shift(); fs.tries++;
     return Sync.brain('fill_form', { images: fs.images, form: h2 ? h2.textContent : '', fields: formFields() });

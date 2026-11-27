@@ -11,7 +11,7 @@ var RECORD_KINDS = {
   condition: { label: 'Condition', title: 'Condition', fields: [['since', 'Since', 'text'], ['notes', 'Notes', 'textarea']] },
   allergy: { label: 'Allergy', title: 'Allergic to', fields: [['reaction', 'Reaction', 'text'], ['severity', 'Severity', 'select:Mild|Moderate|Severe|Unknown']] },
   medication: { label: 'Medicine', title: 'Medicine', fields: [['dose', 'Dose (e.g. 40 mg, 1 tablet)', 'text'], ['per_dose', 'How many each time (tablets, capsules, puffs). Leave blank if unsure', 'number'], ['slots', 'When to give it', 'slots'], ['with_food', 'Food', 'select:With food|Without food|Either'], ['when', 'Other timing notes', 'text'], ['purpose', 'What it is for', 'text'], ['prescriber', 'Prescribed by', 'text'], ['pharmacy', 'Pharmacy', 'text'], ['start', 'Started', 'date'], ['stop', 'Stop on (leave blank if ongoing)', 'date'], ['refill_on', 'Next refill due', 'date'], ['on_hand', 'How many are left right now (count them to get a warning before they run out)', 'number'], ['on_hand_at', '', 'hidden'], ['instructions', 'Instructions from the doctor or pharmacist', 'textarea'], ['generic', '', 'hidden'],
-    ['label_head', 'From the label', 'heading'], ['label_boxed', 'Boxed warning', 'textarea'], ['label_how', 'How to take it', 'textarea'], ['label_side', 'Side effects to watch for', 'textarea'], ['label_warn', 'Warnings', 'textarea'], ['label_patients', 'For patients and families', 'textarea'], ['label_older', 'Older adults', 'textarea'], ['label_source', '', 'hidden'], ['label_date', '', 'hidden']] },
+    ['label_head', 'From the label', 'heading'], ['label_boxed', 'Boxed warning', 'textarea'], ['label_how', 'How to take it', 'textarea'], ['label_side', 'Side effects to watch for', 'textarea'], ['label_warn', 'Warnings', 'textarea'], ['label_inter', 'Other medicines, foods or drinks to be careful with', 'textarea'], ['label_patients', 'For patients and families', 'textarea'], ['label_older', 'Older adults', 'textarea'], ['label_source', '', 'hidden'], ['label_date', '', 'hidden']] },
   directive: { label: 'Directive', title: 'Document (e.g. DNR, POLST, living will, power of attorney)', fields: [['kept', 'Where the original is kept', 'text'], ['notes', 'Notes', 'textarea']] },
   contact: { label: 'Care team', title: 'Name', fields: [['role', 'Role (kidney doctor, hospice nurse, pharmacy...)', 'text'], ['phone', 'Phone', 'tel'], ['fax', 'Fax', 'text'], ['address', 'Address', 'text'], ['portal', 'Patient portal link', 'text'], ['notes', 'Notes', 'textarea']] },
   lab: { label: 'Lab result', title: 'Test', date: 'date', fields: [['value', 'Result', 'number'], ['unit', 'Unit', 'text'], ['low', 'Range low (from the report)', 'number'], ['high', 'Range high (from the report)', 'number'], ['range_text', 'Range as printed, if not numbers', 'text'], ['notes', 'Notes', 'textarea']] },
@@ -239,7 +239,7 @@ function editRecord(id, kind, pid) {
   var dateType = K.date, dateVal = r && r.occurred_at ? (dateType === 'date' ? localDay(r.occurred_at) : localDay(r.occurred_at) + 'T' + localTime(r.occurred_at)) : (dateType === 'date' ? localDay(new Date().toISOString()) : localDay(new Date().toISOString()) + 'T' + localTime(new Date().toISOString()));
   var field = function (f) {
     var key = f[0], label = f[1], type = f[2], v = fl[key] == null ? '' : fl[key], fid = 'rf-' + key;
-    if (type === 'textarea') return '<label for="' + fid + '">' + label + '</label><textarea id="' + fid + '" rows="3">' + esc(v) + '</textarea>';
+    if (type === 'textarea') return '<label for="' + fid + '">' + label + '</label><textarea id="' + fid + '" class="grow-text" rows="' + growRows(v) + '" oninput="growText(this)">' + esc(v) + '</textarea>';
     if (type.indexOf('select:') === 0) return '<label for="' + fid + '">' + label + '</label><select id="' + fid + '"><option value=""></option>' + type.slice(7).split('|').map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>';
     if (type === 'tel') return '<label for="' + fid + '">' + label + '</label><div class="row"><input id="' + fid + '" class="grow" type="tel" value="' + esc(v) + '" oninput="S.phoneCheck=null"><button type="button" class="btn sm ghost" onclick="checkPhoneField(\'' + fid + '\')">Check number</button></div><div class="muted" id="' + fid + 'Hint" aria-live="polite">' + (fl.phone_type ? esc(phoneTypeText(fl.phone_type, fl.phone_carrier)) : '') + '</div>';
     if (type === 'heading') return '<h3>' + esc(label) + '</h3>' + (key === 'label_head' ? labelHelp(fl) : '');
@@ -263,12 +263,68 @@ function editRecord(id, kind, pid) {
   var checkBox = r ? checkBoxHtml(r) : '';
   openSheet('<h2 style="margin-top:0">' + (r ? '' : 'Add ') + esc(K.label) + '</h2>' + checkBox + titleField +
     (dateType ? '<label for="rWhen">' + (kind === 'lab' ? 'Date of the test' : 'When') + '</label><input id="rWhen" type="' + (dateType === 'date' ? 'date' : 'datetime-local') + '" value="' + dateVal + '">' : '') +
-    K.fields.map(field).join('') + extraFieldsHtml(fl.extra) +
+    (kind === 'medication' ? medFormGroups(K.fields, fl, field) : K.fields.map(field).join('')) + extraFieldsHtml(fl.extra) +
     (r && Sync.enabled() ? extraPhotosSection(r.id, 'records') : (r ? '' : '<p class="muted">Save first, then attach photos or PDFs.</p>')) +
     '<div class="btn-row"><button class="btn writer-only" onclick="saveRecord(' + (r ? '\'' + r.id + '\'' : 'null') + ',\'' + kind + '\',' + (pid ? '\'' + pid + '\'' : 'null') + ')">Save</button><button class="btn ghost" onclick="closeSheet()">Close</button>' +
     (r ? '<button class="btn ghost" onclick="showHistory(\'records\',\'' + r.id + '\')">History</button><button class="btn danger writer-only" onclick="deleteRecord(\'' + r.id + '\')">Delete</button>' : '') + '</div>');
   if (r) photoDiffNotes(fl);
+  growAll();
+  draftWatch(id, kind, pid);
 }
+// Textareas show all their text: sized to it when the sheet opens and as the family types.
+function growRows(v) { var t = String(v || ''), lines = t.split('\n').reduce(function (n, l) { return n + Math.max(1, Math.ceil(l.length / 38)); }, 0); return Math.min(Math.max(lines, 3), 40); }
+function growText(el) { el.style.height = 'auto'; el.style.height = (el.scrollHeight + 2) + 'px'; }
+// A folded section opens by itself when something in it was filled in (from a photo, the label or a draft).
+function openFilledGroups() { Array.prototype.forEach.call(document.querySelectorAll('#sheetBody details.form-more'), function (x) { var n = Array.prototype.filter.call(x.querySelectorAll('textarea, input:not([type=hidden]), select'), function (e) { return e.value; }).length; if (n) { x.open = true; var m = x.querySelector('summary .muted'); if (m) m.textContent = n + ' filled in, check them'; } }); }
+function growAll() { Array.prototype.forEach.call(document.querySelectorAll('#sheetBody textarea'), function (el) { if (el.value) growText(el); }); }
+var MED_ESSENTIAL = ['dose', 'per_dose', 'slots', 'with_food'];
+var MED_LABEL = ['label_head', 'label_boxed', 'label_how', 'label_side', 'label_warn', 'label_inter', 'label_patients', 'label_older', 'label_source', 'label_date'];
+function medFormGroups(fields, fl, field) {
+  var filled = function (keys) { return keys.filter(function (k) { var v = fl[k]; return v != null && v !== '' && k !== 'label_source' && k !== 'label_date'; }).length; };
+  var ess = fields.filter(function (f) { return MED_ESSENTIAL.indexOf(f[0]) >= 0 || f[2] === 'hidden' && MED_LABEL.indexOf(f[0]) < 0; });
+  var lab = fields.filter(function (f) { return MED_LABEL.indexOf(f[0]) >= 0; });
+  var more = fields.filter(function (f) { return ess.indexOf(f) < 0 && lab.indexOf(f) < 0; });
+  var nMore = filled(more.map(function (f) { return f[0]; })), nLab = filled(lab.map(function (f) { return f[0]; }));
+  return ess.map(field).join('') +
+    '<details class="form-more"' + (fl.check ? ' open' : '') + '><summary>More details <span class="muted">' + (nMore ? nMore + ' filled' : 'optional') + ': what it is for, doctor, pharmacy, dates, how many are left, instructions</span></summary>' + more.map(field).join('') + '</details>' +
+    '<details class="form-more" id="labelGroup"><summary>From the FDA label <span class="muted" id="labelCount">' + (nLab ? nLab + ' filled' : 'fills in by itself when you save') + '</span></summary>' + lab.map(field).join('') + '</details>';
+}
+
+/* ---------- drafts: nothing typed is lost ----------
+ * Every change in an Add or Edit sheet is kept on this phone. Closing the sheet by accident, a call
+ * coming in, or the phone locking does not lose it: opening the same entry again offers to pick up
+ * where it stopped. A draft is cleared when that entry is saved; drafts older than 3 days are dropped. */
+function draftKey(id, kind, pid) { return 'tcm-draft:' + (id || 'new-' + kind + '-' + (pid || '')); }
+function draftRead(key) { try { var d = JSON.parse(localStorage.getItem(key) || 'null'); return d && Date.now() - d.at < 3 * 864e5 ? d : null; } catch (e) { return null; } }
+function draftClear(id, kind, pid) { try { localStorage.removeItem(draftKey(id, kind, pid)); } catch (e) {} }
+function draftWatch(id, kind, pid) {
+  var body = document.getElementById('sheetBody'); if (!body) return;
+  var key = draftKey(id, kind, pid), d = draftRead(key);
+  var snapshot = function () {
+    var vals = {};
+    Array.prototype.forEach.call(body.querySelectorAll('input[id], textarea[id], select[id]'), function (el) { if (el.type !== 'hidden' && el.type !== 'checkbox' && el.type !== 'file') vals[el.id] = el.value; });
+    Array.prototype.forEach.call(body.querySelectorAll('.chips[id]'), function (c) { vals['chips:' + c.id] = Array.prototype.map.call(c.querySelectorAll('.chip.on'), function (x) { return x.dataset.v; }).join(','); });
+    return vals;
+  };
+  var start = JSON.stringify(snapshot()), timer = null;
+  var save = function () { clearTimeout(timer); timer = setTimeout(function () { var v = snapshot(); if (JSON.stringify(v) === start) return; try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), vals: v })); } catch (e) {} }, 400); };
+  body.addEventListener('input', save); body.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('.chip')) save(); });
+  if (d && JSON.stringify(d.vals) !== start) {
+    var h2 = body.querySelector('h2');
+    if (h2) h2.insertAdjacentHTML('afterend', '<div class="card draft-note" id="draftNote"><p><b>Pick up where you left off?</b> Something was typed here earlier and not saved.</p><div class="btn-row"><button type="button" class="btn sm" onclick="draftRestore(\'' + key + '\')">Yes, put it back</button><button type="button" class="btn sm ghost" onclick="draftDrop(\'' + key + '\')">Start fresh</button></div></div>');
+  }
+}
+function draftRestore(key) {
+  var d = draftRead(key), body = document.getElementById('sheetBody'); if (!d || !body) return;
+  Object.keys(d.vals).forEach(function (k) {
+    if (k.indexOf('chips:') === 0) { var c = document.getElementById(k.slice(6)); if (c) { var on = d.vals[k].split(','); Array.prototype.forEach.call(c.querySelectorAll('.chip'), function (x) { var want = on.indexOf(x.dataset.v) >= 0; if (want !== x.classList.contains('on')) toggleChip(x); }); } return; }
+    var el = document.getElementById(k); if (el) el.value = d.vals[k];
+  });
+  openFilledGroups();
+  growAll();
+  var n = document.getElementById('draftNote'); if (n) n.remove();
+}
+function draftDrop(key) { try { localStorage.removeItem(key); } catch (e) {} var n = document.getElementById('draftNote'); if (n) n.remove(); }
 // Where a saved value no longer matches what the photo said, show the photo's reading under
 // the box, so a change (fixing a misread, or a newer number) can be traced. History says who and when.
 function photoDiffNotes(fl) {
@@ -338,6 +394,7 @@ function saveRecord(id, kind, pid, force) {
     : DB.put('records', { kind: kind, for_profile_id: pid, title: title, occurred_at: K.date ? when : null, fields: fields });
   write.then(function (saved) {
     S.phoneCheck = null; toast(saved ? 'Saved' : 'This was deleted elsewhere');
+    if (saved) { draftClear(id, kind, pid); if (kind === 'medication') labelInBackground(saved); }
     if (saved && kind === 'visit' && S.scribe && S.scribe.pendingClear) { scribeClear(); S.scribe = null; }
     return (!id && saved ? snapAfterSave(saved) : Promise.resolve()).then(loadAll).then(function () {
       var offered = saved && NOTE_TEXT_FIELDS[kind] && noteOfferSheet(saved.for_profile_id || null, noteTextOf(kind, title, fields), noteBefore, when);
@@ -440,24 +497,67 @@ function slotsText(r) {
   var times = fl.slot_times || {};
   return MED_SLOTS.filter(function (s) { return on.indexOf(s[0]) >= 0; }).map(function (s) { return s[1].toLowerCase() + (times[s[0]] ? ' ' + times[s[0]] : ''); }).join(', ');
 }
-var LABEL_KEYS = [['label_boxed', 'boxed_warning'], ['label_how', 'how_to_take'], ['label_side', 'side_effects'], ['label_warn', 'warnings'], ['label_patients', 'for_patients'], ['label_older', 'older_adults']];
+var LABEL_KEYS = [['label_boxed', 'boxed_warning'], ['label_how', 'how_to_take'], ['label_side', 'side_effects'], ['label_warn', 'warnings'], ['label_inter', 'interactions'], ['label_patients', 'for_patients'], ['label_older', 'older_adults']];
 function labelHelp(fl) {
   return '<p class="muted">Official label text, shortened. It is written for everyone, so change or replace any of it with what her doctor or pharmacist said. Whatever is saved here is what the app shows.' +
     (fl.label_source ? ' Filled from <a href="' + esc(fl.label_source) + '" target="_blank" rel="noopener">the FDA label</a>' + (fl.label_date ? ' dated ' + esc(fl.label_date) : '') + '.' : '') + '</p>';
+}
+/* The FDA label, found by name (the lookup also asks RxNorm, so brand and store names work), then
+ * put into plain words by the AI, using only what the label says. When the AI step fails the
+ * label's own wording is used. Resolves to { values: {field: text}, d } or null when not found. */
+function labelLookup(name, bottle) {
+  return Sync.lookup('drug_label', name).then(function (d) {
+    if (!d || !d.found) return null;
+    var values = {}; LABEL_KEYS.forEach(function (k) { if (d[k[1]]) values[k[0]] = d[k[1]]; });
+    if (d.purpose) values.purpose = d.purpose.split('. ')[0].replace(/\.?$/, '.');
+    var sections = {}; ['boxed_warning', 'how_to_take', 'side_effects', 'warnings', 'interactions', 'for_patients', 'older_adults', 'purpose'].forEach(function (k) { if (d[k]) sections[k] = d[k]; });
+    return Sync.brain('label_plain', { name: (d.generic || name).toLowerCase(), bottle: bottle || '', label: sections }).then(function (p) {
+      var bul = function (a) { return (a || []).filter(Boolean).map(function (x) { return '\u2022 ' + x; }).join('\n'); };
+      var plain = { label_boxed: p.boxed, label_how: [p.bottle_first, bul(p.how_to_take)].filter(Boolean).join('\n'), label_side: bul(p.watch_for), label_warn: bul(p.warnings), label_inter: bul(p.avoid_with), label_older: bul(p.older_adults), purpose: p.what_for };
+      Object.keys(plain).forEach(function (k) { if (plain[k]) values[k] = plain[k]; });
+      return { values: values, d: d, plain: true };
+    }, function () { return { values: values, d: d, plain: false }; });
+  });
+}
+function labelSaidHint(r, name) {
+  var d = r.d, what = (d.generic || d.brand || name).toLowerCase();
+  return (r.plain ? 'Put into plain words from the FDA label for ' : 'Filled from the FDA label for ') + esc(what) + (d.label_date ? ' (' + esc(d.label_date) + ')' : '') + '. ' +
+    (d.source ? '<a href="' + esc(d.source) + '" target="_blank" rel="noopener">Read the full label</a>. ' : '') + 'Check it and change anything her doctor or pharmacist said differently.';
 }
 // Fills empty boxes; asks before replacing text that is already there.
 function fillFromLabel() {
   var name = document.getElementById('rTitle').value.trim(), hint = document.getElementById('labelHint');
   if (!name) return toast('Type the medicine name first');
   if (!Sync.enabled()) return toast('Turn on sync in Settings to look up labels');
-  hint.textContent = 'Looking up the label...';
-  Sync.lookup('drug_label', name).then(function (d) {
-    if (!d || !d.found) { hint.textContent = 'No FDA label found for "' + name + '". Try the generic name (furosemide, not Lasix 40).'; return; }
-    var filled = LABEL_KEYS.filter(function (k) { return d[k[1]]; });
-    var typed = filled.filter(function (k) { var el = document.getElementById('rf-' + k[0]); return el && el.value.trim() && el.value.trim() !== d[k[1]]; });
-    var replace = !typed.length || confirm('Some label boxes already have text. Replace them with the FDA wording? Cancel keeps yours and fills only the empty ones.');
-    filled.forEach(function (k) { var el = document.getElementById('rf-' + k[0]); if (el && (replace || !el.value.trim())) el.value = d[k[1]]; });
-    document.getElementById('rf-label_source').value = d.source || ''; document.getElementById('rf-label_date').value = d.label_date || '';
-    hint.textContent = 'Filled from the FDA label for ' + (d.generic || d.brand || name).toLowerCase() + (d.label_date ? ' (' + d.label_date + ')' : '') + '. Check it, edit anything, then Save.';
+  hint.innerHTML = workingArt('condense', 'Finding the official label and putting it in plain words...');
+  var bottle = (document.getElementById('rf-instructions') || {}).value || '';
+  labelLookup(name, bottle).then(function (r) {
+    if (!r) { hint.textContent = 'No FDA label found for "' + name + '". Check the spelling or try the generic name. Vitamins and supplements are usually not in the FDA list.'; return; }
+    var keys = Object.keys(r.values);
+    var typed = keys.filter(function (k) { var el = document.getElementById('rf-' + k); return el && el.value.trim() && el.value.trim() !== r.values[k]; });
+    var replace = !typed.length || confirm('Some boxes already have text. Replace them with the label? Cancel keeps yours and fills only the empty ones.');
+    keys.forEach(function (k) { var el = document.getElementById('rf-' + k); if (el && (replace || !el.value.trim())) el.value = r.values[k]; });
+    document.getElementById('rf-label_source').value = r.d.source || ''; document.getElementById('rf-label_date').value = r.d.label_date || '';
+    var gen = document.getElementById('rf-generic'); if (gen && !gen.value && r.d.generic) gen.value = r.d.generic.toLowerCase();
+    var g = document.getElementById('labelGroup'); if (g) g.open = true;
+    var c = document.getElementById('labelCount'); if (c) c.textContent = 'filled';
+    growAll();
+    hint.innerHTML = labelSaidHint(r, name);
   }).catch(function (e) { hint.textContent = 'Could not look it up: ' + e.message; });
+}
+// A medicine saved without label text gets it a moment later, into the empty boxes only.
+function labelInBackground(rec) {
+  var f = rec.fields || {};
+  if (!Sync.enabled() || f.label_source || LABEL_KEYS.some(function (k) { return f[k[0]]; })) return;
+  labelLookup(rec.title, f.instructions).then(function (r) {
+    if (!r) return;
+    return DB.update('records', rec.id, function (cur) {
+      if (!cur || cur.deleted) return null;
+      var cf = cur.fields = cur.fields || {};
+      Object.keys(r.values).forEach(function (k) { if (!cf[k]) cf[k] = r.values[k]; });
+      cf.label_source = r.d.source || null; cf.label_date = r.d.label_date || null;
+      if (!cf.generic && r.d.generic) cf.generic = r.d.generic.toLowerCase();
+      return cur;
+    }).then(function (saved) { if (!saved) return; toast('Added the FDA label for ' + rec.title + ' in plain words'); return loadAll().then(function () { refresh(); if (Sync.enabled()) syncNow(); }); });
+  }).catch(function () {});
 }

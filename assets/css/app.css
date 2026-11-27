@@ -437,3 +437,15 @@ h3 + .dose { margin-top: var(--space-1); }
 .visit-list li, .call-signs li { margin: 0 0 var(--space-2); line-height: 1.45; }
 .call-signs li { font-weight: 600; }
 .ai-draft { border-left: 3px solid var(--gold, var(--status-ok-fg)); }
+
+/* Medicine input: working pictures, folded form groups, drafts (v0.15.0) */
+.working { text-align: center; padding: var(--space-2) 0; }
+.working .art { max-width: 180px; margin-bottom: var(--space-2); animation: working-breathe 2.4s ease-in-out infinite; }
+.working p { margin: 0; color: var(--text-muted); }
+@keyframes working-breathe { 0%, 100% { transform: scale(1); opacity: .92; } 50% { transform: scale(1.04); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .working .art { animation: none; } }
+details.form-more { margin: var(--space-4) 0 0; border-top: 1px solid var(--border-subtle, var(--surface-sunken)); padding-top: var(--space-3); }
+details.form-more > summary { cursor: pointer; font-weight: 650; min-height: 44px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+details.form-more > summary .muted { font-weight: 400; font-size: var(--fs-caption, .85rem); }
+textarea.grow-text { resize: vertical; overflow: hidden; line-height: 1.45; }
+.draft-note { border-left: 3px solid var(--status-warn-fg); }

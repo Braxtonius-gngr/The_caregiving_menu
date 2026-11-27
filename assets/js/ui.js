@@ -54,6 +54,8 @@ var ICONS = {
 function icon(name) { return '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>'; }
 // A small illustration (assets/img, generated on fal 2026-11-27, generic scenes only). Decorative, so no alt text.
 function art(name, size) { return '<img class="art' + (size ? ' art-' + size : '') + '" src="assets/img/' + name + '.webp" alt="" width="720" height="540" loading="lazy" decoding="async">'; }
+// While the app is reading or looking something up: a picture that breathes gently and says what is happening.
+function workingArt(name, text) { return '<div class="working" role="status">' + art(name, 'small') + '<p>' + text + '</p></div>'; }
 // An icon in a soft teal circle, for tiles (the + sheet, Kitchen → Add).
 function iconDot(name) { return '<span class="ico-dot">' + icon(name) + '</span>'; }
 

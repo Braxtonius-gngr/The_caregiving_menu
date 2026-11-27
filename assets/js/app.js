@@ -130,7 +130,7 @@ function toggleShop(id) {
 // Settings: the family's AI balance this month (a meter, no prices) and who used what.
 var AI_FEATURE = { read_photo: 'Snap it', fill_form: 'Fill from a photo', read_vitals: 'Snap it', quick_log: 'Say it', scribe: 'Scribe', ask_file: 'Ask her file', handoff: 'Catch me up',
   estimate_plate: 'Meal estimates', parse_recipe: 'Kitchen', parse_receipt: 'Kitchen', pantry_photo: 'Kitchen', variations: 'Kitchen', diet_swaps: 'Kitchen', canonicalize: 'Kitchen', meal_ideas: 'Kitchen',
-  appointment_summary: 'Visit summary', schedule_draft: 'Medicine timing', timing_questions: 'Pharmacist questions', guidance: 'Current guidance' };
+  appointment_summary: 'Visit summary', label_plain: 'Medicine label in plain words', schedule_draft: 'Medicine timing', timing_questions: 'Pharmacist questions', guidance: 'Current guidance' };
 function renderAiUse() {
   var el = document.getElementById('aiUse'); if (!el || !Sync.enabled()) return;
   var c = Sync.getClient(); if (!c) return;
