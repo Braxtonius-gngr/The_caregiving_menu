@@ -100,6 +100,80 @@ var FX = (function () {
       }
     });
   }
+  /* ---------- the Rx finale ----------
+   * The ℞ glyph is drawn once off screen and sampled into ~1500 points, each with a little depth. Particles burst out of
+   * the centre and spring into the glyph, which turns gently around its upright axis (a perspective projection, so it reads
+   * as 3D), shimmers, then falls back into the page: it tips away, shrinks into depth and fades, and a small ripple
+   * opens where it lands (owner, 2026-11-27).
+   * Light mode draws normally; dark mode adds light (glow), since added light vanishes on a pale page. */
+  var rxCache = {};
+  function rxPoints(size) {
+    size = Math.round(size);
+    if (rxCache[size]) return rxCache[size];
+    var cv = document.createElement('canvas'), s = size, cx = cv.getContext('2d');
+    cv.width = s; cv.height = s;
+    var draw = function (txt, font) { cx.clearRect(0, 0, s, s); cx.fillStyle = 'black'; cx.textAlign = 'center'; cx.textBaseline = 'middle'; cx.font = font; cx.fillText(txt, s / 2, s * 0.52); };
+    draw('℞', '700 ' + Math.round(s * 0.86) + 'px "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols", "DejaVu Sans", serif');
+    var data = cx.getImageData(0, 0, s, s).data, filled = 0;
+    for (var i = 3; i < data.length; i += 4) if (data[i] > 128) filled++;
+    if (filled < s * s * 0.02) { draw('Rx', 'italic 700 ' + Math.round(s * 0.62) + 'px Georgia, serif'); data = cx.getImageData(0, 0, s, s).data; filled = 0; for (i = 3; i < data.length; i += 4) if (data[i] > 128) filled++; }
+    var want = 1500, step = Math.max(1, Math.sqrt(filled / want)), pts = [];
+    for (var yy = 0; yy < s; yy += step) for (var xx = 0; xx < s; xx += step) {
+      var jx = xx + Math.random() * step, jy = yy + Math.random() * step, k = ((jy | 0) * s + (jx | 0)) * 4 + 3;
+      if (data[k] > 128) pts.push({ x: jx / s - 0.5, y: jy / s - 0.5, z: (Math.random() - 0.5) * 0.08,
+        vx: (Math.random() - 0.5), vy: (Math.random() - 0.5), vz: (Math.random() - 0.5), r: 0.6 + Math.random() * 1.1,
+        c: Math.random() < 0.55 ? 'gold' : Math.random() < 0.7 ? 'frost' : 'mint', tw: 6 + Math.random() * 14, ph: Math.random() * 6 });
+    }
+    rxCache[size] = { size: s, pts: pts };
+    return rxCache[size];
+  }
+  function easeOutBack(t) { var c1 = 1.4, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); }
+  function drawRx(e, p) {
+    var S = e.pts.size * dpr, cx0 = e.x * dpr, cy0 = e.y * dpr, c = e.c, dark = isDark();
+    // phases: 0–.32 burst and gather, .32–.6 hold and turn, .6–1 fall back into the page and fade
+    var gather = clamp01(p / 0.32), hold = clamp01((p - 0.32) / 0.28), sink = clamp01((p - 0.6) / 0.4), fall = ease.inout(sink);
+    var alpha = smooth(p / 0.06) * (1 - smooth((sink - 0.4) / 0.6));
+    if (alpha < 0.004) return;
+    var turn = e.spin * (0.55 * (1 - ease.out(gather)) + 0.22 * Math.sin(hold * Math.PI) + 0.2 * fall);
+    var cosT = Math.cos(turn), sinT = Math.sin(turn);
+    // falling: the top tips away from us (a turn about the level axis) while the whole glyph shrinks into depth
+    var tilt = 1.15 * fall, cosX = Math.cos(tilt), sinX = Math.sin(tilt);
+    var zoom = 1 - 0.86 * fall, f = 1.6;
+    g.save();
+    g.globalCompositeOperation = dark ? 'lighter' : 'source-over';
+    // soft bloom behind the glyph
+    var bloomR = S * 0.62 * zoom, bloom = g.createRadialGradient(cx0, cy0, 0, cx0, cy0, bloomR);
+    bloom.addColorStop(0, col(c.gold, alpha * (dark ? 0.28 : 0.2) * (0.6 + 0.4 * gather)));
+    bloom.addColorStop(0.45, col(c.mint, alpha * 0.1));
+    bloom.addColorStop(1, col(c.main, 0));
+    g.fillStyle = bloom; g.beginPath(); g.arc(cx0, cy0, bloomR, 0, Math.PI * 2); g.fill();
+    var g1 = easeOutBack(gather), t = p * e.dur;
+    for (var i = 0; i < e.pts.pts.length; i++) {
+      var q = e.pts.pts[i];
+      // burst: start scattered around the centre, spring into place
+      var bx = q.vx * 0.9 * (1 - g1), by = q.vy * 0.9 * (1 - g1), bz = q.vz * 0.6 * (1 - g1);
+      // as it falls, the points draw in a little and trail behind, like something sinking through water
+      var lag = 1 - 0.25 * fall * (0.5 + 0.5 * Math.sin(q.ph));
+      var px = (q.x + bx) * lag, py = (q.y + by) * lag, pz = q.z + bz;
+      var rx = px * cosT + pz * sinT, rz = -px * sinT + pz * cosT;
+      var ry = py * cosX - rz * sinX, rz2 = py * sinX + rz * cosX;
+      var persp = f / (f + rz2 * 1.2), sx = cx0 + rx * S * persp * zoom, sy = cy0 + ry * S * persp * zoom;
+      var tw = 0.6 + 0.4 * Math.sin(q.ph + t * 0.001 * q.tw);
+      var a = alpha * tw * (0.55 + 0.45 * persp);
+      if (a < 0.01) continue;
+      var r = q.r * dpr * persp * (0.75 + 0.25 * zoom);
+      g.fillStyle = col(c[q.c], a);
+      g.beginPath(); g.arc(sx, sy, r, 0, Math.PI * 2); g.fill();
+      if (q.c === 'gold' && i % 3 === 0) { g.fillStyle = col(c.frost, a * 0.5); g.beginPath(); g.arc(sx, sy, r * 0.45, 0, Math.PI * 2); g.fill(); }
+    }
+    g.restore();
+  }
+  var darkMemo = { at: 0, v: false };
+  function isDark() {
+    var now = performance.now();
+    if (now - darkMemo.at > 1000) { var b = rgb('var(--surface-page)'); darkMemo = { at: now, v: (b[0] + b[1] + b[2]) / 3 < 100 }; }
+    return darkMemo.v;
+  }
   function drawSpark(e, p) {
     var q = ease.out(p), a = env(p, 0.1, 0.45) * (0.55 + 0.45 * Math.sin(e.phase + p * e.tw));
     if (a < 0.01) return;
@@ -113,7 +187,7 @@ var FX = (function () {
     effects = effects.filter(function (e) { return now < e.start + e.dur; });
     effects.forEach(function (e) {
       var p = (now - e.start) / e.dur; if (p < 0) return;
-      if (e.type === 'ring') drawRing(e, p); else if (e.type === 'flash') drawFlash(e, p); else if (e.type === 'nova') drawNova(e, p); else drawSpark(e, p);
+      if (e.type === 'ring') drawRing(e, p); else if (e.type === 'flash') drawFlash(e, p); else if (e.type === 'nova') drawNova(e, p); else if (e.type === 'rx') drawRx(e, p); else drawSpark(e, p);
     });
     if (effects.length) requestAnimationFrame(frame); else { running = false; g.clearRect(0, 0, canvas.width, canvas.height); }
   }
@@ -153,10 +227,17 @@ var FX = (function () {
           c: i % 2 ? c.gold : c.frost, size: 1.2 + Math.random() * 1.6, phase: Math.random() * 6, tw: 10 + Math.random() * 14,
           start: now + bounce + Math.random() * 160, dur: t * (1.1 + Math.random() * 0.5) });
       }
+      // The finale: the energy gathers into a glowing Rx that turns in depth, then falls back into the page.
+      var rxAt = now + bounce + 60, rxSize = Math.min(innerWidth, innerHeight) * 0.5;
+      effects.push({ type: 'rx', x: x, y: y, c: { frost: c.frost, gold: c.gold, mint: c.mint, main: c.main }, start: rxAt, dur: 2600,
+        pts: rxPoints(rxSize), spin: Math.random() < 0.5 ? -1 : 1 });
+      // where it lands, one quiet ripple in gold and frost
+      effects.push(ring({ k: 0.5, r0: 2, r1: rxSize * 0.75, ease: 'out', body: 0.3, crests: [{ off: 0, w: 1.4, a: 0.8, c: c.gold, dash: [3, 2] }, { off: 3, w: 1, a: 0.6, c: c.frost, dash: [1.5, 2.5] }],
+        start: rxAt + 2600 * 0.84, dur: 1500, fin: 0.05, fout: 0.5 }));
     } else {
+      // Every other touch: one slow ring out to the edges, no return (owner, 2026-11-27).
       var soft = [{ off: 0, w: 1.8, a: 0.9, c: c.frost, dash: [4, 2.5] }];
-      effects.push(ring({ k: k, r0: 4, r1: far, ease: 'out', body: 0.26, crests: soft, start: now, dur: t, fout: 0.68 }));
-      effects.push(ring({ k: k * 0.55, r0: far, r1: far * 0.14, ease: 'inout', body: 0.26, crests: soft, start: now + t * 0.86, dur: t * 1.3, fin: 0.14, fout: 0.3, drift: -0.2 }));
+      effects.push(ring({ k: k, r0: 4, r1: far, ease: 'out', body: 0.26, crests: soft, start: now, dur: 1100 + 1600 * k, fout: 0.6 }));
     }
     if (!running) { running = true; requestAnimationFrame(frame); }
   }
