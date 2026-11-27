@@ -164,7 +164,7 @@ function renderAuthBox() {
       : art('sign-in', 'small') + signInBlock('s');
     var fam = document.getElementById('familyBox');
     if (fam) { if (s) renderFamilyBox(); else fam.innerHTML = '<p class="muted">Sign in above to see and invite your family.</p>'; }
-    fillYourData(s); fillReports(s);
+    fillYourData(s); fillReports(s); if (typeof fillNotifyBox === 'function') fillNotifyBox();
   });
 }
 function joinWithCode() {
@@ -462,6 +462,7 @@ document.addEventListener('DOMContentLoaded', function () {
   Promise.all([DB.meta('active_profile'), DB.meta('simple_mode')]).then(function (m) { State.activeProfile = m[0]; State.simple = m[1]; return loadAll(); }).then(function () {
     applySimpleChrome();
     showScreen('home');
+    if (typeof notifyOpenFromUrl === 'function') notifyOpenFromUrl();
     handleShareTarget();
     startAutoSync();
     dropExpiredTrash().catch(function () {});

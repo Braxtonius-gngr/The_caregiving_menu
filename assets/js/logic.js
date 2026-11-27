@@ -367,6 +367,52 @@ var Logic = (function () {
     return { left: left, perDay: perDay, days: perDay ? Math.floor(left / perDay) : null, counted: from };
   }
 
+  /* ---------- what is worth a phone notification (P-027) ----------
+   * The same rules as Today's red card, for one person on one care day, as a list of alerts. Each
+   * has a key that names it exactly once (so it is sent once), whether it may break quiet hours
+   * (urgent: a reading past a care-team number), the words, and the screen to open.
+   * data: { meds, doses, measurements, diary, settings, name, pid }; hour: decimal local hour now. */
+  var SLOT_WORD = { morning: 'morning', noon: 'midday', evening: 'evening', bedtime: 'bedtime' };
+  var VITAL_WORD = { blood_pressure: 'Blood pressure', glucose: 'Blood sugar', oxygen: 'Oxygen', temperature: 'Temperature' };
+  function weekKey(day) { var d = new Date(day + 'T12:00:00Z'), dow = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - dow); return d.toISOString().slice(0, 10); }
+  function dueAlerts(data, day, hour, startHour, doseAfter) {
+    var s = data.settings || {}, pid = data.pid || null, who = data.name ? data.name + ': ' : '', out = [];
+    var stays = s.care_stays || [], away = stayOpen(stays), mine = function (x) { return !x.deleted && (x.for_profile_id || null) === pid; };
+    var ms = (data.measurements || []).filter(mine);
+    if (!away) {
+      medPlan(data.meds || [], data.doses || [], day, hour, stays, startHour).forEach(function (r) {
+        if (r.state !== 'overdue' || hour < r.hour + (doseAfter == null ? 3 : doseAfter)) return;
+        out.push({ key: 'dose:' + r.med.id + ':' + day + ':' + r.slot, kind: 'dose', urgent: false, screen: 'home',
+          text: who + 'The ' + (SLOT_WORD[r.slot] || r.slot) + ' dose of ' + r.med.title + ' is not marked yet.' });
+      });
+    }
+    ms.filter(function (m) { return VITAL_WORD[m.kind] && careDay(m.taken_at, startHour) === day; }).forEach(function (m) {
+      var f = vitalFlags(m, s); if (!f.length) return;
+      out.push({ key: 'reading:' + m.id, kind: 'reading', urgent: true, screen: 'home',
+        text: who + f.map(function (x) { return x.text; }).join('; ') + (s.vitals_source ? ' (' + s.vitals_source + ')' : '') + '.' });
+    });
+    weightFlags(weightChange(ms, pid, day, startHour), s).forEach(function (t, i) {
+      out.push({ key: 'weight:' + day + ':' + i, kind: 'reading', urgent: true, screen: 'home', text: who + 'Weight ' + t + (s.alert_source ? ' (alert level: ' + s.alert_source + ')' : '') + '.' });
+    });
+    var rise = weightRising(ms, pid, day, startHour, 3);
+    if (rise) out.push({ key: 'rise:' + day, kind: 'trend', urgent: false, screen: 'home', text: who + 'Morning weight has gone up ' + rise.mornings + ' mornings in a row (+' + rise.gain.toFixed(1) + ' lb).' });
+    if (!away) (data.meds || []).filter(function (m) { return !m.deleted && medActive(m, day); }).forEach(function (m) {
+      var left = supplyLeft(m, data.doses || [], day); if (!left || left.days == null || left.days > 5) return;
+      var runOut = addDays(day, left.days), refill = (m.fields || {}).refill_on;
+      if (refill && refill <= runOut) return;
+      out.push({ key: 'supply:' + m.id + ':' + weekKey(day), kind: 'supply', urgent: false, screen: 'file',
+        text: who + 'About ' + (left.days === 0 ? 'no days' : left.days + (left.days === 1 ? ' day' : ' days')) + ' of ' + m.title + ' left. Time to ask for a refill?' });
+    });
+    return out;
+  }
+  // The evening summary: doses marked out of scheduled, and fluid in and out, for one care day.
+  function daySummary(data, day, startHour) {
+    var pid = data.pid || null, plan = medPlan(data.meds || [], data.doses || [], day, 99, (data.settings || {}).care_stays || [], startHour);
+    var due = plan.filter(function (r) { return r.state !== 'covered'; }), given = due.filter(function (r) { return r.dose && r.dose.fields.status === 'given'; });
+    var b = fluidBalance((data.diary || []).filter(function (e) { return !e.deleted && (e.for_profile_id || null) === pid && careDay(e.eaten_at, startHour) === day; }));
+    return { given: given.length, due: due.length, inMl: b.inMl, outMl: b.outMl };
+  }
+
   // A suggested fluid amount for one serving of a food, or 0. Only ever a suggestion.
   var FLUID_FOODS = [
     [/\b(soup|broth|bouillon|stew|chili|chowder|bisque|gumbo|ramen|pho|consomm)/i, 1],
@@ -824,7 +870,7 @@ var Logic = (function () {
     if (m) return +m[1] || words[m[1]] || 1;
     return 1;
   }
-  return { vitalFlags: vitalFlags, VITAL_LIMITS: VITAL_LIMITS, weightRising: weightRising, fluidSurplusRun: fluidSurplusRun, missedBySlot: missedBySlot, supplyLeft: supplyLeft, exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, noteOffers: noteOffers, noteOffersNew: noteOffersNew, medSig: medSig, medGive: medGive, medKey: medKey, medFrequency: medFrequency, medTimingIssues: medTimingIssues, mergeMeds: mergeMeds, repointPlan: repointPlan, medSame: medSame, medBrief: medBrief, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
+  return { dueAlerts: dueAlerts, daySummary: daySummary, weekKey: weekKey, vitalFlags: vitalFlags, VITAL_LIMITS: VITAL_LIMITS, weightRising: weightRising, fluidSurplusRun: fluidSurplusRun, missedBySlot: missedBySlot, supplyLeft: supplyLeft, exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, noteOffers: noteOffers, noteOffersNew: noteOffersNew, medSig: medSig, medGive: medGive, medKey: medKey, medFrequency: medFrequency, medTimingIssues: medTimingIssues, mergeMeds: mergeMeds, repointPlan: repointPlan, medSame: medSame, medBrief: medBrief, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
     slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, stayOpen: stayOpen, stayAt: stayAt, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();

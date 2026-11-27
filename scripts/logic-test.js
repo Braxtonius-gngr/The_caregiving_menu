@@ -505,4 +505,25 @@ t('supplyLeft: count on hand minus doses given since, days at the daily rate', f
   assert.strictEqual(Logic.supplyLeft({ id: 'm2', fields: { slots: 'morning' } }, ds, '2026-11-21'), null);
 });
 
+t('dueAlerts: a dose 3 hours after its time, readings past care-team numbers, once each by key', function () {
+  var med = { id: 'm1', kind: 'medication', title: 'Furosemide 40 mg', for_profile_id: 'p', fields: { slots: 'morning' } };
+  var data = { pid: 'p', name: 'Mom', meds: [med], doses: [], measurements: [{ id: 'v1', kind: 'blood_pressure', value: 172, value2: 90, taken_at: '2026-11-27T09:00:00', for_profile_id: 'p' }], diary: [], settings: { bp_sys_high: 160 } };
+  var at10 = Logic.dueAlerts(data, '2026-11-27', 10, 0).map(function (a) { return a.key; });
+  assert.deepEqual(at10, ['reading:v1']); // morning dose (8:00) is overdue at 10 but not yet 3 hours late
+  var at11 = Logic.dueAlerts(data, '2026-11-27', 11, 0);
+  assert.deepEqual(at11.map(function (a) { return a.key; }), ['dose:m1:2026-11-27:morning', 'reading:v1']);
+  assert.strictEqual(at11[0].text, 'Mom: The morning dose of Furosemide 40 mg is not marked yet.');
+  assert.strictEqual(at11[1].urgent, true); assert.strictEqual(at11[0].urgent, false);
+  data.doses = [{ fields: { med_id: 'm1', day: '2026-11-27', slot: 'morning', status: 'given' } }];
+  assert.strictEqual(Logic.dueAlerts(data, '2026-11-27', 11, 0).filter(function (a) { return a.kind === 'dose'; }).length, 0);
+  data.doses = []; data.settings.care_stays = [{ org: 'Hospital', from_at: '2026-11-26T10:00:00' }];
+  assert.strictEqual(Logic.dueAlerts(data, '2026-11-27', 11, 0).filter(function (a) { return a.kind === 'dose'; }).length, 0); // under care: no dose alerts
+});
+t('daySummary and weekKey', function () {
+  var med = { id: 'm1', kind: 'medication', title: 'X', fields: { slots: 'morning,evening' } };
+  var s = Logic.daySummary({ pid: null, meds: [med], doses: [{ fields: { med_id: 'm1', day: '2026-11-27', slot: 'morning', status: 'given' } }], diary: [], settings: {} }, '2026-11-27', 0);
+  assert.strictEqual(s.given, 1); assert.strictEqual(s.due, 2);
+  assert.strictEqual(Logic.weekKey('2026-11-27'), '2026-11-23'); assert.strictEqual(Logic.weekKey('2026-11-23'), '2026-11-23');
+});
+
 console.log(n + ' tests passed');

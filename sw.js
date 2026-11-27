@@ -1,5 +1,5 @@
 /* Service worker: cache the app shell, network-first for everything else. */
-var CACHE = 'tcm-shell-v67';
+var CACHE = 'tcm-shell-v68';
 var CDN = 'https://cdn.jsdelivr.net/npm/';
 var SHELL = [
   './',
@@ -21,6 +21,7 @@ var SHELL = [
   './assets/js/file.js',
   './assets/js/today.js',
   './assets/js/insights.js',
+  './assets/js/notify.js',
   './assets/js/cuff.js',
   './assets/js/snap.js',
   './assets/js/scribe.js',
@@ -65,6 +66,24 @@ self.addEventListener('activate', function (e) {
   e.waitUntil(caches.keys().then(function (keys) {
     return Promise.all(keys.filter(function (k) { return k !== CACHE; }).map(function (k) { return caches.delete(k); }));
   }).then(function () { return self.clients.claim(); }));
+});
+
+// Phone notifications (P-027). The server sends { title, body, url, tag, urgent }, encrypted for this phone.
+self.addEventListener('push', function (e) {
+  var d = {}; try { d = e.data ? e.data.json() : {}; } catch (err) { d = { body: e.data ? e.data.text() : '' }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'The Caregiving Menu', {
+    body: d.body || 'Something needs a look.', tag: d.tag || 'tcm', renotify: true, requireInteraction: !!d.urgent,
+    icon: './assets/icons/icon-192.png', badge: './assets/icons/icon-192.png', data: { url: d.url || './' }
+  }));
+});
+// Tapping it opens the app on the right screen, reusing an open window when there is one.
+self.addEventListener('notificationclick', function (e) {
+  e.notification.close();
+  var url = (e.notification.data && e.notification.data.url) || './';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
+    for (var i = 0; i < list.length; i++) { if ('focus' in list[i]) { list[i].navigate(url); return list[i].focus(); } }
+    return self.clients.openWindow(url);
+  }));
 });
 
 // Android "Share to" lands here as a POST. Park the shared text/photo in a cache the page

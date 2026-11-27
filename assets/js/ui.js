@@ -1423,7 +1423,7 @@ function renderSettings() {
       '<label>Project URL</label><input id="cfgUrl" placeholder="https://abcd1234.supabase.co" autocomplete="off">' +
       '<label>Anon (public) key</label><input id="cfgKey" placeholder="eyJ..." autocomplete="off">' +
       '<div class="btn-row"><button class="btn sm" onclick="connectCloud()">Connect</button></div>') + '</div>' +
-    (cloud ? '<h2>Family</h2><div class="card" id="familyBox">Loading...</div>' : '') +
+    (cloud ? '<h2>Family</h2><div class="card" id="familyBox">Loading...</div><h2>Notifications</h2><div class="card" id="notifyBox">Loading...</div>' : '') +
     '<h2>Diet profiles</h2>' + State.profiles.map(function (p) {
       var rules = S.rulesByProfile[p.id] || [];
       return '<div class="card"><div class="row between"><h3>' + esc(p.person_name) + '</h3><button class="btn sm ghost" onclick="editProfile(\'' + p.id + '\')">Edit</button></div><div class="muted">' + (Object.keys(p.daily_targets || {}).length ? Object.keys(p.daily_targets).map(function (k) { return esc(k.replace('_', ' ') + ' ≤ ' + p.daily_targets[k]); }).join(', ') : 'no daily targets') + '</div>' +
