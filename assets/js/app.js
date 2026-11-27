@@ -325,6 +325,7 @@ function syncNow() {
       if (lockedBefore !== State.eraseAfter) { applyRole(State.role); bgRefresh(); }
       if (justJoined) askMyName();
       dropExpiredTrash().catch(function () {});
+      if (typeof labelAutoRefresh === 'function') setTimeout(labelAutoRefresh, 4000);
       return DB.meta('my_role').then(function (role) {
         if (r.pulled || r.photos || role !== roleBefore || justJoined) return loadAll().then(bgRefresh);
       });

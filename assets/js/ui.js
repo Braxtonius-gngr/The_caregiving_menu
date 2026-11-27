@@ -105,6 +105,7 @@ function showScreen(name, arg) {
   if (name !== 'help') S.lastScreen = name;
   var entering = name !== currentScreen || !S.shownOnce; S.shownOnce = true;
   currentScreen = name;
+  document.body.dataset.screen = name; // wide layouts size some screens differently
   document.getElementById('screenTitle').textContent = TITLES[name] || name;
   var tab = { scan: 'kitchen', ask: 'home', handoff: 'home', medcheck: 'file', phototest: 'settings', recipes: 'kitchen', pantry: 'kitchen', recipe: 'kitchen', fluids: 'diary', trash: 'diary', meds: 'home', help: 'home', timing: 'home', patterns: 'home', visit: 'home', plans: 'home', plan: 'home', reports: 'settings' }[name] || name;
   document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === tab); });
@@ -121,7 +122,11 @@ function placeGlow() {
   var g = document.querySelector('.underglow'), t = document.querySelector('.tab.active:not(.tab-scan)');
   if (!g) return;
   g.classList.toggle('none', !t);
-  if (t) g.style.left = (t.offsetLeft + t.offsetWidth / 2) + 'px';
+  if (!t) return;
+  // On a wide screen the tab bar is a rail down the left side, so the glow follows the tab down it.
+  var rail = window.matchMedia && matchMedia('(min-width: 1100px)').matches;
+  g.style.left = (t.offsetLeft + t.offsetWidth / 2) + 'px';
+  g.style.top = rail ? (t.offsetTop + t.offsetHeight / 2) + 'px' : '';
 }
 window.addEventListener('resize', placeGlow);
 document.addEventListener('click', function (e) {

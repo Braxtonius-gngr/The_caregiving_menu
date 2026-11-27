@@ -449,3 +449,35 @@ details.form-more > summary { cursor: pointer; font-weight: 650; min-height: 44p
 details.form-more > summary .muted { font-weight: 400; font-size: var(--fs-caption, .85rem); }
 textarea.grow-text { resize: vertical; overflow: hidden; line-height: 1.45; }
 .draft-note { border-left: 3px solid var(--status-warn-fg); }
+
+/* ---------- Tablet and desktop (v0.16.0) ----------
+ * Phones are unchanged. From 768px windows open as centred dialogs. From 1100px the tab bar becomes
+ * a rail down the left, the page gets wider, and Today's lower half runs in two columns. */
+@media (min-width: 768px) {
+  :root { --page-x: var(--space-6); }
+  .sheet { align-items: center; padding: var(--space-6); }
+  .sheet-body { max-width: 640px; max-height: 86vh; border-radius: var(--radius-l); box-shadow: var(--elevation-2); animation: dialog-in var(--dur-enter) var(--ease-settle); padding-bottom: var(--space-5); }
+  #sheetBody > .btn-row:last-child { bottom: calc(-1 * var(--space-5)); margin-bottom: calc(-1 * var(--space-5)); padding-bottom: var(--space-3); border-radius: 0 0 var(--radius-l) var(--radius-l); }
+  body { --screen-max: 820px; }
+  .screen { max-width: var(--screen-max); }
+  /* The title lines up with the content column, however wide the window is. */
+  .topbar { padding-left: max(var(--page-x), calc((100% - var(--screen-max)) / 2 + var(--page-x))); padding-right: max(var(--page-x), calc((100% - var(--screen-max)) / 2 + var(--page-x))); }
+  .art { max-width: 340px; }
+  .vitals { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
+@keyframes dialog-in { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
+@media (min-width: 1100px) {
+  :root { --rail-w: 92px; }
+  body { padding-left: calc(var(--rail-w) + var(--space-5)); }
+  .tabbar { left: var(--space-4); right: auto; top: 50%; bottom: auto; transform: translateY(-50%); width: var(--rail-w); height: auto; max-width: none; margin: 0; flex-direction: column; padding: var(--space-3) 0; gap: var(--space-2); }
+  .tab { flex: none; width: 100%; height: 72px; }
+  .tab-scan { height: 76px; }
+  .underglow { left: 50%; transition: top 560ms var(--ease-settle), opacity 300ms ease; }
+  body { --screen-max: 880px; }
+  body[data-screen="home"], body[data-screen="visit"] { --screen-max: 1180px; }
+  .today-cols { columns: 2; column-gap: var(--space-5); }
+  .today-cols > * { break-inside: avoid; display: inline-block; width: 100%; vertical-align: top; }
+  .today-cols > .section-label { display: block; }
+  .toast { bottom: var(--space-6); left: calc(50% + (var(--rail-w) + var(--space-5)) / 2); }
+}
+@media (min-width: 1100px) and (prefers-reduced-motion: reduce) { .sheet-body { animation: none; } }

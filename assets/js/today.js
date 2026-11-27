@@ -27,6 +27,8 @@ function renderHome(arg) {
   html += eraseBanner() + gettingStarted(pid);
   if (flags.length) html += '<div class="card attention" role="alert"><h3>' + icon('alert') + ' Needs attention</h3>' + flags.map(function (f) { return '<div class="list-item"><div class="grow">' + f.text + '</div>' + (f.action || '') + '</div>'; }).join('') + '</div>';
   html += todayMeds(pid, day, plan);
+  // Below the urgent part, a wide screen shows the rest in two columns (one column on a phone, same order).
+  html += '<div class="today-cols">';
   html += todayChecks(pid);
   html += todayExercises(pid);
   html += '<div class="section-label">Today&rsquo;s readings</div>';
@@ -37,6 +39,7 @@ function renderHome(arg) {
   html += todayComing(pid, day);
   html += todayInsights(pid);
   html += todayMeals(pid, prof, entries);
+  html += '</div>';
   return html + legalFooter();
 }
 // Snap a photo is the main way in; voice and the visit scribe sit beside it.

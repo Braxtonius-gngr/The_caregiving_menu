@@ -259,7 +259,7 @@ function editRecord(id, kind, pid) {
     : '<label for="rTitle">' + K.title + '</label><input id="rTitle" value="' + esc(r ? r.title : '') + '">';
   if (!r && (kind === 'medication' || kind === 'lab' || kind === 'visit' || kind === 'exercise')) titleField = '<div class="btn-row writer-only"><button type="button" class="btn sm ghost" onclick="snapIt(' + (pid ? '\'' + pid + '\'' : 'null') + ',\'' + kind + '\')">' + icon('camera') + ' From a photo</button></div>' + titleField;
   if (!r && kind === 'visit') titleField = titleField.replace('</button></div>', '</button><button type="button" class="btn sm ghost" onclick="scribeIt(' + (pid ? '\'' + pid + '\'' : 'null') + ')">' + icon('mic') + ' Scribe it</button></div>');
-  if (kind === 'medication') titleField += '<div class="btn-row writer-only"><button type="button" class="btn sm ghost" onclick="fillFromLabel()">Fill from the FDA label</button></div><div class="muted" id="labelHint" aria-live="polite"></div>';
+  if (kind === 'medication') titleField += '<div class="btn-row writer-only">' + (r ? '<button type="button" class="btn sm ghost" onclick="refreshLabelNow(\'' + r.id + '\')">' + icon('update') + ' Refresh the label</button>' : '<button type="button" class="btn sm ghost" onclick="fillFromLabel()">Fill from the FDA label</button>') + '</div><div class="muted" id="labelHint" aria-live="polite"></div>';
   var checkBox = r ? checkBoxHtml(r) : '';
   openSheet('<h2 style="margin-top:0">' + (r ? '' : 'Add ') + esc(K.label) + '</h2>' + checkBox + titleField +
     (dateType ? '<label for="rWhen">' + (kind === 'lab' ? 'Date of the test' : 'When') + '</label><input id="rWhen" type="' + (dateType === 'date' ? 'date' : 'datetime-local') + '" value="' + dateVal + '">' : '') +
@@ -372,6 +372,7 @@ function saveRecord(id, kind, pid, force) {
     else fields[f[0]] = v || null;
   });
   var ex = readExtraFields(); if (ex !== undefined) fields.extra = ex.length ? ex : null;
+  if (kind === 'medication' && S.labelV) { fields.label_v = S.labelV; S.labelV = null; }
   if (kind === 'medication') {
     var was = id ? (State.records || []).find(function (r) { return r.id === id; }) : null, sig = Logic.medSig(fields);
     // The count is "as of today" whenever it is typed or changed; otherwise it keeps its day.
@@ -538,12 +539,70 @@ function fillFromLabel() {
     var replace = !typed.length || confirm('Some boxes already have text. Replace them with the label? Cancel keeps yours and fills only the empty ones.');
     keys.forEach(function (k) { var el = document.getElementById('rf-' + k); if (el && (replace || !el.value.trim())) el.value = r.values[k]; });
     document.getElementById('rf-label_source').value = r.d.source || ''; document.getElementById('rf-label_date').value = r.d.label_date || '';
+    S.labelV = r.plain ? LABEL_V : 1;
     var gen = document.getElementById('rf-generic'); if (gen && !gen.value && r.d.generic) gen.value = r.d.generic.toLowerCase();
     var g = document.getElementById('labelGroup'); if (g) g.open = true;
     var c = document.getElementById('labelCount'); if (c) c.textContent = 'filled';
     growAll();
     hint.innerHTML = labelSaidHint(r, name);
   }).catch(function (e) { hint.textContent = 'Could not look it up: ' + e.message; });
+}
+/* ---------- refreshing labels saved before v0.15 ----------
+ * Older labels were cut off at 500-700 characters and in the label's own wording. label_v 2 marks
+ * a label filled by the new lookup in plain words. A refresh replaces label boxes that were filled
+ * from the FDA (label_source set) and fills empty ones; boxes typed by hand on a medicine never
+ * filled from the FDA are kept. The family's own boxes (instructions, dose, times) are never touched.
+ * History keeps the old text. A medicine with no FDA label is not retried for 14 days. */
+var LABEL_V = 2;
+function labelStale(r) {
+  var f = r.fields || {}, day = careToday();
+  if (r.deleted || r.kind !== 'medication' || (f.label_v || 0) >= LABEL_V || (f.stop && f.stop < day)) return false;
+  return !(f.label_tried && shiftDay(f.label_tried, 14) > day);
+}
+function labelRefresh(rec) {
+  var f0 = rec.fields || {};
+  return labelLookup(rec.title, f0.instructions).then(function (r) {
+    return DB.update('records', rec.id, function (cur) {
+      if (!cur || cur.deleted) return null;
+      var f = cur.fields = cur.fields || {};
+      if (!r) { f.label_tried = careToday(); return cur; }
+      var fromFda = !!f.label_source;
+      LABEL_KEYS.forEach(function (k) { var v = r.values[k[0]]; if (v && (fromFda || !f[k[0]])) f[k[0]] = v; });
+      if (!f.purpose && r.values.purpose) f.purpose = r.values.purpose;
+      if (!f.generic && r.d.generic) f.generic = r.d.generic.toLowerCase();
+      f.label_source = r.d.source || null; f.label_date = r.d.label_date || null; f.label_v = r.plain ? LABEL_V : 1;
+      delete f.label_tried;
+      return cur;
+    }).then(function (saved) { return { saved: saved, found: !!r, plain: !!(r && r.plain) }; });
+  });
+}
+// The button in a medicine's sheet.
+function refreshLabelNow(id) {
+  var rec = (State.records || []).find(function (x) { return x.id === id; }); if (!rec) return;
+  if (!Sync.enabled()) return toast('Turn on sync in Settings to look up labels');
+  var hint = document.getElementById('labelHint'); if (hint) hint.innerHTML = workingArt('condense', 'Finding the newest official label and putting it in plain words...');
+  labelRefresh(rec).then(function (x) {
+    return loadAll().then(function () {
+      refresh(); if (Sync.enabled()) syncNow();
+      if (!x.found) { if (hint) hint.textContent = 'No FDA label found for "' + rec.title + '". Vitamins and supplements are usually not in the FDA list.'; return; }
+      editRecord(id); var g = document.getElementById('labelGroup'); if (g) g.open = true;
+      toast(x.plain ? 'Label refreshed in plain words' : 'Label refreshed (plain words were not available, so this is the label wording)');
+    });
+  }).catch(function (e) { if (hint) hint.textContent = 'Could not refresh: ' + e.message; });
+}
+// Once per app start, after a sync: older labels are refreshed one at a time, quietly.
+var labelAutoRan = false;
+function labelAutoRefresh() {
+  if (labelAutoRan || !Sync.enabled() || State.role === 'viewer' || State.role === 'pending') return;
+  labelAutoRan = true;
+  var todo = (State.records || []).filter(labelStale).slice(0, 15), done = 0;
+  if (!todo.length) return;
+  todo.reduce(function (p, rec) {
+    return p.then(function () { return labelRefresh(rec).then(function (x) { if (x.found && x.saved) done++; }, function () {}); });
+  }, Promise.resolve()).then(function () {
+    if (!done) return;
+    return loadAll().then(function () { refresh(); syncNow(); toast(plural(done, 'medicine label') + ' updated in plain words'); });
+  });
 }
 // A medicine saved without label text gets it a moment later, into the empty boxes only.
 function labelInBackground(rec) {
@@ -555,7 +614,7 @@ function labelInBackground(rec) {
       if (!cur || cur.deleted) return null;
       var cf = cur.fields = cur.fields || {};
       Object.keys(r.values).forEach(function (k) { if (!cf[k]) cf[k] = r.values[k]; });
-      cf.label_source = r.d.source || null; cf.label_date = r.d.label_date || null;
+      cf.label_source = r.d.source || null; cf.label_date = r.d.label_date || null; cf.label_v = r.plain ? LABEL_V : 1;
       if (!cf.generic && r.d.generic) cf.generic = r.d.generic.toLowerCase();
       return cur;
     }).then(function (saved) { if (!saved) return; toast('Added the FDA label for ' + rec.title + ' in plain words'); return loadAll().then(function () { refresh(); if (Sync.enabled()) syncNow(); }); });
