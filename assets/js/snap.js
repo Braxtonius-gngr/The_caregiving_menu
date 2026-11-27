@@ -255,7 +255,7 @@ function snapKeepPhotos(rec) {
  * the first word or by the FDA generic name (Lasix = furosemide), so the second source is
  * added to the existing medicine instead of making a duplicate. Both photos are attached to it,
  * and a mismatch (list says 20 mg, bottle says 40 mg) is flagged for someone to check. */
-function snapMedKey(n) { return String(n || '').toLowerCase().split(/[\s,(]/)[0].replace(/[^a-z]/g, ''); }
+function snapMedKey(n) { return Logic.medKey(n); }
 function snapGeneric(name) {
   if (!name) return Promise.resolve(null);
   return Sync.lookup('drug_label', name).then(function (r) {
@@ -320,7 +320,7 @@ function snapFindMed(pid, name, g) {
   keys = keys.filter(Boolean);
   return recordsOf(pid, ['medication']).find(function (r) {
     var fl = r.fields || {};
-    return [snapMedKey(r.title), snapMedKey(fl.generic)].some(function (k) { return k && keys.indexOf(k) >= 0; });
+    return [r.title, fl.generic].concat(fl.also_called || []).map(snapMedKey).some(function (k) { return k && keys.indexOf(k) >= 0; });
   }) || null;
 }
 // "40 mg", "0.5mg" -> "40mg"; null when no strength is written.
