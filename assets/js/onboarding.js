@@ -118,7 +118,7 @@ function welcomeSave(auth) {
 // Snap it reads papers or bottles into a list to confirm line by line; typing one in is the fallback.
 function firstRunMeds(pid, name) {
   var a = pid ? '\'' + pid + '\'' : 'null';
-  openSheet(art('welcome', 'small') + '<h2 style="margin-top:0">Do you have ' + esc(name) + '&rsquo;s medicines nearby?</h2>' +
+  openSheet(art('first-meds', 'small') + '<h2 style="margin-top:0">Do you have ' + esc(name) + '&rsquo;s medicines nearby?</h2>' +
     '<p>Hospital papers, a medicine list or the pill bottles all work. Take a photo and the app reads them into a list for you to check, one line at a time. Nothing is saved until you confirm it.</p>' +
     '<div class="btn-col"><button class="btn" onclick="closeSheet();snapIt(' + a + ')">' + icon('camera') + ' Snap them now</button>' +
     '<button class="btn ghost" onclick="closeSheet();editRecord(null,\'medication\',' + a + ')">Type a medicine in</button>' +

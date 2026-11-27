@@ -161,7 +161,7 @@ function renderAuthBox() {
     box.innerHTML = s ? '<p>Signed in as <b>' + esc(s.user.email) + '</b></p><p id="syncError" class="note' + (lastSyncError ? '' : ' hidden') + '">' + (lastSyncError ? 'Last sync failed: ' + esc(lastSyncError) : '') + '</p>' +
         '<div class="btn-row"><button class="btn sm" onclick="syncNow()">Sync now</button><button class="btn sm ghost" onclick="Sync.signOut().then(function(){renderSettingsAgain()})">Sign out</button></div>' +
         '<details><summary class="muted">Have an invite code instead of a link?</summary><div class="row"><input id="joinCode" placeholder="Invite code" class="grow" autocomplete="off"><button class="btn sm" onclick="joinWithCode()">Join</button></div></details>'
-      : signInBlock('s');
+      : art('sign-in', 'small') + signInBlock('s');
     var fam = document.getElementById('familyBox');
     if (fam) { if (s) renderFamilyBox(); else fam.innerHTML = '<p class="muted">Sign in above to see and invite your family.</p>'; }
     fillYourData(s); fillReports(s);

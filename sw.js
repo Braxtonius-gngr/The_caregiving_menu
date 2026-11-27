@@ -1,5 +1,5 @@
 /* Service worker: cache the app shell, network-first for everything else. */
-var CACHE = 'tcm-shell-v64';
+var CACHE = 'tcm-shell-v65';
 var CDN = 'https://cdn.jsdelivr.net/npm/';
 var SHELL = [
   './',
@@ -44,7 +44,13 @@ var SHELL = [
   './assets/img/empty-file.webp',
   './assets/img/empty-kitchen.webp',
   './assets/img/under-care.webp',
-  './assets/img/all-done.webp'
+  './assets/img/all-done.webp',
+  './assets/img/sign-in.webp',
+  './assets/img/first-meds.webp',
+  './assets/img/visit.webp',
+  './assets/img/care-team.webp',
+  './assets/img/patterns.webp',
+  './assets/img/caught-up.webp'
 ];
 
 self.addEventListener('install', function (e) {

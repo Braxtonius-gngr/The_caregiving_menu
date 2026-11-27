@@ -427,3 +427,13 @@ h3 + .dose { margin-top: var(--space-1); }
 .art-small { max-width: 220px; margin-bottom: var(--space-3); }
 .next .art { opacity: .95; }
 @media (prefers-color-scheme: dark) { .art { filter: brightness(.82) saturate(.9); } }
+
+/* Warning signs and the visit summary (v0.14.0) */
+.vital.flagged { box-shadow: inset 0 0 0 1.5px var(--status-bad-fg); background: var(--status-bad-bg); }
+.empty-art { text-align: center; }
+.empty-art .art { margin-top: var(--space-2); }
+.visit-head .art, .card > .art-small:first-child { margin-top: var(--space-1); }
+.visit-list, .call-signs { margin: var(--space-2) 0 0; padding-left: 1.2em; }
+.visit-list li, .call-signs li { margin: 0 0 var(--space-2); line-height: 1.45; }
+.call-signs li { font-weight: 600; }
+.ai-draft { border-left: 3px solid var(--gold, var(--status-ok-fg)); }

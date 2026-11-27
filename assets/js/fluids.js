@@ -210,10 +210,18 @@ function careSettingsFields(p) {
     '<label for="csPhone">Care team phone (shown with warnings)</label><div class="row"><input id="csPhone" class="grow" type="tel" autocomplete="off" value="' + esc(cs.care_phone || '') + '" oninput="S.phoneCheck=null;document.getElementById(\'csPhoneHint\').textContent=\'\'">' +
     '<button type="button" class="btn sm ghost" onclick="checkPhoneField(\'csPhone\')">Check number</button></div>' +
     '<div class="muted" id="csPhoneHint" aria-live="polite">' + (cs.care_phone_type ? esc(phoneTypeText(cs.care_phone_type, cs.care_phone_carrier)) : '') + '</div>' +
+    '<h3>Warning signs</h3>' + art('care-team', 'small') + '<p class="muted">The readings the care team said to call about. Fill in only what they gave you; a blank box never warns. Nothing here is a default.</p>' +
+    '<div class="row">' + limitInput('csBpHi', 'Top BP number above', cs.bp_sys_high) + limitInput('csBpLo', 'Top BP number below', cs.bp_sys_low) + '</div>' +
+    '<div class="row">' + limitInput('csDiaHi', 'Bottom BP number above', cs.bp_dia_high) + limitInput('csSpo2Lo', 'Oxygen below (%)', cs.spo2_low) + '</div>' +
+    '<div class="row">' + limitInput('csPulseHi', 'Pulse above', cs.pulse_high) + limitInput('csPulseLo', 'Pulse below', cs.pulse_low) + '</div>' +
+    '<div class="row">' + limitInput('csSugarHi', 'Blood sugar above (mg/dL)', cs.glucose_high) + limitInput('csSugarLo', 'Blood sugar below (mg/dL)', cs.glucose_low) + '</div>' +
+    '<div class="row">' + limitInput('csTempHi', 'Temperature above (&deg;F)', cs.temp_high) + '<div class="grow"><label for="csVitalSrc">Set by</label><input id="csVitalSrc" placeholder="Heart clinic, 2026-11-25" value="' + esc(cs.vitals_source || '') + '"></div></div>' +
+    '<label for="csCallSigns">When to call (in the care team&rsquo;s words, one per line)</label><textarea id="csCallSigns" rows="3" placeholder="Short of breath lying flat&#10;Ankles more swollen than usual">' + esc(cs.call_signs || '') + '</textarea>' +
     '<h3>Her usual day</h3><p class="muted">Used to line medicine times up with her day.</p>' +
     '<div class="row"><div class="grow"><label for="csWake">Usually wakes</label><input id="csWake" type="time" value="' + esc(cs.wake_time || '') + '"></div>' +
     '<div class="grow"><label for="csBed">Usually goes to bed</label><input id="csBed" type="time" value="' + esc(cs.bed_time || '') + '"></div></div>';
 }
+function limitInput(id, label, v) { return '<div class="grow"><label for="' + id + '">' + label + '</label><input id="' + id + '" type="number" min="0" step="any" inputmode="decimal" value="' + (v == null ? '' : esc(v)) + '"></div>'; }
 function readCareSettings(prev) {
   var cs = Object.assign({}, prev || {});
   var num = function (id) { var v = document.getElementById(id).value; return v === '' ? null : +v; };
@@ -221,6 +229,9 @@ function readCareSettings(prev) {
   var oz = num('csLimit');
   cs.fluid_limit_ml = oz ? Math.round(Logic.toMl(oz, 'oz')) : null; cs.fluid_limit_source = txt('csLimitSrc');
   cs.wake_time = txt('csWake'); cs.bed_time = txt('csBed');
+  [['csBpHi', 'bp_sys_high'], ['csBpLo', 'bp_sys_low'], ['csDiaHi', 'bp_dia_high'], ['csSpo2Lo', 'spo2_low'], ['csPulseHi', 'pulse_high'], ['csPulseLo', 'pulse_low'],
+    ['csSugarHi', 'glucose_high'], ['csSugarLo', 'glucose_low'], ['csTempHi', 'temp_high']].forEach(function (p) { if (document.getElementById(p[0])) { var n = num(p[0]); cs[p[1]] = n > 0 ? n : null; } });
+  if (document.getElementById('csVitalSrc')) { cs.vitals_source = txt('csVitalSrc'); cs.call_signs = txt('csCallSigns'); }
   cs.weight_alert_day_lb = num('csDay'); cs.weight_alert_week_lb = num('csWeek'); cs.alert_source = txt('csAlertSrc');
   var typed = txt('csPhone');
   if (typed !== (prev || {}).care_phone) { delete cs.care_phone_e164; delete cs.care_phone_type; delete cs.care_phone_carrier; }

@@ -10,7 +10,7 @@ var LAB_UNITS = { eGFR: 'mL/min/1.73m²', Creatinine: 'mg/dL', BUN: 'mg/dL', Pot
 var RECORD_KINDS = {
   condition: { label: 'Condition', title: 'Condition', fields: [['since', 'Since', 'text'], ['notes', 'Notes', 'textarea']] },
   allergy: { label: 'Allergy', title: 'Allergic to', fields: [['reaction', 'Reaction', 'text'], ['severity', 'Severity', 'select:Mild|Moderate|Severe|Unknown']] },
-  medication: { label: 'Medicine', title: 'Medicine', fields: [['dose', 'Dose (e.g. 40 mg, 1 tablet)', 'text'], ['per_dose', 'How many each time (tablets, capsules, puffs). Leave blank if unsure', 'number'], ['slots', 'When to give it', 'slots'], ['with_food', 'Food', 'select:With food|Without food|Either'], ['when', 'Other timing notes', 'text'], ['purpose', 'What it is for', 'text'], ['prescriber', 'Prescribed by', 'text'], ['pharmacy', 'Pharmacy', 'text'], ['start', 'Started', 'date'], ['stop', 'Stop on (leave blank if ongoing)', 'date'], ['refill_on', 'Next refill due', 'date'], ['instructions', 'Instructions from the doctor or pharmacist', 'textarea'], ['generic', '', 'hidden'],
+  medication: { label: 'Medicine', title: 'Medicine', fields: [['dose', 'Dose (e.g. 40 mg, 1 tablet)', 'text'], ['per_dose', 'How many each time (tablets, capsules, puffs). Leave blank if unsure', 'number'], ['slots', 'When to give it', 'slots'], ['with_food', 'Food', 'select:With food|Without food|Either'], ['when', 'Other timing notes', 'text'], ['purpose', 'What it is for', 'text'], ['prescriber', 'Prescribed by', 'text'], ['pharmacy', 'Pharmacy', 'text'], ['start', 'Started', 'date'], ['stop', 'Stop on (leave blank if ongoing)', 'date'], ['refill_on', 'Next refill due', 'date'], ['on_hand', 'How many are left right now (count them to get a warning before they run out)', 'number'], ['on_hand_at', '', 'hidden'], ['instructions', 'Instructions from the doctor or pharmacist', 'textarea'], ['generic', '', 'hidden'],
     ['label_head', 'From the label', 'heading'], ['label_boxed', 'Boxed warning', 'textarea'], ['label_how', 'How to take it', 'textarea'], ['label_side', 'Side effects to watch for', 'textarea'], ['label_warn', 'Warnings', 'textarea'], ['label_patients', 'For patients and families', 'textarea'], ['label_older', 'Older adults', 'textarea'], ['label_source', '', 'hidden'], ['label_date', '', 'hidden']] },
   directive: { label: 'Directive', title: 'Document (e.g. DNR, POLST, living will, power of attorney)', fields: [['kept', 'Where the original is kept', 'text'], ['notes', 'Notes', 'textarea']] },
   contact: { label: 'Care team', title: 'Name', fields: [['role', 'Role (kidney doctor, hospice nurse, pharmacy...)', 'text'], ['phone', 'Phone', 'tel'], ['fax', 'Fax', 'text'], ['address', 'Address', 'text'], ['portal', 'Patient portal link', 'text'], ['notes', 'Notes', 'textarea']] },
@@ -318,6 +318,9 @@ function saveRecord(id, kind, pid, force) {
   var ex = readExtraFields(); if (ex !== undefined) fields.extra = ex.length ? ex : null;
   if (kind === 'medication') {
     var was = id ? (State.records || []).find(function (r) { return r.id === id; }) : null, sig = Logic.medSig(fields);
+    // The count is "as of today" whenever it is typed or changed; otherwise it keeps its day.
+    var wasF = (was && was.fields) || {};
+    fields.on_hand_at = fields.on_hand == null ? null : fields.on_hand !== wasF.on_hand || !wasF.on_hand_at ? careToday() : wasF.on_hand_at;
     fields.timing_ok = force === 'asis' || (was && (was.fields || {}).timing_ok === sig) ? sig : null;
     if (force !== 'asis' && medAsk(id, pid, title, fields)) return;
   }

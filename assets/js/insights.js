@@ -58,11 +58,14 @@ function renderTiming(arg) {
 
 /* ---------- patterns ---------- */
 function patternsFor(pid) {
-  return Logic.patterns({ measurements: State.measurements || [], meds: medsOf(pid), doses: dosesOf(pid), diary: State.diary, stays: careSettingsOf(pid).care_stays || [] }, pid, lastCareDays(28), dayStart());
+  var days = lastCareDays(28), w = Logic.missedBySlot(activeMeds(pid), dosesOf(pid), days, dayStart(), careSettingsOf(pid).care_stays || []);
+  var slot = { key: 'missed_slot', title: 'One time of day missed more than the others', n: w ? w.due : 0, enough: !!w,
+    text: w ? slotName(w.slot) + ' doses were not marked given ' + w.missed + ' of ' + w.due + ' times in the last 28 days, clearly more than at other times. Would a different time, or a reminder, fit her day better?' : 'No one time of day stands out yet.' };
+  return [slot].concat(Logic.patterns({ measurements: State.measurements || [], meds: medsOf(pid), doses: dosesOf(pid), diary: State.diary, stays: careSettingsOf(pid).care_stays || [] }, pid, days, dayStart()));
 }
 function renderPatterns(arg) {
   var pid = filePid(arg || {}), ps = patternsFor(pid);
-  return '<p class="muted">Plain math on her own logs from the last 28 days. A pattern is a reason to ask, not proof of a cause. It needs enough days on both sides before it shows a number.</p>' +
+  return (ps.some(function (p) { return p.enough; }) ? '' : '<div class="empty-art">' + art('patterns', 'small') + '</div>') + '<p class="muted">Plain math on her own logs from the last 28 days. A pattern is a reason to ask, not proof of a cause. It needs enough days on both sides before it shows a number.</p>' +
     ps.map(function (p) { return '<div class="card' + (p.enough ? '' : ' faded') + '"><b>' + esc(p.title) + '</b><p>' + esc(p.text) + '</p>' + (p.enough ? '<div class="muted">Based on ' + p.n + ' days or readings.</div>' : '') + '</div>'; }).join('') +
     '<p class="muted">The more days have meds marked, morning weights, BP and meals logged, the more this can show.</p>';
 }
@@ -71,7 +74,106 @@ function todayInsights(pid) {
   return '<div class="card"><div class="row between"><h3>' + icon('chart') + ' Insights</h3><button class="btn sm ghost" onclick="showScreen(\'patterns\',{pid:' + pidArg(pid) + '})">Patterns</button></div>' +
     (drafts.length ? '<div class="note">A medicine schedule draft is waiting for her pharmacist or doctor to approve. <button class="linkish" onclick="showScreen(\'plans\',{pid:' + pidArg(pid) + '})">Open</button></div>' : '') +
     (ps.length ? ps.slice(0, 2).map(function (p) { return '<div class="list-item"><div class="grow"><b>' + esc(p.title) + '</b><div class="muted">' + esc(p.text) + '</div></div></div>'; }).join('') : '<p class="muted">Patterns show here once there are enough days logged.</p>') +
-    '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'timing\',{pid:' + pidArg(pid) + '})">Timing review</button><button class="btn sm ghost" onclick="askGuidance(' + pidArg(pid) + ')">Ask about current guidance</button></div></div>';
+    '<div class="btn-row"><button class="btn sm" onclick="showScreen(\'visit\',{pid:' + pidArg(pid) + '})">' + icon('calendar') + ' Visit summary</button><button class="btn sm ghost" onclick="showScreen(\'timing\',{pid:' + pidArg(pid) + '})">Timing review</button><button class="btn sm ghost" onclick="askGuidance(' + pidArg(pid) + ')">Ask about current guidance</button></div></div>';
+}
+
+/* ---------- visit summary ----------
+ * Everything worth raising at an appointment, gathered from her own logs: readings past the care
+ * team's numbers, weight, doses missed or late, streaks and patterns. Plain counting; the AI step
+ * only turns it into questions, and the family decides what to bring. */
+function visitData(pid, span) {
+  var days = lastCareDays(span), set = {}, cs = careSettingsOf(pid);
+  days.forEach(function (d) { set[d] = true; });
+  var prof = State.profiles.find(function (p) { return p.id === pid; }) || {};
+  var ms = (State.measurements || []).filter(function (m) { return !m.deleted && (m.for_profile_id || null) === (pid || null) && set[careDayOf(m.taken_at)]; })
+    .sort(function (a, b) { return a.taken_at < b.taken_at ? -1 : 1; });
+  var warnings = [];
+  ms.forEach(function (m) { if (VITALS[m.kind]) Logic.vitalFlags(m, cs).forEach(function (f) { warnings.push({ day: careDayOf(m.taken_at), time: localTime(m.taken_at), text: VITALS[m.kind][0] + ' ' + vitalText(m) + ': ' + f.text }); }); });
+  days.forEach(function (d) { Logic.weightFlags(Logic.weightChange(State.measurements || [], pid, d, dayStart()), cs).forEach(function (t) { warnings.push({ day: d, time: '', text: 'Weight ' + t }); }); });
+  warnings.sort(function (a, b) { return (a.day + a.time) < (b.day + b.time) ? -1 : 1; });
+  var ws = Logic.standardWeights(State.measurements || [], pid, dayStart()).filter(function (w) { return set[w.day]; });
+  var weight = ws.length ? { first: ws[ws.length - 1], last: ws[0], n: ws.length } : null;
+  var vitals = Object.keys(VITALS).map(function (k) {
+    var xs = ms.filter(function (m) { return m.kind === k && m.value != null; }); if (!xs.length) return null;
+    var vs = xs.map(function (m) { return +m.value; }), avg = function (a) { return Math.round(a.reduce(function (s, x) { return s + x; }, 0) / a.length * 10) / 10; };
+    var r = { name: VITALS[k][0], unit: VITALS[k][1], n: xs.length, low: Math.min.apply(null, vs), high: Math.max.apply(null, vs), avg: avg(vs) };
+    if (k === 'blood_pressure') { var b = xs.filter(function (m) { return m.value2 != null; }).map(function (m) { return +m.value2; }); if (b.length) r.avg2 = avg(b); }
+    return r;
+  }).filter(Boolean);
+  var stays = cs.care_stays || [], due = 0, given = 0, doses = [];
+  activeMeds(pid).forEach(function (m) {
+    Logic.medSlots(m).filter(function (s) { return s !== 'prn'; }).forEach(function (s) {
+      var t = Logic.doseTiming(m, dosesOf(pid), s, days, dayStart(), stays);
+      due += t.given + t.skipped + t.unmarked; given += t.given;
+      if (t.skipped + t.unmarked || t.late) doses.push({ med: m.title, slot: slotName(s).toLowerCase(), missed: t.skipped + t.unmarked, late: t.late });
+    });
+  });
+  var day = careToday();
+  return { pid: pid, prof: prof, span: span, from: days[0], to: days[days.length - 1], warnings: warnings, weight: weight, vitals: vitals, doses: doses, due: due, given: given,
+    rise: Logic.weightRising(State.measurements || [], pid, day, dayStart(), 3), surplus: Logic.fluidSurplusRun(State.diary || [], pid, day, dayStart(), 3),
+    patterns: patternsFor(pid).filter(function (p) { return p.enough; }), questions: timingQuestions(timingData(pid)),
+    stays: stays.filter(function (s) { var a = careDayOf(s.from_at), b = s.to_at ? careDayOf(s.to_at) : day; return b >= days[0] && a <= day; }),
+    signs: String(cs.call_signs || '').split('\n').map(function (x) { return x.trim(); }).filter(Boolean), source: cs.vitals_source || '' };
+}
+function visitLines(d) {
+  var L = [], lb = function (x) { return (Math.round(x * 10) / 10) + ' lb'; };
+  var sec = function (title, rows) { if (rows.length) { L.push('', title + ':'); rows.forEach(function (r) { L.push('- ' + r); }); } };
+  sec('Readings past the care team\'s numbers', d.warnings.map(function (w) { return dayLabel(w.day) + (w.time ? ' ' + w.time : '') + ' · ' + w.text; }));
+  var trend = [];
+  if (d.weight) trend.push('Morning weight ' + lb(d.weight.first.lb) + ' (' + dayLabel(d.weight.first.day) + ') to ' + lb(d.weight.last.lb) + ' (' + dayLabel(d.weight.last.day) + '), ' + d.weight.n + ' mornings');
+  if (d.rise) trend.push('Weight up ' + d.rise.mornings + ' mornings in a row (+' + d.rise.gain.toFixed(1) + ' lb)');
+  if (d.surplus) trend.push('More fluid in than out on each of the last ' + d.surplus.days + ' days logged');
+  d.vitals.forEach(function (v) { var both = v.avg + (v.avg2 ? '/' + v.avg2 : ''); trend.push(v.name + ': ' + (v.n === 1 ? '1 reading, ' + both : v.n + ' readings, ' + v.low + ' to ' + v.high + (v.avg2 ? ' (top number)' : '') + ', average ' + both) + ' ' + v.unit); });
+  sec('Readings', trend);
+  sec('Medicines', (d.due ? [d.given + ' of ' + d.due + ' scheduled doses marked given'] : []).concat(d.doses.map(function (x) { return x.med + ' (' + x.slot + '): ' + [x.missed ? x.missed + ' not given or not marked' : '', x.late ? x.late + ' given 2+ hours late' : ''].filter(Boolean).join(', '); })));
+  sec('In care elsewhere', d.stays.map(function (s) { return s.org + ' from ' + dayLabel(careDayOf(s.from_at)) + (s.to_at ? ' to ' + dayLabel(careDayOf(s.to_at)) : ', still there'); }));
+  sec('Patterns (a reason to ask, not proof)', d.patterns.map(function (p) { return p.title + ': ' + p.text; }));
+  sec('Questions from the timing review', d.questions);
+  return L;
+}
+function visitText(d) {
+  return [(d.prof.person_name || 'Visit') + ': visit summary, ' + dayLabel(d.from) + ' to ' + dayLabel(d.to), 'Prepared by the family from home records. Not medical advice.'].concat(visitLines(d)).join('\n');
+}
+function renderVisit(arg) {
+  var pid = filePid(arg || {}), span = (arg && arg.span) || 14, d = visitData(pid, span);
+  S.visit = d;
+  var a = pidArg(pid), lines = visitLines(d), html = '';
+  html += '<div class="card visit-head">' + art('visit', 'small') + '<h3>Before the appointment</h3><p class="muted">Everything worth raising from the last ' + span + ' days, straight from what the family logged. Bring it, share it, or let the AI turn it into questions to ask.</p>' +
+    '<div class="chips">' + [7, 14, 30].map(function (n) { return '<button class="chip' + (n === span ? ' on' : '') + '" onclick="showScreen(\'visit\',{pid:' + a + ',span:' + n + '})">' + n + ' days</button>'; }).join('') + '</div></div>';
+  if (lines.length < 2) html += '<div class="card"><p class="muted">Nothing logged in this time yet. Readings, doses and weights show here as they are logged.</p></div>';
+  var block = null;
+  lines.forEach(function (l) {
+    if (!l) return;
+    if (l.slice(-1) === ':' && l.indexOf('- ') !== 0) { if (block) html += '</ul></div>'; html += '<div class="card"><h3>' + esc(l.slice(0, -1)) + '</h3><ul class="visit-list">'; block = true; return; }
+    html += '<li>' + esc(l.replace(/^- /, '')) + '</li>';
+  });
+  if (block) html += '</ul></div>';
+  if (d.signs.length) html += '<div class="card"><h3>When to call, from the care team</h3><ul class="visit-list">' + d.signs.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul></div>';
+  html += '<div id="visitAi" aria-live="polite"></div>';
+  html += '<div class="btn-row">' + (Sync.enabled() ? '<button class="btn" onclick="visitDraft()">' + icon('bulb') + ' Draft questions to ask</button>' : '') +
+    '<button class="btn ghost" onclick="visitShare()">Share</button><button class="btn ghost" onclick="copyText(visitText(S.visit), \'Copied\')">Copy</button><button class="btn ghost" onclick="visitPrint()">Print</button></div>' +
+    '<p class="note">A summary of what was logged at home, not medical advice. The care team decides what it means.</p>';
+  return html;
+}
+function visitShare() {
+  var text = visitText(S.visit);
+  if (navigator.share) return navigator.share({ title: 'Visit summary', text: text }).catch(function () {});
+  copyText(text, 'Copied');
+}
+function visitPrint() { printHtml('<h2>' + esc((S.visit.prof.person_name || '') + ': visit summary') + '</h2><pre style="white-space:pre-wrap;font:inherit">' + esc(visitText(S.visit)) + '</pre>'); }
+// The AI only rewords what is already here into questions. It sees no names.
+function visitDraft() {
+  var d = S.visit, box = document.getElementById('visitAi'); if (!box) return;
+  box.innerHTML = '<div class="card"><p class="muted">Drafting questions...</p></div>';
+  var digest = { kind: 'home care log (not a food diary)', span_days: d.span, summary_lines: visitLines(d).filter(Boolean), caregiver_notes: '' };
+  Sync.brain('appointment_summary', { digest: digest }).then(function (res) {
+    if (S.visit !== d || !document.getElementById('visitAi')) return;
+    S.summary = { res: res, d: { prof: d.prof, span: d.span } };
+    var list = function (title, items) { return items && items.length ? '<h3>' + title + '</h3><ul class="visit-list">' + items.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : ''; };
+    document.getElementById('visitAi').innerHTML = '<div class="card ai-draft"><p><b>' + esc(res.headline || '') + '</b></p>' + list('Questions to ask', res.questions_for_clinician) + list('Worth watching', res.watch_items) +
+      '<p class="muted small">' + esc(res.caveats || 'Drafted by AI from the summary above. Check it before you bring it.') + '</p>' +
+      '<div class="btn-row"><button class="btn sm" onclick="addQuestionsToNotes()">Add questions to her notes</button><button class="btn sm ghost" onclick="shareSummary()">Share questions</button></div>' + aiWrongLink('appointment_summary') + '</div>';
+  }).catch(function (e) { var b = document.getElementById('visitAi'); if (b) b.innerHTML = '<div class="card"><p class="note">Could not draft: ' + esc(e.message) + '</p></div>'; });
 }
 
 /* ---------- AI-drafted schedules ---------- */

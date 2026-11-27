@@ -290,6 +290,83 @@ var Logic = (function () {
     return f;
   }
 
+  /* ---------- warning signs from the care team ----------
+   * Limits are what the care team told the family; blank means no warning. Nothing here is a
+   * default, and the wording says what crossed which number, never what it means. */
+  var VITAL_LIMITS = [
+    ['blood_pressure', 'value', 'bp_sys_high', 'above', 'Top number'], ['blood_pressure', 'value', 'bp_sys_low', 'below', 'Top number'],
+    ['blood_pressure', 'value2', 'bp_dia_high', 'above', 'Bottom number'],
+    ['blood_pressure', 'pulse', 'pulse_high', 'above', 'Pulse'], ['blood_pressure', 'pulse', 'pulse_low', 'below', 'Pulse'],
+    ['oxygen', 'pulse', 'pulse_high', 'above', 'Pulse'], ['oxygen', 'pulse', 'pulse_low', 'below', 'Pulse'],
+    ['oxygen', 'value', 'spo2_low', 'below', 'Oxygen'],
+    ['glucose', 'value', 'glucose_high', 'above', 'Blood sugar'], ['glucose', 'value', 'glucose_low', 'below', 'Blood sugar'],
+    ['temperature', 'value', 'temp_high', 'above', 'Temperature']
+  ];
+  function vitalFlags(m, settings) {
+    if (!m || m.deleted || !settings) return [];
+    var out = [];
+    VITAL_LIMITS.forEach(function (r) {
+      if (m.kind !== r[0]) return;
+      var v = m[r[1]], lim = settings[r[2]];
+      if (v == null || v === '' || lim == null || lim === '' || !(+lim > 0)) return;
+      v = +v; lim = +lim;
+      if (r[3] === 'above' ? v > lim : v < lim) out.push({ key: r[2], text: r[4] + ' ' + v + ' is ' + r[3] + ' the ' + lim + ' the care team gave' });
+    });
+    return out;
+  }
+
+  /* ---------- streaks (plain counting on the last few days) ---------- */
+  // Morning weight up on each of the last n mornings in a row (consecutive days only).
+  function weightRising(measurements, profileId, day, startHour, n) {
+    n = n || 3;
+    var ws = standardWeights(measurements, profileId, startHour).filter(function (w) { return w.day <= day; });
+    if (ws.length < n + 1 || ws[0].day !== day) return null;
+    for (var i = 0; i < n; i++) { if (dayDiff(ws[i].day, ws[i + 1].day) !== 1 || !(ws[i].lb > ws[i + 1].lb)) return null; }
+    return { mornings: n, gain: ws[0].lb - ws[n].lb };
+  }
+  // Fluid in more than out on each of the last n days that have both logged, ending today or yesterday.
+  function fluidSurplusRun(diary, profileId, day, startHour, n) {
+    n = n || 3;
+    var run = 0, total = 0;
+    for (var i = 0; i < n + 1 && run < n; i++) {
+      var d = new Date(day + 'T12:00:00'); d.setDate(d.getDate() - i);
+      var key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      var b = fluidBalance(diary.filter(function (e) { return !e.deleted && (e.for_profile_id || null) === (profileId || null) && careDay(e.eaten_at, startHour) === key; }));
+      if (i === 0 && !(b.inMl > 0 && b.outMl > 0)) continue; // today may not be logged yet
+      if (b.inMl > 0 && b.outMl > 0 && b.inMl > b.outMl) { run++; total += b.inMl - b.outMl; } else break;
+    }
+    return run >= n ? { days: run, extraMl: total } : null;
+  }
+  // One time of day missed or late much more often than the others over the given days.
+  function missedBySlot(meds, doses, days, startHour, stays) {
+    var by = {};
+    meds.forEach(function (m) {
+      medSlots(m).forEach(function (slot) {
+        if (slot === 'prn') return;
+        var t = doseTiming(m, doses, slot, days, startHour, stays), b = by[slot] = by[slot] || { slot: slot, due: 0, missed: 0 };
+        b.due += t.given + t.skipped + t.unmarked; b.missed += t.skipped + t.unmarked;
+      });
+    });
+    var list = Object.keys(by).map(function (k) { return by[k]; }).filter(function (b) { return b.due >= 5; });
+    list.sort(function (a, b) { return b.missed / b.due - a.missed / a.due; });
+    var worst = list[0], rest = list.slice(1);
+    if (!worst || worst.missed < 3) return null;
+    var restRate = rest.length ? rest.reduce(function (s, b) { return s + b.missed; }, 0) / rest.reduce(function (s, b) { return s + b.due; }, 0) : 0;
+    return worst.missed / worst.due >= restRate * 2 + 0.1 ? worst : null;
+  }
+
+  /* ---------- how long a medicine supply lasts ----------
+   * fields.on_hand is a count the family typed (pills, capsules, puffs) on fields.on_hand_at.
+   * Each dose marked given since then uses fields.per_dose (1 when blank). */
+  function supplyLeft(med, doses, day) {
+    var f = med.fields || {};
+    if (f.on_hand == null || f.on_hand === '' || !f.on_hand_at) return null;
+    var per = +f.per_dose > 0 ? +f.per_dose : 1, from = String(f.on_hand_at).slice(0, 10);
+    var used = doses.filter(function (d) { var x = d.fields || {}; return !d.deleted && x.med_id === med.id && x.status === 'given' && x.day >= from && x.day <= day; }).length * per;
+    var left = Math.max(0, +f.on_hand - used), perDay = medSlots(med).filter(function (s) { return s !== 'prn'; }).length * per;
+    return { left: left, perDay: perDay, days: perDay ? Math.floor(left / perDay) : null, counted: from };
+  }
+
   // A suggested fluid amount for one serving of a food, or 0. Only ever a suggestion.
   var FLUID_FOODS = [
     [/\b(soup|broth|bouillon|stew|chili|chowder|bisque|gumbo|ramen|pho|consomm)/i, 1],
@@ -747,7 +824,7 @@ var Logic = (function () {
     if (m) return +m[1] || words[m[1]] || 1;
     return 1;
   }
-  return { exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, noteOffers: noteOffers, noteOffersNew: noteOffersNew, medSig: medSig, medGive: medGive, medKey: medKey, medFrequency: medFrequency, medTimingIssues: medTimingIssues, mergeMeds: mergeMeds, repointPlan: repointPlan, medSame: medSame, medBrief: medBrief, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
+  return { vitalFlags: vitalFlags, VITAL_LIMITS: VITAL_LIMITS, weightRising: weightRising, fluidSurplusRun: fluidSurplusRun, missedBySlot: missedBySlot, supplyLeft: supplyLeft, exerciseTarget: exerciseTarget, datedNotes: datedNotes, handoff: handoff, reconcileMeds: reconcileMeds, noteOffers: noteOffers, noteOffersNew: noteOffersNew, medSig: medSig, medGive: medGive, medKey: medKey, medFrequency: medFrequency, medTimingIssues: medTimingIssues, mergeMeds: mergeMeds, repointPlan: repointPlan, medSame: medSame, medBrief: medBrief, medSources: medSources, medStrength: medStrength, parseBpMeasurement: parseBpMeasurement, doseTiming: doseTiming, labelCues: labelCues, mealTimes: mealTimes, patterns: patterns, minuteOfDay: minuteOfDay, hhmm: hhmm,
     slotHour: slotHour, medActive: medActive, medSlots: medSlots, doseFor: doseFor, medPlan: medPlan, stayOpen: stayOpen, stayAt: stayAt, prnDoses: prnDoses, upcoming: upcoming, SLOT_HOURS: SLOT_HOURS, addDays: addDays,
     ML_PER: ML_PER, FLUID_UNITS: FLUID_UNITS, toMl: toMl, fromMl: fromMl, toLb: toLb, careDay: careDay, fluidIn: fluidIn, fluidOut: fluidOut, outputFlags: outputFlags, fluidBalance: fluidBalance, standardWeights: standardWeights, weightChange: weightChange, weightFlags: weightFlags, suggestFluidMl: suggestFluidMl, DV: DV, NUTRIENTS: NUTRIENTS, ingredientMatch: ingredientMatch, coverage: coverage, gramsFor: gramsFor, recipeNutrition: recipeNutrition, fitForProfile: fitForProfile, burnRate: burnRate, restockSuggestions: restockSuggestions, dayTotals: dayTotals, expiringSoon: expiringSoon, stitchPages: stitchPages, exifTakenAt: exifTakenAt, exactIngredient: exactIngredient };
 })();

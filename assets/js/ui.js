@@ -48,7 +48,8 @@ var ICONS = {
   pause: '<path d="M9 5v14M15 5v14"/>',
   clip: '<path d="M20.5 11.5l-8.3 8.3a5 5 0 0 1-7-7L13.6 4.4a3.3 3.3 0 0 1 4.7 4.7l-8.4 8.4a1.7 1.7 0 0 1-2.4-2.4l7.7-7.7"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
-  heart: '<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/>'
+  heart: '<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/>',
+  phone: '<path d="M6.6 3.5h2.6l1.4 4-1.9 1.3a11 11 0 0 0 6.5 6.5l1.3-1.9 4 1.4v2.6a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2z"/>'
 };
 function icon(name) { return '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>'; }
 // A small illustration (assets/img, generated on fal 2026-11-27, generic scenes only). Decorative, so no alt text.
@@ -96,17 +97,17 @@ function openSheet(html) { if (typeof aiWrongAppend === 'function') html = aiWro
 var scanSession = 0; // bumped when the scanner opens or a sheet closes; late lookups compare against it
 function closeSheet() { scanSession++; S.sharedPhoto = null; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
 
-var TITLES = { simple: '', home: 'Today', meds: 'Daily meds', help: 'How to', timing: 'Timing review', patterns: 'Patterns', plans: 'Pharmacist questions', phototest: 'Photo reader test', medcheck: 'Compare medicines', handoff: 'Catch me up', ask: 'Ask her file', reports: 'Reports', plan: 'Question sheet',  recipes: 'Recipes', scan: 'Kitchen', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted', file: 'Patient file', kitchen: 'Kitchen' };
+var TITLES = { simple: '', home: 'Today', meds: 'Daily meds', help: 'How to', timing: 'Timing review', patterns: 'Patterns', visit: 'Visit summary', plans: 'Pharmacist questions', phototest: 'Photo reader test', medcheck: 'Compare medicines', handoff: 'Catch me up', ask: 'Ask her file', reports: 'Reports', plan: 'Question sheet',  recipes: 'Recipes', scan: 'Kitchen', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted', file: 'Patient file', kitchen: 'Kitchen' };
 var currentScreen = 'home';
 function showScreen(name, arg) {
   if (name !== 'help') S.lastScreen = name;
   var entering = name !== currentScreen || !S.shownOnce; S.shownOnce = true;
   currentScreen = name;
   document.getElementById('screenTitle').textContent = TITLES[name] || name;
-  var tab = { scan: 'kitchen', ask: 'home', handoff: 'home', medcheck: 'file', phototest: 'settings', recipes: 'kitchen', pantry: 'kitchen', recipe: 'kitchen', fluids: 'diary', trash: 'diary', meds: 'home', help: 'home', timing: 'home', patterns: 'home', plans: 'home', plan: 'home', reports: 'settings' }[name] || name;
+  var tab = { scan: 'kitchen', ask: 'home', handoff: 'home', medcheck: 'file', phototest: 'settings', recipes: 'kitchen', pantry: 'kitchen', recipe: 'kitchen', fluids: 'diary', trash: 'diary', meds: 'home', help: 'home', timing: 'home', patterns: 'home', visit: 'home', plans: 'home', plan: 'home', reports: 'settings' }[name] || name;
   document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === tab); });
   placeGlow();
-  var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe, fluids: renderFluids, trash: renderTrash, file: renderFile, kitchen: renderKitchen, meds: renderMeds, help: renderHelp, timing: renderTiming, patterns: renderPatterns, plans: renderPlans, plan: renderPlan, phototest: renderPhotoTest, medcheck: renderMedCheck, handoff: renderHandoff, ask: renderAsk, reports: renderReports }[name];
+  var fn = { simple: renderSimple, home: renderHome, recipes: renderRecipes, scan: renderScan, pantry: renderPantry, diary: renderDiary, settings: renderSettings, recipe: renderRecipe, fluids: renderFluids, trash: renderTrash, file: renderFile, kitchen: renderKitchen, meds: renderMeds, help: renderHelp, timing: renderTiming, patterns: renderPatterns, visit: renderVisit, plans: renderPlans, plan: renderPlan, phototest: renderPhotoTest, medcheck: renderMedCheck, handoff: renderHandoff, ask: renderAsk, reports: renderReports }[name];
   var el = document.getElementById('screen');
   el.innerHTML = fn ? fn(arg) : '';
   // A new screen settles in once; a re-render of the same screen (after a save) stays still.

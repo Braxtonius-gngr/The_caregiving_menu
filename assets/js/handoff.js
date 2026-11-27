@@ -33,7 +33,7 @@ function renderHandoff(arg) {
     '<div class="chips">' + '<button class="chip' + (!(arg && arg.hours) ? ' on' : '') + '" onclick="showScreen(\'handoff\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">Since last time</button>' + pick(8, '8 hours') + pick(24, '1 day') + pick(72, '3 days') + '</div>' +
     '<div class="btn-row"><button class="btn" onclick="handoffDone()">&#10003; Got it</button>' + (h.empty ? '' : '<button class="btn ghost" onclick="handoffSay()">Say it in a few lines</button><button class="btn ghost" onclick="copyText(handoffText(), \'Copied\')">Copy</button>') + '</div>' +
     '<div id="handoffSay" aria-live="polite"></div></div>';
-  if (h.empty && !h.checks.length) return html + '<p class="muted">Nothing was logged for her in this time.</p>';
+  if (h.empty && !h.checks.length) return html + '<div class="card empty-art">' + art('caught-up', 'small') + '<p class="muted">Nothing was logged for her in this time. You are all caught up.</p></div>';
   var day = careToday(), att = attentionItems(pid, day, fluidEntriesFor(pid, day), planFor(pid, day));
   html += att.length ? '<div class="card attention"><h3>' + icon('alert') + ' Needs attention now</h3><ul>' + att.map(function (f) { return '<li>' + f.text + '</li>'; }).join('') + '</ul></div>' : '';
   html += section(icon('pill') + ' Medicines',

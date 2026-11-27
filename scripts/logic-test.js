@@ -473,4 +473,36 @@ t('exerciseTarget: times a day from the therapy sheet wording', function () {
   Object.keys(cases).forEach(function (k) { assert.strictEqual(Logic.exerciseTarget(k), cases[k], k); });
 });
 
+t('vitalFlags: only limits the care team set; says what crossed which number', function () {
+  var s = { bp_sys_high: 160, bp_sys_low: 90, pulse_low: 50, spo2_low: 90, glucose_high: '' };
+  var f = Logic.vitalFlags({ kind: 'blood_pressure', value: 172, value2: 95, pulse: 48 }, s).map(function (x) { return x.key; });
+  assert.deepEqual(f, ['bp_sys_high', 'pulse_low']);
+  assert.strictEqual(Logic.vitalFlags({ kind: 'blood_pressure', value: 160, value2: 95 }, s).length, 0); // equal is not over
+  assert.strictEqual(Logic.vitalFlags({ kind: 'oxygen', value: 88 }, s)[0].text, 'Oxygen 88 is below the 90 the care team gave');
+  assert.strictEqual(Logic.vitalFlags({ kind: 'glucose', value: 400 }, s).length, 0); // blank limit: no warning
+  assert.strictEqual(Logic.vitalFlags({ kind: 'oxygen', value: 80, deleted: true }, s).length, 0);
+  assert.strictEqual(Logic.vitalFlags({ kind: 'oxygen', value: 80 }, null).length, 0);
+});
+
+t('weightRising: three mornings up in a row, back-to-back days only', function () {
+  var w = function (day, lb) { return { kind: 'weight', standard: true, value: lb, unit: 'lb', taken_at: day + 'T13:00:00Z', for_profile_id: 'p' }; };
+  var ms = [w('2026-11-20', 150), w('2026-11-21', 151), w('2026-11-22', 151.5), w('2026-11-23', 152.4)];
+  var r = Logic.weightRising(ms, 'p', '2026-11-23', 0, 3);
+  assert.strictEqual(r.mornings, 3); assert.ok(Math.abs(r.gain - 2.4) < 0.01);
+  assert.strictEqual(Logic.weightRising(ms.slice(0, 3), 'p', '2026-11-22', 0, 3), null); // not enough mornings
+  var gap = [w('2026-11-18', 150), w('2026-11-21', 151), w('2026-11-22', 151.5), w('2026-11-23', 152.4)];
+  assert.strictEqual(Logic.weightRising(gap, 'p', '2026-11-23', 0, 3), null);
+  var dip = [w('2026-11-20', 150), w('2026-11-21', 149), w('2026-11-22', 151.5), w('2026-11-23', 152.4)];
+  assert.strictEqual(Logic.weightRising(dip, 'p', '2026-11-23', 0, 3), null);
+});
+
+t('supplyLeft: count on hand minus doses given since, days at the daily rate', function () {
+  var med = { id: 'm1', fields: { slots: 'morning,evening', per_dose: 1, on_hand: 20, on_hand_at: '2026-11-20' } };
+  var dose = function (day, slot, status) { return { fields: { med_id: 'm1', day: day, slot: slot, status: status || 'given' } }; };
+  var ds = [dose('2026-11-19', 'morning'), dose('2026-11-20', 'morning'), dose('2026-11-20', 'evening'), dose('2026-11-21', 'morning', 'skipped')];
+  var r = Logic.supplyLeft(med, ds, '2026-11-21');
+  assert.strictEqual(r.left, 18); assert.strictEqual(r.perDay, 2); assert.strictEqual(r.days, 9);
+  assert.strictEqual(Logic.supplyLeft({ id: 'm2', fields: { slots: 'morning' } }, ds, '2026-11-21'), null);
+});
+
 console.log(n + ' tests passed');

@@ -59,12 +59,45 @@ function attentionItems(pid, day, entries, plan) {
   rhythmFlags(pid, day).forEach(function (m) { out.push({ text: 'The monitor showed <b>' + esc(rhythmName(m.rhythm)) + '</b> at ' + esc(localTime(m.taken_at)) + (m.pulse != null ? ' (pulse ' + esc(m.pulse) + ')' : '') + '. Tell the care team, especially if it is new. Chest pain, fainting or trouble breathing: call 911.', action: call }); });
   var w = Logic.weightChange(State.measurements || [], pid, day, dayStart());
   Logic.weightFlags(w, cs).forEach(function (t) { out.push({ text: 'Weight ' + esc(t) + (cs.alert_source ? ' (alert level: ' + esc(cs.alert_source) + ')' : '') + '.', action: call }); });
+  todayVitalWarnings(pid, day, cs).forEach(function (x) { out.push({ text: '<b>' + esc(x.what) + '</b> at ' + esc(x.time) + ': ' + esc(x.text) + (cs.vitals_source ? ' (' + esc(cs.vitals_source) + ')' : '') + '.', action: call }); });
+  var rise = Logic.weightRising(State.measurements || [], pid, day, dayStart(), 3);
+  if (rise) out.push({ text: 'Morning weight has gone up <b>' + rise.mornings + ' mornings in a row</b> (' + (rise.gain >= 0 ? '+' : '') + rise.gain.toFixed(1) + ' lb). Worth mentioning to the care team.', action: call });
+  var surplus = Logic.fluidSurplusRun(State.diary || [], pid, day, dayStart(), 3);
+  if (surplus) out.push({ text: 'More went in than came out on each of the last <b>' + surplus.days + ' days</b> logged (about ' + shortOz(surplus.extraMl) + ' more in all). Worth mentioning to the care team.' });
+  if (!away) supplyWarnings(pid, day).forEach(function (x) { out.push(x); });
   var weighsDaily = Logic.standardWeights(State.measurements || [], pid, dayStart()).some(function (x) { return x.day >= shiftDay(day, -7); });
   // While she is in care elsewhere, the things only home would do are not missing.
   if (!away && !w && weighsDaily && careHourNow() >= 10) out.push({ text: 'No morning weight yet today.', action: '<button class="btn sm writer-only" onclick="logWeight()">Log weight</button>' });
   if (!away) plan.filter(function (p) { return p.state === 'overdue'; }).forEach(function (p) { out.push({ dose: true, text: '<b>' + esc(p.med.title) + '</b> ' + esc(slotName(p.slot).toLowerCase()) + ' dose not marked yet.', action: '<button class="btn sm writer-only" onclick="giveDose(\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')">Given</button>' }); });
   Logic.upcoming(medsOf(pid), day, 3, localDay).forEach(function (u) { out.push({ text: esc(u.title) + ' ' + (u.inDays === 0 ? 'today' : u.inDays === 1 ? 'tomorrow' : 'in ' + u.inDays + ' days') + '.' }); });
   return out;
+}
+
+// Today's readings that crossed a number the care team gave.
+function todayVitalWarnings(pid, day, cs) {
+  return (State.measurements || []).filter(function (m) { return !m.deleted && (m.for_profile_id || null) === (pid || null) && VITALS[m.kind] && careDayOf(m.taken_at) === day; })
+    .sort(function (a, b) { return a.taken_at < b.taken_at ? -1 : 1; })
+    .reduce(function (acc, m) { Logic.vitalFlags(m, cs).forEach(function (f) { acc.push({ what: VITALS[m.kind][0] + ' ' + vitalText(m), time: localTime(m.taken_at), text: f.text }); }); return acc; }, []);
+}
+// Medicines whose counted supply runs out within 5 days, unless a refill is due before then.
+function supplyWarnings(pid, day) {
+  var out = [];
+  medsOf(pid).filter(function (m) { return Logic.medActive(m, day); }).forEach(function (m) {
+    var s = Logic.supplyLeft(m, dosesOf(pid), day); if (!s || s.days == null || s.days > 5) return;
+    var runOut = shiftDay(day, s.days), refill = (m.fields || {}).refill_on;
+    if (refill && refill <= runOut) return;
+    out.push({ text: '<b>' + esc(m.title) + '</b>: about ' + (s.days === 0 ? 'no days' : plural(s.days, 'day')) + ' left (' + s.left + ' counted ' + esc(dayLabel(s.counted).toLowerCase()) + ', minus doses marked given). Time to ask for a refill?',
+      action: '<button class="btn sm ghost writer-only" onclick="editRecord(\'' + m.id + '\')">Update count</button>' });
+  });
+  return out;
+}
+function callSignsSheet(pid) {
+  var cs = careSettingsOf(pid), signs = String(cs.call_signs || '').split('\n').map(function (x) { return x.trim(); }).filter(Boolean);
+  var tel = cs.care_phone ? '<a class="btn" href="tel:' + esc(cs.care_phone_e164 || cs.care_phone.replace(/[^\d+]/g, '')) + '">' + icon('phone') + ' Call the care team</a>' : '';
+  openSheet(art('care-team', 'small') + '<h2 style="margin-top:0">When to call</h2>' + (cs.vitals_source ? '<p class="muted">From ' + esc(cs.vitals_source) + '.</p>' : '') +
+    '<ul class="call-signs">' + signs.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul>' +
+    '<p class="note">Chest pain, fainting, trouble breathing or signs of a stroke: call 911.</p>' +
+    '<div class="btn-row">' + tel + '<button class="btn ghost" onclick="closeSheet()">Close</button></div>');
 }
 
 /* ---------- under care elsewhere ---------- */
@@ -345,16 +378,19 @@ function rhythmFlags(pid, day) {
 function todayVitals(pid, day) {
   var w = Logic.weightChange(State.measurements || [], pid, day, dayStart());
   var lastW = Logic.standardWeights(State.measurements || [], pid, dayStart())[0];
-  var tile = function (label, val, sub) { return '<div class="vital"><span class="muted">' + label + '</span><b>' + val + '</b>' + (sub ? '<span class="muted">' + sub + '</span>' : '') + '</div>'; };
+  var cs = careSettingsOf(pid);
+  var tile = function (label, val, sub, flag) { return '<div class="vital' + (flag ? ' flagged' : '') + '"><span class="muted">' + label + '</span><b>' + val + '</b>' + (sub ? '<span class="muted">' + sub + '</span>' : '') + '</div>'; };
   var tiles = [tile('Morning weight', w ? (Math.round(w.lb * 10) / 10) + ' lb' : 'Not yet', w ? (w.sincePrev != null ? (w.sincePrev >= 0 ? '+' : '') + w.sincePrev.toFixed(1) + ' lb' : '') : lastW ? 'last ' + (Math.round(lastW.lb * 10) / 10) + ' lb, ' + esc(dayLabel(lastW.day).toLowerCase()) : '')];
   Object.keys(VITALS).forEach(function (k) {
     var m = latestVital(pid, k); if (!m) return;
     var age = careDayOf(m.taken_at) === day ? localTime(m.taken_at) : esc(localDay(m.taken_at));
     var pt = pulseText(m);
-    tiles.push(tile(VITALS[k][0], esc(vitalText(m)) + ' <small>' + esc(m.unit || VITALS[k][1]) + '</small>', age + (pt ? '<br><span class="' + (m.rhythm === 'afib' || m.rhythm === 'irregular' ? 'flag-text' : '') + '">' + esc(pt) + '</span>' : '')));
+    var over = Logic.vitalFlags(m, cs).length > 0;
+    tiles.push(tile(VITALS[k][0], esc(vitalText(m)) + ' <small>' + esc(m.unit || VITALS[k][1]) + '</small>', age + (pt ? '<br><span class="' + (m.rhythm === 'afib' || m.rhythm === 'irregular' ? 'flag-text' : '') + '">' + esc(pt) + '</span>' : '') + (over ? '<br><span class="flag-text">past a care-team number</span>' : ''), over));
   });
   return '<div class="card"><h3>Vitals</h3><div class="vitals">' + tiles.join('') + '</div>' +
-    '<div class="btn-row writer-only"><button class="btn sm" onclick="logWeight()">Log weight</button><button class="btn sm ghost" onclick="logVital(' + pidArg(pid) + ')">Log BP, sugar, oxygen...</button>' + (cuffSupported() ? '<button class="btn sm ghost" onclick="connectCuff(' + pidArg(pid) + ')">Get readings from cuff</button>' : '') + '</div></div>';
+    '<div class="btn-row writer-only"><button class="btn sm" onclick="logWeight()">Log weight</button><button class="btn sm ghost" onclick="logVital(' + pidArg(pid) + ')">Log BP, sugar, oxygen...</button>' + (cuffSupported() ? '<button class="btn sm ghost" onclick="connectCuff(' + pidArg(pid) + ')">Get readings from cuff</button>' : '') + '</div>' +
+    (cs.call_signs ? '<div class="btn-row"><button class="btn sm ghost" onclick="callSignsSheet(' + pidArg(pid) + ')">' + icon('alert') + ' When to call</button></div>' : '') + '</div>';
 }
 function logVital(pid, kind) {
   kind = kind || 'blood_pressure';
