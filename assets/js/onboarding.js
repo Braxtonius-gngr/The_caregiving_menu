@@ -69,7 +69,7 @@ function signInBlock(id) {
 /* ---------- Today when nobody is cared for yet ---------- */
 function welcomeCard() {
   if (!State.signedIn) {
-    return '<div class="card welcome"><h2 style="margin-top:0">Welcome to The Caregiving Menu</h2>' +
+    return '<div class="card welcome">' + art('welcome') + '<h2 style="margin-top:0">Welcome to The Caregiving Menu</h2>' +
       '<p>One shared record for the family caring for someone at home: medicines, drinks and output, readings, visits and papers. Snap a photo or just say what happened, and it fills itself in for you to check.</p>' +
       signInBlock('w') +
       '<p class="muted">Joining a family? Open the invite link they sent you, then sign in.</p></div>';

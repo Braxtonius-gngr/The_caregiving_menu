@@ -51,6 +51,8 @@ var ICONS = {
   heart: '<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/>'
 };
 function icon(name) { return '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>'; }
+// A small illustration (assets/img, generated on fal 2026-11-27, generic scenes only). Decorative, so no alt text.
+function art(name, size) { return '<img class="art' + (size ? ' art-' + size : '') + '" src="assets/img/' + name + '.webp" alt="" width="720" height="540" loading="lazy" decoding="async">'; }
 // An icon in a soft teal circle, for tiles (the + sheet, Kitchen → Add).
 function iconDot(name) { return '<span class="ico-dot">' + icon(name) + '</span>'; }
 
@@ -160,7 +162,7 @@ function profileSwitcher() {
 function setProfile(id) { State.activeProfile = id; DB.meta('active_profile', id); refresh(); }
 
 // An empty Kitchen list says what would fill it and offers that step.
-function kitchenEmpty(text, label, tab) { return '<div class="empty">' + text + '<div class="btn-row" style="justify-content:center"><button class="btn sm ghost" onclick="showScreen(\'kitchen\',{tab:\'' + tab + '\'})">' + label + '</button></div></div>'; }
+function kitchenEmpty(text, label, tab, pic) { return '<div class="empty">' + (pic ? art(pic) : '') + text + '<div class="btn-row" style="justify-content:center"><button class="btn sm ghost" onclick="showScreen(\'kitchen\',{tab:\'' + tab + '\'})">' + label + '</button></div></div>'; }
 /* ---------- Kitchen ideas (was Home): what to cook, use up, restock, the shopping list ---------- */
 function renderKitchenIdeas() {
   var cookNow = State.recipes.filter(function (r) { return S.recipeInfo[r.id].cov.pct === 100 && S.recipeInfo[r.id].cov.total > 0; }).sort(function (a, b) { return (a.last_cooked_on || '') < (b.last_cooked_on || '') ? -1 : 1; });
@@ -171,7 +173,7 @@ function renderKitchenIdeas() {
   var restock = Logic.restockSuggestions(State.pantry, S.usageByIng, S.ingById);
   var html = profileSwitcher();
   if (!State.recipes.length) html += '<div class="card"><h3>Welcome</h3><p class="muted">Add a recipe and a few pantry items and this screen fills in with what you can cook tonight. Try <b>Settings &rarr; Load sample data</b> to see it working.</p></div>';
-  html += '<h2>Cook tonight</h2>' + (cookNow.length ? cookNow.slice(0, 6).map(recipeCard).join('') : kitchenEmpty('Nothing you can cook from the pantry yet.', 'Add a recipe', 'add'));
+  html += '<h2>Cook tonight</h2>' + (cookNow.length ? cookNow.slice(0, 6).map(recipeCard).join('') : kitchenEmpty('Nothing you can cook from the pantry yet.', 'Add a recipe', 'add', 'empty-kitchen'));
   html += '<h2>One trip away</h2>' + (oneTrip.length ? oneTrip.slice(0, 6).map(recipeCard).join('') : kitchenEmpty('No recipes one shopping trip away.', 'See the pantry', 'pantry'));
   if (useUp.length) html += '<h2>Use it up</h2><p class="muted">' + expiring.map(function (p) { return esc(S.ingById[p.ingredient_id].name) + ' (' + esc(p.expires_on) + ')'; }).join(', ') + '</p>' + useUp.slice(0, 4).map(recipeCard).join('');
   if (restock.length) html += '<h2>Restock</h2>' + restock.map(function (s) { return '<div class="list-item"><div class="grow"><b>' + esc(S.ingById[s.ingredient_id].name) + '</b><div class="muted">' + esc(s.why) + '</div></div><button class="btn sm" onclick="addToList(\'' + s.ingredient_id + '\',\'low_stock\')">+ list</button></div>'; }).join('');
@@ -749,7 +751,7 @@ function renderDiary() {
       var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
       var who = State.profiles.find(function (p) { return p.id === e.for_profile_id; });
       return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===this){event.preventDefault();this.click();}" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + (e.entry_kind === 'drink' ? icon('cup') + ' ' : e.entry_kind === 'output' ? icon('output') + ' ' : '') + esc(r ? r.title : e.entry_kind === 'output' && !e.free_text ? (OUTPUT_TYPES[e.output_type] || 'Output') : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult && e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + loggedBy(e) + '</span><div class="muted">' + (e.entry_kind === 'output' ? '<span class="' + (Logic.outputFlags(e).length ? 'flag-text' : '') + '">Out · ' + outputLine(e) + '</span>' + photoStatus(e) : Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + extraCount(e) + plateNote(e) + (e.entry_kind !== 'drink' && e.fluid_ml ? ' · +' + shortOz(Logic.fluidIn(e)) + ' fluid' : '')) + (e.entry_kind !== 'output' && !(e.kcal > 0) && e.estimate_source !== 'manual' && e.estimate_source !== 'water' && Sync.enabled() ? ' <button class="btn sm writer-only" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + plateButtons(e) + '</div></div></div>';
-    }).join('') : '<div class="empty">Nothing logged.</div>') +
+    }).join('') : '<div class="empty">' + art('empty-diary') + 'Nothing logged yet today.</div>') +
     nutritionRow(entries, prof) +
     trashLink() +
     (prof ? '<h2>Notes for ' + esc(prof.person_name) + '\'s next appointment</h2><div class="card"><textarea id="profNotes" rows="4" placeholder="Questions to ask, patterns you noticed...">' + esc(prof.notes || '') + '</textarea><div class="btn-row"><button class="btn sm" onclick="saveProfileNotes(\'' + prof.id + '\')">Save notes</button><button class="btn sm ghost" onclick="weeklyDigest(\'' + prof.id + '\')">Weekly digest</button></div></div>' : '');

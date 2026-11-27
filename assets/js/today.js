@@ -79,7 +79,7 @@ function careStartBtn(pid) { return '<button class="btn sm ghost writer-only" on
 function underCareCard(pid, stay) {
   var prof = State.profiles.find(function (p) { return p.id === pid; }) || {}, name = esc(prof.person_name || 'your person');
   var day = careToday(), dueHome = stay.until && stay.until <= day, a = pidArg(pid);
-  return '<div class="next under-care"><div class="when"><span>' + icon('heart') + ' Under care</span><span>since ' + esc(dayLabel(careDayOf(stay.from_at)).replace(/^(Today|Yesterday)$/, function (w) { return w.toLowerCase(); })) + '</span></div>' +
+  return '<div class="next under-care">' + art('under-care', 'small') + '<div class="when"><span>' + icon('heart') + ' Under care</span><span>since ' + esc(dayLabel(careDayOf(stay.from_at)).replace(/^(Today|Yesterday)$/, function (w) { return w.toLowerCase(); })) + '</span></div>' +
     '<div class="what">' + name + ' is being looked after at ' + esc(stay.org) + '</div>' +
     '<p class="quiet">Their team is giving the medicines, so there is nothing to give or mark here. These days are saved as covered, never as missed.</p>' +
     (dueHome ? '<p class="care-ask"><b>Is ' + name + ' home?</b> ' + (stay.until === day ? 'Today was' : esc(plainDay(stay.until)) + ' was') + ' the day you expected.</p>' +
@@ -175,7 +175,9 @@ function todayMeds(pid, day, plan) {
     : open.length ? '<div class="when"><span>Now</span>' + count + '</div><div class="what">' + (open.length === 1 ? esc(slotName(open[0].slot)) + ' dose' : 'Medicines due') + '</div>'
     : show.length ? '<div class="when"><span>Next up' + (show[0].time ? ' · ' + esc(show[0].time) : '') + '</span>' + count + '</div><div class="what">' + esc(slotName(show[0].slot)) + ' medicines</div>'
     : '<div class="when"><span>Medicines</span>' + count + '</div><div class="what">' + (plan.length ? 'Nothing due right now' : 'No scheduled doses today') + '</div>';
-  return '<div class="next' + (late.length ? ' urgent" role="alert' : '') + '">' + head + (show.length ? scrollList(show.map(function (p) { return nextDoseRow(p, pid); }), 5) : '') +
+  // Every dose of the day marked: a calm picture of water at sunrise.
+  var allDone = plan.length && done === plan.length ? art('all-done', 'small') : '';
+  return '<div class="next' + (late.length ? ' urgent" role="alert' : '') + '">' + head + allDone + (show.length ? scrollList(show.map(function (p) { return nextDoseRow(p, pid); }), 5) : '') +
     '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'meds\',{pid:' + pidArg(pid) + '})">All meds today</button>' + careStartBtn(pid) + '</div></div>';
 }
 var DOSE_TAG = { due: '<span class="badge warn">Due now</span>', overdue: '<span class="badge bad">Overdue</span>' };

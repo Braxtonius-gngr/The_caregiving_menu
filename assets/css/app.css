@@ -419,3 +419,9 @@ h3 + .dose { margin-top: var(--space-1); }
 .card.rec .ico { width: 16px; height: 16px; vertical-align: -3px; }
 /* A section bar with more tabs than fit fades at the right edge, so it reads as scrollable. */
 .seg.scrolls { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); padding-right: 36px; }
+
+/* U6: illustrations. Soft, rounded, never the loudest thing on screen; a little dimmer in dark mode. */
+.art { display: block; width: 100%; max-width: 300px; height: auto; margin: 0 auto var(--space-4); border-radius: var(--radius-m); }
+.art-small { max-width: 220px; margin-bottom: var(--space-3); }
+.next .art { opacity: .95; }
+@media (prefers-color-scheme: dark) { .art { filter: brightness(.82) saturate(.9); } }

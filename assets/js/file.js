@@ -46,7 +46,9 @@ function renderFile(arg) {
   if (!prof) return head;
   head += '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'ask\',{pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">' + icon('chat') + ' Ask her file</button></div>';
   var body = { summary: fileSummary, team: fileTeam, labs: fileLabs, visits: fileVisits, therapy: fileTherapy, documents: fileDocuments, updates: fileUpdates, export: fileExport }[section] || fileSummary;
-  return head + body(pid, prof);
+  // A file with nothing in it yet opens with a tidy folder, so the screen reads as ready, not broken.
+  var empty = section === 'summary' && !(State.records || []).some(function (r) { return !r.deleted && (r.for_profile_id || null) === (pid || null); });
+  return head + (empty ? art('empty-file') : '') + body(pid, prof);
 }
 function addBtn(kind, pid, label) { return '<button class="btn sm writer-only" onclick="editRecord(null,\'' + kind + '\',' + (pid ? '\'' + pid + '\'' : 'null') + ')">+ ' + esc(label || RECORD_KINDS[kind].label) + '</button>'; }
 function recordCard(r, sub, extra) {

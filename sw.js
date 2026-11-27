@@ -1,5 +1,5 @@
 /* Service worker: cache the app shell, network-first for everything else. */
-var CACHE = 'tcm-shell-v59';
+var CACHE = 'tcm-shell-v60';
 var CDN = 'https://cdn.jsdelivr.net/npm/';
 var SHELL = [
   './',
@@ -36,7 +36,15 @@ var SHELL = [
   './assets/js/nav.js',
   './assets/js/simple.js',
   './assets/js/app.js',
-  './assets/icons/icon.svg'
+  './assets/icons/icon.svg',
+  './assets/icons/icon-192.png',
+  './assets/icons/apple-touch-icon.png',
+  './assets/img/welcome.webp',
+  './assets/img/empty-diary.webp',
+  './assets/img/empty-file.webp',
+  './assets/img/empty-kitchen.webp',
+  './assets/img/under-care.webp',
+  './assets/img/all-done.webp'
 ];
 
 self.addEventListener('install', function (e) {
