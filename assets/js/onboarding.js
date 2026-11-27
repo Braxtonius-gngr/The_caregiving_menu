@@ -110,8 +110,19 @@ function welcomeSave(auth) {
       return Sync.householdName().then(function (n) { if (!n || n === 'Home') return Sync.setHouseholdName(auth === 'self' ? name + '’s care' : name + '’s family'); }).catch(function () {});
     })
     .then(function () { S.welcome = null; closeSheet(); return loadAll(); })
-    .then(function () { refresh(); if (Sync.enabled()) syncNow(); toast('Set up. Next: the Getting started steps on Today.'); })
+    .then(function () { refresh(); if (Sync.enabled()) syncNow(); firstRunMeds(State.activeProfile, name); })
     .catch(function (e) { toast('Could not save: ' + e.message); });
+}
+
+// First run (Step B): straight from setup to the medicine list, the thing a new family most needs.
+// Snap it reads papers or bottles into a list to confirm line by line; typing one in is the fallback.
+function firstRunMeds(pid, name) {
+  var a = pid ? '\'' + pid + '\'' : 'null';
+  openSheet(art('welcome', 'small') + '<h2 style="margin-top:0">Do you have ' + esc(name) + '&rsquo;s medicines nearby?</h2>' +
+    '<p>Hospital papers, a medicine list or the pill bottles all work. Take a photo and the app reads them into a list for you to check, one line at a time. Nothing is saved until you confirm it.</p>' +
+    '<div class="btn-col"><button class="btn" onclick="closeSheet();snapIt(' + a + ')">' + icon('camera') + ' Snap them now</button>' +
+    '<button class="btn ghost" onclick="closeSheet();editRecord(null,\'medication\',' + a + ')">Type a medicine in</button>' +
+    '<button class="btn ghost" onclick="closeSheet();toast(\'You can do this any time from Getting started on Today.\')">Not now</button></div>');
 }
 
 /* ---------- Getting started (families set up through the welcome screens) ---------- */
