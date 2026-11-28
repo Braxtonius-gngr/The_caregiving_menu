@@ -386,7 +386,8 @@ button.check:active { transform: scale(.92); }
 .tab.active::after { display: none; }
 .underglow { position: absolute; z-index: 0; top: 50%; left: 10%; width: 64px; height: 54px; margin: -27px 0 0 -32px; border-radius: 22px; pointer-events: none;
   background: radial-gradient(60% 70% at 50% 80%, color-mix(in srgb, var(--calm) 38%, transparent), color-mix(in srgb, var(--action) 14%, transparent) 60%, transparent 75%);
-  filter: blur(2px); transition: left 560ms var(--ease-settle), opacity 300ms ease; animation: breathe 5s ease-in-out infinite; }
+  filter: blur(2px); transition: left 560ms var(--ease-settle), opacity 300ms ease; animation: none; }
+.underglow.breathing { animation: breathe 5s ease-in-out 2; }
 .underglow::after { content: ""; position: absolute; left: 50%; bottom: 3px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--action); box-shadow: 0 0 8px 2px color-mix(in srgb, var(--calm) 70%, transparent); }
 .underglow.none { opacity: 0; }
 @keyframes breathe { 0%, 100% { opacity: .8; } 50% { opacity: 1; } }
@@ -481,3 +482,28 @@ textarea.grow-text { resize: vertical; overflow: hidden; line-height: 1.45; }
   .toast { bottom: var(--space-6); left: calc(50% + (var(--rail-w) + var(--space-5)) / 2); }
 }
 @media (min-width: 1100px) and (prefers-reduced-motion: reduce) { .sheet-body { animation: none; } }
+
+/* ---------- UX/UI pass (v0.18.0, P-028) ---------- */
+.today-line { align-items: center; gap: var(--space-3); }
+.today-catch { white-space: nowrap; min-height: 40px; } .today-catch .ico { width: 18px; height: 18px; vertical-align: -4px; }
+.card.worth { background: var(--status-warn-bg); border: 1px solid color-mix(in srgb, var(--status-warn-fg) 30%, transparent); box-shadow: none; }
+.card.worth h3 { color: var(--status-warn-fg); }
+.row-tap { min-height: 52px; border-radius: var(--radius-s); -webkit-tap-highlight-color: transparent; transition: background-color var(--dur-tap) var(--ease-settle); }
+.row-tap .grow { cursor: pointer; align-self: stretch; display: flex; flex-direction: column; justify-content: center; }
+.row-tap:active { background: color-mix(in srgb, var(--action) 8%, transparent); }
+.dose .check { position: relative; } .dose .check::after { content: ""; position: absolute; inset: -8px; }
+details.sumrow { background: var(--surface-card); border-radius: var(--radius-l); box-shadow: var(--elevation-1); margin: var(--space-3) 0; break-inside: avoid; }
+details.sumrow > summary { list-style: none; display: flex; align-items: center; gap: var(--space-3); min-height: 60px; padding: var(--space-2) var(--space-4); cursor: pointer; border-radius: var(--radius-l); }
+details.sumrow > summary::-webkit-details-marker { display: none; }
+details.sumrow > summary:focus-visible { outline: 3px solid var(--action); outline-offset: 2px; }
+details.sumrow > summary .grow { display: flex; flex-direction: column; min-width: 0; }
+details.sumrow > summary .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-ico { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--action) 12%, transparent); color: var(--action-text); flex: none; }
+details.sumrow > summary > .ico:last-child { color: var(--text-muted); transition: transform var(--dur-tap) var(--ease-settle); } details.sumrow[open] > summary > .ico:last-child { transform: rotate(90deg); }
+.dot-flag { width: 10px; height: 10px; border-radius: 50%; background: var(--status-bad); flex: none; }
+details.sumrow > .card { box-shadow: none; margin: 0; border-radius: 0; border-top: 1px solid var(--divider); background: transparent; }
+details.sumrow > .card:last-child { border-radius: 0 0 var(--radius-l) var(--radius-l); }
+.more-links { margin: var(--space-2) 0 0; color: var(--text-muted); } .more-links .linkish { min-height: 40px; }
+.legal-list { list-style: none; padding: 0; margin: var(--space-6) 0 0; } .legal-list a { display: flex; align-items: center; min-height: 44px; color: var(--text-muted); font-size: var(--fs-caption); }
+@media (prefers-reduced-motion: reduce) { .row-tap, details.sumrow > summary > .ico:last-child { transition: none; } }
+.list-item .icon-btn { min-width: 44px; min-height: 44px; }

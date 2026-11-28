@@ -12,7 +12,7 @@ function build() {
 }
 var want = build();
 if (process.argv.indexOf('--check') >= 0) {
-  var have = fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : '';
+  var have = fs.existsSync(out) ? fs.readFileSync(out, 'utf8').split(String.fromCharCode(13)).join('') : ''; // git may check files out with CRLF
   if (have !== want) { console.error('FAIL supabase/functions/_shared/carelogic.ts is out of date: run node scripts/sync-shared.js'); process.exit(1); }
   console.log('shared rules in sync');
 } else { fs.writeFileSync(out, want); console.log('wrote ' + path.relative(root, out)); }

@@ -61,7 +61,7 @@ function signInBlock(id) {
       '<p class="muted small">No email? Check spam, or wait a minute and use a different email to send again. You can also tap the link in the email on this phone.</p></div>';
   }
   return (g ? '<div class="btn-row"><button class="btn google-btn" onclick="signInGoogle()"><span class="g-logo">G</span> Continue with Google</button></div>' : '') +
-    '<details class="email-signin"' + (g ? '' : ' open') + '><summary class="muted">' + (g ? 'Or use your email' : 'Sign in with your email') + '</summary><div class="row"><input id="' + id + 'Email" type="email" class="grow" placeholder="you@example.com" autocomplete="email" autocapitalize="none" spellcheck="false" inputmode="email">' +
+    '<details class="email-signin"' + (g ? '' : ' open') + '><summary class="muted">' + (g ? 'Or use your email' : 'Sign in with your email') + '</summary><div class="row"><input id="' + id + 'Email" aria-label="Your email" type="email" class="grow" placeholder="you@example.com" autocomplete="email" autocapitalize="none" spellcheck="false" inputmode="email">' +
     '<button class="btn" onclick="signInEmail(\'' + id + 'Email\',\'' + id + 'Ts\')">Send code</button></div><div id="' + id + 'Ts"></div></details>' +
     '<p class="muted small">By continuing you agree to the <a href="legal/terms.html" target="_blank" rel="noopener">terms</a> and <a href="legal/privacy.html" target="_blank" rel="noopener">privacy policy</a> (drafts under legal review), including the <a href="legal/health-data.html" target="_blank" rel="noopener">health data policy</a>, and confirm you are 18 or older.</p>';
 }

@@ -9,5 +9,5 @@ var TCM_CONFIG = {
   GOOGLE_SIGNIN: true, // turn on once the Google provider is set up in Supabase
   TURNSTILE_SITE_KEY: '',
   VAPID_PUBLIC_KEY: 'BKXDscd7LO3GpKlEcV3wz4zVkrUdjgv3zmbe2YEFssuEud6s_EnWA_uA6-MXkpgPfYWm290_3l6rgnbJJEH39nE', // public half of the push key pair; the private half is a Supabase secret // Cloudflare Turnstile (public site key); empty = no bot check yet
-  APP_VERSION: '0.17.0'
+  APP_VERSION: '0.18.0'
 };

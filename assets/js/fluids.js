@@ -59,7 +59,7 @@ function fluidCard(entries, day) {
   return pids.map(function (pid) { return fluidCardFor(pid, entries.filter(function (e) { return (e.for_profile_id || null) === pid; }), day); }).join('');
 }
 function uniq(xs) { return xs.filter(function (x, i) { return xs.indexOf(x) === i; }); }
-function fluidCardFor(pid, entries, day) {
+function fluidCardFor(pid, entries, day, opts) {
   var b = Logic.fluidBalance(entries), cs = careSettingsOf(pid);
   var prof = State.profiles.find(function (p) { return p.id === pid; });
   var w = Logic.weightChange(State.measurements || [], pid, day, dayStart());
@@ -72,7 +72,7 @@ function fluidCardFor(pid, entries, day) {
     '<div><span class="muted">Out</span><b>' + shortOz(b.outMl) + '</b></div>' +
     '<div><span class="muted">Difference</span><b>' + (b.netMl >= 0 ? '+' : '&minus;') + shortOz(Math.abs(b.netMl)) + '</b><span class="muted">' + (b.netMl >= 0 ? 'more in' : 'more out') + '</span></div></div>' +
     (limit ? '<div class="bar' + (b.inMl > limit ? ' over' : '') + '" role="img" aria-label="' + pct + '% of the daily fluid limit"><span style="width:' + pct + '%"></span></div><div class="muted">' + shortOz(b.inMl) + ' of ' + shortOz(limit) + ' limit' + (cs.fluid_limit_source ? ' (' + esc(cs.fluid_limit_source) + ')' : '') + '</div>' : '') +
-    (w ? '<div class="muted">Morning weight ' + localTime(w.m.taken_at) + ': <b>' + (Math.round(w.lb * 10) / 10) + ' lb</b>' + (w.sincePrev != null ? ' (' + (w.sincePrev >= 0 ? '+' : '') + w.sincePrev.toFixed(1) + ' since ' + (w.prevDays === 1 ? 'yesterday' : w.prevDays + ' days ago') + ')' : '') + '</div>' : '') +
+    (w && !(opts && opts.today) ? '<div class="muted">Morning weight ' + localTime(w.m.taken_at) + ': <b>' + (Math.round(w.lb * 10) / 10) + ' lb</b>' + (w.sincePrev != null ? ' (' + (w.sincePrev >= 0 ? '+' : '') + w.sincePrev.toFixed(1) + ' since ' + (w.prevDays === 1 ? 'yesterday' : w.prevDays + ' days ago') + ')' : '') + '</div>' : '') +
     (flags.length ? '<div class="note flag" role="alert"><b>Worth a call to the care team if this is new or getting worse:</b><br>' + flags.map(esc).join('<br>') + (cs.care_phone ? '<br><a href="tel:' + esc(cs.care_phone_e164 || cs.care_phone.replace(/[^\d+]/g, '')) + '">Call ' + esc(cs.care_phone) + '</a>' : '') + '</div>' : '') +
     '<div class="btn-row"><button class="btn sm ghost" onclick="showScreen(\'fluids\',{day:\'' + day + '\',pid:' + (pid ? '\'' + pid + '\'' : 'null') + '})">In &amp; Out sheet</button></div></div>';
 }

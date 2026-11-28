@@ -23,25 +23,49 @@ function renderHome(arg) {
   var entries = fluidEntriesFor(pid, day), plan = planFor(pid, day);
   // Overdue doses show once, in the Next up panel (it turns into an alert); the red card keeps the other alerts.
   var flags = attentionItems(pid, day, entries, plan).filter(function (f) { return !f.dose; });
-  html += '<p class="today-sub">' + esc(dayLabel(day)) + ' · Caring for ' + esc(prof.person_name) + '</p>';
+  var urgent = flags.filter(function (f) { return f.urgent; }), worth = flags.filter(function (f) { return !f.urgent; });
+  var item = function (f) { return '<div class="list-item"><div class="grow">' + f.text + '</div>' + (f.action || '') + '</div>'; };
+  html += '<div class="row between today-line"><p class="today-sub">' + esc(dayLabel(day)) + ' · Caring for ' + esc(prof.person_name) + '</p>' + catchUpLink(pid) + '</div>';
   html += eraseBanner() + gettingStarted(pid);
-  if (flags.length) html += '<div class="card attention" role="alert"><h3>' + icon('alert') + ' Needs attention</h3>' + flags.map(function (f) { return '<div class="list-item"><div class="grow">' + f.text + '</div>' + (f.action || '') + '</div>'; }).join('') + '</div>';
+  // One alarm colour: red only for what crossed a number the care team gave; trends, refills and reminders are amber.
+  if (urgent.length) html += '<div class="card attention" role="alert"><h3>' + icon('alert') + ' Needs attention</h3>' + urgent.map(item).join('') + '</div>';
+  if (worth.length) html += '<div class="card worth" role="status"><h3>Worth a look</h3>' + worth.map(item).join('') + '</div>';
   html += todayMeds(pid, day, plan);
+  html += captureRow(pid);
   // Below the urgent part, a wide screen shows the rest in two columns (one column on a phone, same order).
   html += '<div class="today-cols">';
   html += todayChecks(pid);
   html += todayExercises(pid);
-  html += '<div class="section-label">Today&rsquo;s readings</div>';
-  html += fluidCardFor(pid, entries, day);
-  html += todayVitals(pid, day);
-  html += captureRow(pid);
-  html += catchUpRow(pid);
-  html += todayComing(pid, day);
-  html += todayInsights(pid);
-  html += todayMeals(pid, prof, entries);
+  html += foldRows(pid, day, prof, entries, urgent.length > 0);
   html += '</div>';
   return html + legalFooter();
 }
+/* ---------- folded rows (P-028) ----------
+ * Below the urgent part each area is one row that shows its key numbers and opens in place. The
+ * app remembers which rows a person keeps open; Readings opens by itself when something is past a
+ * care-team number. */
+function foldOpen(key) { try { return localStorage.getItem('tcm-fold:' + key) === '1'; } catch (e) { return false; } }
+function foldSave(el) { try { localStorage.setItem('tcm-fold:' + el.getAttribute('data-fold'), el.open ? '1' : '0'); } catch (e) {} }
+function foldRow(key, ico, title, summary, inner, force) {
+  return '<details class="sumrow' + (force ? ' flagged' : '') + '" data-fold="' + key + '"' + (force || foldOpen(key) ? ' open' : '') + ' ontoggle="foldSave(this)">' +
+    '<summary><span class="sr-ico">' + icon(ico) + '</span><span class="grow"><b>' + title + '</b><span class="muted">' + summary + '</span></span>' + (force ? '<span class="dot-flag" aria-label="Needs attention"></span>' : '') + icon('chev') + '</summary>' + inner + '</details>';
+}
+function foldRows(pid, day, prof, entries, urgentNow) {
+  var b = Logic.fluidBalance(entries), w = Logic.weightChange(State.measurements || [], pid, day, dayStart());
+  var bp = latestVital(pid, 'blood_pressure'), bpToday = bp && careDayOf(bp.taken_at) === day;
+  var readSum = [shortOz(b.inMl) + ' in', shortOz(b.outMl) + ' out', bpToday ? 'BP ' + vitalText(bp) : '', w ? (Math.round(w.lb * 10) / 10) + ' lb' : ''].filter(Boolean).join(' · ');
+  var up = Logic.upcoming(State.records.filter(function (r) { return (r.for_profile_id || null) === (pid || null); }), day, 14, localDay)[0];
+  var upSum = up ? esc(up.title) + ', ' + (up.inDays === 0 ? 'today' : up.inDays === 1 ? 'tomorrow' : new Date(up.day + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short' })) : 'Nothing in the next 2 weeks';
+  var ps = patternsFor(pid).filter(function (p) { return p.enough; }), drafts = recordsOf(pid, ['plan']).filter(function (r) { return (r.fields || {}).status === 'draft'; });
+  var inSum = drafts.length ? 'A schedule draft is waiting for approval' : ps.length ? plural(ps.length, 'pattern') + ' to look at' : 'Visit summary and patterns';
+  var cs = careSettingsOf(pid), limit = +cs.fluid_limit_ml || 0;
+  var mealSum = limit ? shortOz(Math.max(0, limit - b.inMl)) + ' fluid left today' : 'Ideas from what is on hand';
+  return foldRow('readings', 'drop', 'Readings', readSum, fluidCardFor(pid, entries, day, { today: true }) + todayVitals(pid, day), urgentNow) +
+    foldRow('coming', 'calendar', 'Coming up', upSum, todayComing(pid, day)) +
+    foldRow('insights', 'chart', 'Insights', inSum, todayInsights(pid)) +
+    foldRow('meals', 'meal', 'Meal thoughts', mealSum, todayMeals(pid, prof, entries));
+}
+function catchUpLink(pid) { return '<button class="linkish today-catch" onclick="showScreen(\'handoff\',{pid:' + pidArg(pid) + '})">' + icon('wave') + ' Catch me up</button>'; }
 // Snap a photo is the main way in; voice and the visit scribe sit beside it.
 function captureRow(pid) {
   return '<div class="capture writer-only"><button class="btn" onclick="snapIt(' + pidArg(pid) + ')">' + icon('camera') + ' Snap it</button>' +
@@ -57,12 +81,12 @@ function catchUpRow(pid) {
 function attentionItems(pid, day, entries, plan) {
   var cs = careSettingsOf(pid), out = [], b = Logic.fluidBalance(entries), limit = +cs.fluid_limit_ml || 0, away = careStay(pid);
   var call = cs.care_phone ? ' <a class="btn sm" href="tel:' + esc(cs.care_phone_e164 || cs.care_phone.replace(/[^\d+]/g, '')) + '">Call</a>' : '';
-  if (limit && b.inMl > limit) out.push({ text: 'Fluid in is <b>' + shortOz(b.inMl) + '</b>, over her ' + shortOz(limit) + ' limit' + (cs.fluid_limit_source ? ' (' + esc(cs.fluid_limit_source) + ')' : '') + '.' });
-  b.flags.forEach(function (f) { out.push({ text: esc(localTime(f.entry.eaten_at) + ' ' + (OUTPUT_TYPES[f.entry.output_type] || 'output').toLowerCase() + ': ' + f.reasons.join(', ')) + '. Worth a call to the care team if this is new or getting worse.', action: call }); });
-  rhythmFlags(pid, day).forEach(function (m) { out.push({ text: 'The monitor showed <b>' + esc(rhythmName(m.rhythm)) + '</b> at ' + esc(localTime(m.taken_at)) + (m.pulse != null ? ' (pulse ' + esc(m.pulse) + ')' : '') + '. Tell the care team, especially if it is new. Chest pain, fainting or trouble breathing: call 911.', action: call }); });
+  if (limit && b.inMl > limit) out.push({ urgent: true, text: 'Fluid in is <b>' + shortOz(b.inMl) + '</b>, over her ' + shortOz(limit) + ' limit' + (cs.fluid_limit_source ? ' (' + esc(cs.fluid_limit_source) + ')' : '') + '.' });
+  b.flags.forEach(function (f) { out.push({ urgent: true, text: esc(localTime(f.entry.eaten_at) + ' ' + (OUTPUT_TYPES[f.entry.output_type] || 'output').toLowerCase() + ': ' + f.reasons.join(', ')) + '. Worth a call to the care team if this is new or getting worse.', action: call }); });
+  rhythmFlags(pid, day).forEach(function (m) { out.push({ urgent: true, text: 'The monitor showed <b>' + esc(rhythmName(m.rhythm)) + '</b> at ' + esc(localTime(m.taken_at)) + (m.pulse != null ? ' (pulse ' + esc(m.pulse) + ')' : '') + '. Tell the care team, especially if it is new. Chest pain, fainting or trouble breathing: call 911.', action: call }); });
   var w = Logic.weightChange(State.measurements || [], pid, day, dayStart());
-  Logic.weightFlags(w, cs).forEach(function (t) { out.push({ text: 'Weight ' + esc(t) + (cs.alert_source ? ' (alert level: ' + esc(cs.alert_source) + ')' : '') + '.', action: call }); });
-  todayVitalWarnings(pid, day, cs).forEach(function (x) { out.push({ text: '<b>' + esc(x.what) + '</b> at ' + esc(x.time) + ': ' + esc(x.text) + (cs.vitals_source ? ' (' + esc(cs.vitals_source) + ')' : '') + '.', action: call }); });
+  Logic.weightFlags(w, cs).forEach(function (t) { out.push({ urgent: true, text: 'Weight ' + esc(t) + (cs.alert_source ? ' (alert level: ' + esc(cs.alert_source) + ')' : '') + '.', action: call }); });
+  todayVitalWarnings(pid, day, cs).forEach(function (x) { out.push({ urgent: true, text: '<b>' + esc(x.what) + '</b> at ' + esc(x.time) + ': ' + esc(x.text) + (cs.vitals_source ? ' (' + esc(cs.vitals_source) + ')' : '') + '.', action: call }); });
   var rise = Logic.weightRising(State.measurements || [], pid, day, dayStart(), 3);
   if (rise) out.push({ text: 'Morning weight has gone up <b>' + rise.mornings + ' mornings in a row</b> (' + (rise.gain >= 0 ? '+' : '') + rise.gain.toFixed(1) + ' lb). Worth mentioning to the care team.', action: call });
   var surplus = Logic.fluidSurplusRun(State.diary || [], pid, day, dayStart(), 3);
@@ -183,7 +207,7 @@ function doseRow(p, pid) {
   var amt = d && d.fields.amount && d.fields.amount !== f.dose ? ' · <b>' + esc(d.fields.amount) + '</b>' : '';
   var when = d ? (p.state === 'given' ? 'given ' : '') + esc(localTime(d.occurred_at || d.updated_at)) + amt + (d.edited_by || d.user_id ? ' by ' + esc(whoName(d.edited_by || d.user_id)) : '')
     : p.stay ? 'in care at ' + esc(p.stay.org) : (p.time ? esc(p.time) : '');
-  var meta = (DOSE_TAG[p.state] ? DOSE_TAG[p.state] + ' ' : DOSE_WORD[p.state] || '') + [esc(f.dose || ''), esc(Logic.medGive(f)), when].filter(Boolean).join(' · ') +
+  var meta = (DOSE_TAG[p.state] ? DOSE_TAG[p.state] + ' ' : DOSE_WORD[p.state] || '') + [esc(f.dose || ''), +f.per_dose > 1 ? esc(Logic.medGive(f)) : '', when].filter(Boolean).join(' · ') +
     (d && d.fields.note ? ' · ' + esc(d.fields.note) : '') + (f.label_boxed ? ' · <span class="flag-text">boxed warning</span>' : '');
   var mark = p.state === 'covered' ? '<span class="check covered" aria-hidden="true">' + icon('heart') + '</span>'
     : d ? '<button class="check' + (p.state === 'given' ? '' : ' skip') + ' writer-only" onclick="editDose(\'' + d.id + '\')" aria-label="Edit ' + esc(p.med.title) + ' dose">' + (p.state === 'given' ? icon('tick') : '<span class="dash"></span>') + '</button>'
@@ -220,10 +244,12 @@ var DOSE_TAG = { due: '<span class="badge warn">Due now</span>', overdue: '<span
 // One medicine in Next up: tap the circle to mark it given (the tick draws, then the list updates; Undo is in the toast).
 function nextDoseRow(p, pid) {
   var f = p.med.fields || {};
-  var meta = [f.dose, Logic.medGive(f), f.with_food && f.with_food !== 'Either' ? f.with_food.toLowerCase() : '', p.state === 'later' && p.time ? p.time : ''].filter(Boolean).map(esc).join(' · ');
-  return '<div class="dose dose-' + p.state + '">' +
+  var meta = [f.dose, +f.per_dose > 1 ? Logic.medGive(f) : '', f.with_food && f.with_food !== 'Either' ? f.with_food.toLowerCase() : '', p.state === 'later' && p.time ? p.time : ''].filter(Boolean).map(esc).join(' · ');
+  // The whole row marks it given (a 52 px target); the round button stays the accessible control.
+  var can = State.role !== 'viewer';
+  return '<div class="dose dose-' + p.state + (can ? ' row-tap' : '') + '">' +
     '<button class="check writer-only" onclick="tickDose(this,\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')" aria-label="Mark ' + esc(p.med.title) + ' given">' + icon('tick') + '</button>' +
-    '<div class="grow tappable" onclick="aboutMed(\'' + p.med.id + '\')"><div class="name">' + esc(p.med.title) + '</div><div class="meta">' + (DOSE_TAG[p.state] ? DOSE_TAG[p.state] + ' ' : '') + meta + (f.label_boxed ? ' · <span class="flag-text">boxed warning</span>' : '') + '</div></div>' +
+    '<div class="grow tappable" onclick="' + (can ? 'var c=this.parentNode.querySelector(\'.check\');if(c)c.click()' : 'aboutMed(\'' + p.med.id + '\')') + '"><div class="name">' + esc(p.med.title) + '</div><div class="meta">' + (DOSE_TAG[p.state] ? DOSE_TAG[p.state] + ' ' : '') + meta + (f.label_boxed ? ' · <span class="flag-text">boxed warning</span>' : '') + '</div></div>' +
     '<button class="linkish writer-only" onclick="skipDose(\'' + p.med.id + '\',\'' + p.slot + '\',' + pidArg(pid) + ')">Not given</button></div>';
 }
 function tickDose(btn, medId, slot, pid) {
@@ -392,8 +418,10 @@ function todayVitals(pid, day) {
     tiles.push(tile(VITALS[k][0], esc(vitalText(m)) + ' <small>' + esc(m.unit || VITALS[k][1]) + '</small>', age + (pt ? '<br><span class="' + (m.rhythm === 'afib' || m.rhythm === 'irregular' ? 'flag-text' : '') + '">' + esc(pt) + '</span>' : '') + (over ? '<br><span class="flag-text">past a care-team number</span>' : ''), over));
   });
   return '<div class="card"><h3>Vitals</h3><div class="vitals">' + tiles.join('') + '</div>' +
-    '<div class="btn-row writer-only"><button class="btn sm" onclick="logWeight()">Log weight</button><button class="btn sm ghost" onclick="logVital(' + pidArg(pid) + ')">Log BP, sugar, oxygen...</button>' + (cuffSupported() ? '<button class="btn sm ghost" onclick="connectCuff(' + pidArg(pid) + ')">Get readings from cuff</button>' : '') + '</div>' +
-    (cs.call_signs ? '<div class="btn-row"><button class="btn sm ghost" onclick="callSignsSheet(' + pidArg(pid) + ')">' + icon('alert') + ' When to call</button></div>' : '') + '</div>';
+    '<div class="btn-row writer-only"><button class="btn sm" onclick="' + (w ? 'logVital(' + pidArg(pid) + ')' : 'logWeight()') + '">' + (w ? 'Log a reading' : 'Log morning weight') + '</button></div>' +
+    '<p class="more-links">' + [w ? '<button class="linkish writer-only" onclick="logWeight()">Weight</button>' : '<button class="linkish writer-only" onclick="logVital(' + pidArg(pid) + ')">BP, sugar, oxygen</button>',
+      cuffSupported() ? '<button class="linkish writer-only" onclick="connectCuff(' + pidArg(pid) + ')">From the cuff</button>' : '',
+      cs.call_signs ? '<button class="linkish" onclick="callSignsSheet(' + pidArg(pid) + ')">When to call</button>' : ''].filter(Boolean).join(' · ') + '</p></div>';
 }
 function logVital(pid, kind) {
   kind = kind || 'blood_pressure';
@@ -508,4 +536,4 @@ function renderHelp(arg) {
 // The policies (drafts under legal review) live in legal/. Washington's health data law wants
 // the Consumer Health Data Privacy Policy linked prominently from the home screen.
 function legalLinks() { return '<a href="legal/privacy.html" target="_blank" rel="noopener">Privacy policy</a>, <a href="legal/health-data.html" target="_blank" rel="noopener">Consumer Health Data Privacy Policy</a> and <a href="legal/terms.html" target="_blank" rel="noopener">Terms of use</a>'; }
-function legalFooter() { return '<p class="muted small legal-foot"><a href="legal/health-data.html" target="_blank" rel="noopener">Consumer Health Data Privacy Policy</a> &middot; <a href="legal/privacy.html" target="_blank" rel="noopener">Privacy</a> &middot; <a href="legal/terms.html" target="_blank" rel="noopener">Terms</a> (drafts)</p>'; }
+function legalFooter() { return '<ul class="legal-list"><li><a href="legal/health-data.html" target="_blank" rel="noopener">Consumer Health Data Privacy Policy</a></li><li><a href="legal/privacy.html" target="_blank" rel="noopener">Privacy</a></li><li><a href="legal/terms.html" target="_blank" rel="noopener">Terms (drafts)</a></li></ul>'; }

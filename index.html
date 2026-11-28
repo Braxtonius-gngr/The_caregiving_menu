@@ -37,9 +37,9 @@
   </nav>
 
   <div id="sheet" class="sheet hidden" onclick="if (event.target === this) dismissSheet()">
-    <div class="sheet-body" id="sheetBody"></div>
+    <div class="sheet-body" id="sheetBody" role="dialog" aria-modal="true"></div>
   </div>
-  <div id="toast" class="toast hidden"></div>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <script src="assets/vendor/supabase-2.49.4.js" defer></script>
   <script src="assets/js/config.js"></script>

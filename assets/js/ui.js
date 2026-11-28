@@ -49,6 +49,7 @@ var ICONS = {
   clip: '<path d="M20.5 11.5l-8.3 8.3a5 5 0 0 1-7-7L13.6 4.4a3.3 3.3 0 0 1 4.7 4.7l-8.4 8.4a1.7 1.7 0 0 1-2.4-2.4l7.7-7.7"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   heart: '<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/>',
+  chev: '<path d="M9 6l6 6-6 6"/>',
   phone: '<path d="M6.6 3.5h2.6l1.4 4-1.9 1.3a11 11 0 0 0 6.5 6.5l1.3-1.9 4 1.4v2.6a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2z"/>'
 };
 function icon(name) { return '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>'; }
@@ -95,9 +96,23 @@ function scrollList(rows, limit, tall) {
   if (rows.length <= (limit || 4)) return rows.join('');
   return '<div class="scroll-box' + (tall ? ' tall' : '') + '" tabindex="0" role="region" aria-label="List, scrolls">' + rows.join('') + '</div><div class="scroll-hint muted">' + rows.length + ' in all &middot; scroll for more</div>';
 }
-function openSheet(html) { if (typeof aiWrongAppend === 'function') html = aiWrongAppend(html); document.getElementById('sheetBody').innerHTML = html; document.getElementById('sheet').classList.remove('hidden'); }
+// A sheet is a modal dialog: named by its heading, focus moves in and comes back when it closes.
+var sheetReturn = null;
+function openSheet(html) {
+  if (typeof aiWrongAppend === 'function') html = aiWrongAppend(html);
+  var sheet = document.getElementById('sheet'), body = document.getElementById('sheetBody'), wasOpen = !sheet.classList.contains('hidden');
+  if (!wasOpen) sheetReturn = document.activeElement;
+  body.innerHTML = html;
+  sheet.classList.remove('hidden');
+  var h = body.querySelector('h2, h3'); if (h) { h.id = h.id || 'sheetTitle'; body.setAttribute('aria-labelledby', h.id); } else body.removeAttribute('aria-labelledby');
+  setTimeout(function () { var f = body.querySelector('input:not([type=hidden]):not([disabled]), select, textarea, button, [href]'); if (f && !wasOpen) { try { f.focus({ preventScroll: true }); } catch (e) {} } }, 60);
+}
 var scanSession = 0; // bumped when the scanner opens or a sheet closes; late lookups compare against it
-function closeSheet() { scanSession++; S.sharedPhoto = null; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden'); }
+function closeSheet() {
+  scanSession++; S.sharedPhoto = null; if (window.Scanner) Scanner.stop(); document.getElementById('sheet').classList.add('hidden');
+  var r = sheetReturn; sheetReturn = null; if (r && document.contains(r) && r.focus) { try { r.focus({ preventScroll: true }); } catch (e) {} }
+}
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !document.getElementById('sheet').classList.contains('hidden') && !(typeof navZoomOpen === 'function' && navZoomOpen())) dismissSheet(); });
 
 var TITLES = { simple: '', home: 'Today', meds: 'Daily meds', help: 'How to', timing: 'Timing review', patterns: 'Patterns', visit: 'Visit summary', plans: 'Pharmacist questions', phototest: 'Photo reader test', medcheck: 'Compare medicines', handoff: 'Catch me up', ask: 'Ask her file', reports: 'Reports', plan: 'Question sheet',  recipes: 'Recipes', scan: 'Kitchen', pantry: 'Pantry', diary: 'Diary', settings: 'Settings', recipe: 'Recipe', fluids: 'In & Out', trash: 'Deleted', file: 'Patient file', kitchen: 'Kitchen' };
 var currentScreen = 'home';
@@ -123,6 +138,8 @@ function placeGlow() {
   if (!g) return;
   g.classList.toggle('none', !t);
   if (!t) return;
+  // The glow breathes a couple of times after a tab change, then rests.
+  g.classList.remove('breathing'); void g.offsetWidth; g.classList.add('breathing');
   // On a wide screen the tab bar is a rail down the left side, so the glow follows the tab down it.
   var rail = window.matchMedia && matchMedia('(min-width: 1100px)').matches;
   g.style.left = (t.offsetLeft + t.offsetWidth / 2) + 'px';
@@ -758,7 +775,7 @@ function renderDiary() {
     (entries.length ? entries.map(function (e) {
       var r = e.recipe_id ? State.recipes.find(function (x) { return x.id === e.recipe_id; }) : null;
       var who = State.profiles.find(function (p) { return p.id === e.for_profile_id; });
-      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===this){event.preventDefault();this.click();}" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + (e.entry_kind === 'drink' ? icon('cup') + ' ' : e.entry_kind === 'output' ? icon('output') + ' ' : '') + esc(r ? r.title : e.entry_kind === 'output' && !e.free_text ? (OUTPUT_TYPES[e.output_type] || 'Output') : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult && e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + loggedBy(e) + '</span><div class="muted">' + (e.entry_kind === 'output' ? '<span class="' + (Logic.outputFlags(e).length ? 'flag-text' : '') + '">Out · ' + outputLine(e) + '</span>' + photoStatus(e) : Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + extraCount(e) + plateNote(e) + (e.entry_kind !== 'drink' && e.fluid_ml ? ' · +' + shortOz(Logic.fluidIn(e)) + ' fluid' : '')) + (e.entry_kind !== 'output' && !(e.kcal > 0) && e.estimate_source !== 'manual' && e.estimate_source !== 'water' && Sync.enabled() ? ' <button class="btn sm writer-only" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + plateButtons(e) + '</div></div></div>';
+      return '<div class="card row">' + photoThumb(e) + '<div class="grow tappable" role="button" tabindex="0" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===this){event.preventDefault();this.click();}" onclick="editDiaryEntry(\'' + e.id + '\')"><b>' + (e.entry_kind === 'drink' ? icon('cup') + ' ' : e.entry_kind === 'output' ? icon('output') + ' ' : '') + esc(r ? r.title : e.entry_kind === 'output' && !e.free_text ? (OUTPUT_TYPES[e.output_type] || 'Output') : e.free_text) + '</b> <span class="muted">' + esc(localTime(e.eaten_at)) + (who ? ' · ' + esc(who.person_name) : '') + (e.portion_mult && e.portion_mult !== 1 ? ' · ' + esc(e.portion_mult) + 'x' : '') + loggedBy(e) + '</span><div class="muted">' + (e.entry_kind === 'output' ? '<span class="' + (Logic.outputFlags(e).length ? 'flag-text' : '') + '">Out · ' + outputLine(e) + '</span>' + photoStatus(e) : e.entry_kind === 'drink' ? shortOz(Logic.fluidIn(e)) + ' drunk' + photoStatus(e) + extraCount(e) : Math.round((e.kcal || 0) * (e.portion_mult || 1)) + ' kcal · ' + Math.round((e.sodium_mg || 0) * (e.portion_mult || 1)) + ' mg sodium' + (e.estimate_source ? ' · ' + esc(e.estimate_source) : '') + photoStatus(e) + extraCount(e) + plateNote(e) + (e.entry_kind !== 'drink' && e.fluid_ml ? ' · +' + shortOz(Logic.fluidIn(e)) + ' fluid' : '')) + (e.entry_kind !== 'output' && e.entry_kind !== 'drink' && !(e.kcal > 0) && e.estimate_source !== 'manual' && e.estimate_source !== 'water' && Sync.enabled() ? ' <button class="btn sm writer-only" onclick="event.stopPropagation();reEstimateEntry(\'' + e.id + '\')">Estimate</button>' : '') + plateButtons(e) + '</div></div></div>';
     }).join('') : '<div class="empty">' + art('empty-diary') + 'Nothing logged yet today.</div>') +
     nutritionRow(entries, prof) +
     trashLink() +
